@@ -34,13 +34,28 @@ pub const BUILTIN_KEYS: &[&str] = &["name", "id", "module", "created_at", "publi
 const MAX_FILES: usize = 500;
 const MAX_BYTES: u64 = 1 << 20;
 
-/// Live templates can be used; coming ones are listed and refuse.
+/// Live templates can be used. Coming ones refuse, and are left out of the menu and of
+/// `template list` unless asked for (`init --experimental`, `template list --all`). Hidden
+/// ones work by name but are left out of both the same way.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     #[default]
     Live,
     Coming,
+    Hidden,
+}
+
+impl Status {
+    /// The word `template list` shows.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Live => "live",
+            Self::Coming => "coming",
+            Self::Hidden => "hidden",
+        }
+    }
 }
 
 /// The kind of an answer.
@@ -110,6 +125,9 @@ pub struct Question {
     /// One line of help shown with the question.
     #[serde(default)]
     pub help: Option<String>,
+    /// Never asked: the answer is `--set`, the default, or an init flag (`--ci`).
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 /// The built-in steps a template may list.
@@ -146,9 +164,21 @@ pub struct TemplateToml {
     pub id: String,
     /// One line: what the project is.
     pub description: String,
-    /// `live` (default) or `coming`.
+    /// `live` (default), `coming`, `hidden` or `experimental`.
     #[serde(default)]
     pub status: Status,
+    /// What `inorbit.toml` calls the project (`@@PROJECT_KIND@@`): `project` when none is set.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// Paths (a file, or a folder with its trailing slash) written only when the project
+    /// keeps CI: `--ci github` (the default), not `--ci none`.
+    #[serde(default)]
+    pub ci_paths: Vec<String>,
+    /// Text every variant of a language gets, `[lang_vars.python]`: what a floor shared by
+    /// several templates says per language (the CI setup, the lockfile). A variant's own
+    /// `vars` win.
+    #[serde(default)]
+    pub lang_vars: BTreeMap<String, BTreeMap<String, String>>,
     /// The id of a template this one adds to: its files, questions and steps come first, and
     /// a file of the same path here replaces its file.
     #[serde(default)]
@@ -172,6 +202,11 @@ pub struct TemplateToml {
     /// Files written as programs (executable); paths, placeholders allowed.
     #[serde(default)]
     pub programs: Vec<String>,
+    /// Files this template shares with another built-in folder instead of copying them: the
+    /// path here (`variants/<id>/...` allowed) and the path under `templates/` it is read from
+    /// (`ext/common/tools/ext_artifact.py`). Built-in templates only.
+    #[serde(default)]
+    pub include: BTreeMap<String, String>,
 }
 
 /// What the smoke test of a language does: `heartbeat` (default) runs the project once and reads
@@ -355,6 +390,7 @@ impl Template {
             when: None,
             regex: None,
             help: Some("The files of that language are laid over the common ones".into()),
+            hidden: false,
         }];
         q.extend(self.meta.questions.clone());
         q
@@ -514,128 +550,42 @@ pub fn user_root() -> Result<PathBuf, Error> {
         .map_err(|e| Error::Failed(format!("no home folder: {e}")))
 }
 
-macro_rules! bf {
-    ($path:expr, $src:expr) => {
-        ($path, include_str!(concat!("../templates/project/", $src)))
-    };
+/// The order built-ins are listed in; any other is listed after these, by id.
+const ORDER: &[&str] = &[
+    "blank",
+    "service",
+    "mcp-server",
+    "agent",
+    "evals",
+    "cli",
+    "extension",
+    "demo",
+    "coordinated",
+    "macos-app",
+    "ui-panel",
+    "floor",
+    "base",
+];
+
+/// The built-in bases: shared files other templates extend. They are never listed, even by
+/// `template list --all`, and are not templates to start a project from.
+const BASES: &[&str] = &["floor", "base"];
+
+/// The ids of the built-in templates: every folder of `templates/project/` with a
+/// `template.toml`, in [`ORDER`].
+fn built_in_ids() -> Vec<&'static str> {
+    let mut ids: Vec<&'static str> = crate::embedded::FILES
+        .iter()
+        .filter_map(|(p, _)| p.strip_prefix("project/")?.strip_suffix("/template.toml"))
+        .collect();
+    ids.sort_by_key(|id| {
+        (
+            ORDER.iter().position(|o| o == id).unwrap_or(ORDER.len()),
+            *id,
+        )
+    });
+    ids
 }
-
-type Embedded = &'static [(&'static str, &'static str)];
-
-const DEMO: Embedded = &[
-    bf!("template.toml", "demo/template.toml"),
-    bf!("extension.toml", "demo/extension.toml"),
-    bf!("README.md", "demo/README.md"),
-    bf!("inorbit.toml", "demo/inorbit.toml"),
-    bf!(".gitignore", "demo/gitignore"),
-    bf!("panel/index.html", "demo/panel/index.html"),
-    bf!(
-        "variants/python/src/@@MODULE@@/__init__.py",
-        "demo/variants/python/src/module/__init__.py"
-    ),
-    bf!(
-        "variants/python/src/@@MODULE@@/__main__.py",
-        "demo/variants/python/src/module/__main__.py"
-    ),
-    bf!(
-        "variants/python/src/@@MODULE@@/channel.py",
-        "demo/variants/python/src/module/channel.py"
-    ),
-    bf!(
-        "variants/python/tests/test_selftest.py",
-        "demo/variants/python/tests/test_selftest.py"
-    ),
-    bf!(
-        "variants/typescript/package.json",
-        "demo/variants/typescript/package.json"
-    ),
-    bf!(
-        "variants/typescript/src/channel.ts",
-        "demo/variants/typescript/src/channel.ts"
-    ),
-    bf!(
-        "variants/typescript/src/main.ts",
-        "demo/variants/typescript/src/main.ts"
-    ),
-    bf!(
-        "variants/typescript/tests/selftest.test.ts",
-        "demo/variants/typescript/tests/selftest.test.ts"
-    ),
-    bf!("variants/go/go.mod", "demo/variants/go/go.mod"),
-    bf!("variants/go/channel.go", "demo/variants/go/channel.go"),
-    bf!("variants/go/main.go", "demo/variants/go/main.go"),
-    bf!("variants/go/main_test.go", "demo/variants/go/main_test.go"),
-    bf!("variants/rust/Cargo.toml", "demo/variants/rust/Cargo.toml"),
-    bf!("variants/rust/Cargo.lock", "demo/variants/rust/Cargo.lock"),
-    bf!(
-        "variants/rust/src/channel.rs",
-        "demo/variants/rust/src/channel.rs"
-    ),
-    bf!(
-        "variants/rust/src/main.rs",
-        "demo/variants/rust/src/main.rs"
-    ),
-    bf!(
-        "variants/rust/tests/selftest.rs",
-        "demo/variants/rust/tests/selftest.rs"
-    ),
-];
-const BLANK: Embedded = &[
-    bf!("template.toml", "blank/template.toml"),
-    bf!("README.md", "blank/README.md"),
-    bf!("inorbit.toml", "blank/inorbit.toml"),
-    bf!(".gitignore", "blank/gitignore"),
-    bf!(
-        "variants/python/pyproject.toml",
-        "blank/variants/python/pyproject.toml"
-    ),
-    bf!(
-        "variants/python/src/@@MODULE@@/__init__.py",
-        "blank/variants/python/src/module/__init__.py"
-    ),
-    bf!(
-        "variants/python/tests/test_basic.py",
-        "blank/variants/python/tests/test_basic.py"
-    ),
-    bf!(
-        "variants/typescript/package.json",
-        "blank/variants/typescript/package.json"
-    ),
-    bf!(
-        "variants/typescript/src/index.ts",
-        "blank/variants/typescript/src/index.ts"
-    ),
-    bf!(
-        "variants/typescript/tests/index.test.ts",
-        "blank/variants/typescript/tests/index.test.ts"
-    ),
-    bf!("variants/go/go.mod", "blank/variants/go/go.mod"),
-    bf!("variants/go/main.go", "blank/variants/go/main.go"),
-    bf!("variants/go/main_test.go", "blank/variants/go/main_test.go"),
-    bf!("variants/rust/Cargo.toml", "blank/variants/rust/Cargo.toml"),
-    bf!("variants/rust/Cargo.lock", "blank/variants/rust/Cargo.lock"),
-    bf!(
-        "variants/rust/src/main.rs",
-        "blank/variants/rust/src/main.rs"
-    ),
-];
-const COORDINATED: Embedded = &[
-    bf!("template.toml", "coordinated/template.toml"),
-    bf!("README.md", "coordinated/README.md"),
-    bf!("inorbit.toml", "coordinated/inorbit.toml"),
-    bf!("coordination.toml", "coordinated/coordination.toml"),
-];
-const MACOS_APP: Embedded = &[bf!("template.toml", "macos-app/template.toml")];
-const UI_PANEL: Embedded = &[bf!("template.toml", "ui-panel/template.toml")];
-
-/// The built-ins, in the order they are listed.
-const BUILT_INS: &[(&str, Embedded)] = &[
-    ("blank", BLANK),
-    ("demo", DEMO),
-    ("coordinated", COORDINATED),
-    ("macos-app", MACOS_APP),
-    ("ui-panel", UI_PANEL),
-];
 
 fn parse_meta(text: &str, from: &str) -> Result<TemplateToml, String> {
     toml::from_str(text).map_err(|e| format!("{from}/{FILE}: {}", e.message()))
@@ -658,18 +608,24 @@ fn split_variants(all: Vec<(String, String)>) -> (VariantFiles, Vec<(String, Str
 }
 
 fn built_in(id: &str) -> Option<Template> {
-    let (_, files) = BUILT_INS.iter().find(|(i, _)| *i == id)?;
+    let prefix = format!("project/{id}/");
+    let files: Vec<(&str, &str)> = crate::embedded::under(&prefix).collect();
     let meta = files
         .iter()
         .find(|(p, _)| *p == FILE)
         .and_then(|(_, t)| toml::from_str(t).ok())?;
-    let (variant_files, files) = split_variants(
-        files
-            .iter()
-            .filter(|(p, _)| *p != FILE)
-            .map(|(p, t)| ((*p).to_owned(), (*t).to_owned()))
-            .collect(),
-    );
+    let mut all: Vec<(String, String)> = files
+        .iter()
+        .filter(|(p, _)| *p != FILE)
+        .map(|(p, t)| ((*p).to_owned(), (*t).to_owned()))
+        .collect();
+    let meta: TemplateToml = meta;
+    for (to, from) in &meta.include {
+        let text = crate::embedded::file(from)?;
+        all.retain(|(p, _)| p != to);
+        all.push((to.clone(), text.to_owned()));
+    }
+    let (variant_files, files) = split_variants(all);
     Some(Template {
         meta,
         files,
@@ -764,11 +720,30 @@ fn merge(parent: Template, child: Template) -> Template {
             programs.push(p);
         }
     }
+    let mut ci_paths = parent.meta.ci_paths;
+    for p in child.meta.ci_paths {
+        if !ci_paths.contains(&p) {
+            ci_paths.push(p);
+        }
+    }
+    let mut lang_vars = parent.meta.lang_vars;
+    for (lang, vars) in child.meta.lang_vars {
+        lang_vars.entry(lang).or_default().extend(vars);
+    }
     Template {
         variant_files,
         meta: TemplateToml {
             variants,
             programs,
+            ci_paths,
+            lang_vars,
+            include: parent
+                .meta
+                .include
+                .into_iter()
+                .chain(child.meta.include)
+                .collect(),
+            kind: child.meta.kind.or(parent.meta.kind),
             default_variant: child.meta.default_variant.or(parent.meta.default_variant),
             questions,
             steps: if child.meta.steps.is_empty() {
@@ -900,7 +875,7 @@ pub struct Row {
 /// Every template of the user's folder and the built-ins: a user template of a built-in's id
 /// shadows it (and says so). A broken one is listed `invalid` with the reason.
 #[must_use]
-pub fn list(root: &Path, default: &str) -> Vec<Row> {
+pub fn list(root: &Path, default: &str, all: bool) -> Vec<Row> {
     let mut rows: Vec<Row> = Vec::new();
     let mut user: Vec<PathBuf> = std::fs::read_dir(root)
         .map(|rd| {
@@ -919,12 +894,19 @@ pub fn list(root: &Path, default: &str) -> Vec<Row> {
         status: s.to_owned(),
         origin: o,
     };
-    for (id, _) in BUILT_INS {
+    let built_ins = built_in_ids();
+    for id in &built_ins {
+        if BASES.contains(id) {
+            continue;
+        }
         let shadow = user.iter().find(|p| user_id(p).as_deref() == Some(id));
         let t = shadow
             .and_then(|p| from_dir(p, Origin::User(p.clone())).ok())
             .or_else(|| built_in(id));
         if let Some(t) = t {
+            if !all && t.meta.status != Status::Live {
+                continue;
+            }
             let origin = if shadow.is_some() {
                 format!("{} (shadows built-in)", t.origin.label())
             } else {
@@ -933,31 +915,28 @@ pub fn list(root: &Path, default: &str) -> Vec<Row> {
             rows.push(row(
                 (*id).into(),
                 t.meta.description,
-                if t.meta.status == Status::Live {
-                    "live"
-                } else {
-                    "coming"
-                },
+                t.meta.status.word(),
                 origin,
             ));
         }
     }
     for p in &user {
         let Some(id) = user_id(p) else { continue };
-        if BUILT_INS.iter().any(|(b, _)| *b == id) {
+        if built_ins.iter().any(|b| *b == id) {
             continue;
         }
         rows.push(match from_dir(p, Origin::User(p.clone())) {
-            Ok(t) => row(
-                id,
-                t.meta.description,
-                if t.meta.status == Status::Live {
-                    "live"
-                } else {
-                    "coming"
-                },
-                Origin::User(p.clone()).label(),
-            ),
+            Ok(t) => {
+                if !all && t.meta.status != Status::Live {
+                    continue;
+                }
+                row(
+                    id,
+                    t.meta.description,
+                    t.meta.status.word(),
+                    Origin::User(p.clone()).label(),
+                )
+            }
             Err(e) => row(id, e, "invalid", Origin::User(p.clone()).label()),
         });
     }
@@ -1188,15 +1167,37 @@ pub fn all_values(
     created_at: &str,
     answers: &Answers,
 ) -> Vec<(String, String)> {
-    let mut v = Vec::new();
-    if let Some(var) = answers.get(LANGUAGE).and_then(|a| t.variant(&a.text())) {
+    let mut v = vec![
+        ("@@TEMPLATE@@".to_owned(), t.meta.id.clone()),
+        (
+            "@@PROJECT_KIND@@".to_owned(),
+            t.meta.kind.clone().unwrap_or_else(|| "project".to_owned()),
+        ),
+    ];
+    if let Some(lang) = answers.get(LANGUAGE).map(Answer::text)
+        && let Some(var) = t.variant(&lang)
+    {
         v.push(("@@LANGUAGE_LABEL@@".to_owned(), var.label.clone()));
         v.extend(
             var.vars
                 .iter()
                 .map(|(k, x)| (format!("@@{k}@@"), x.clone())),
         );
+        // Below the variant's own: it wins where both say a thing.
+        v.extend(
+            t.meta
+                .lang_vars
+                .get(&lang)
+                .into_iter()
+                .flatten()
+                .filter(|(k, _)| !var.vars.contains_key(*k))
+                .map(|(k, x)| (format!("@@{k}@@"), x.clone())),
+        );
     }
+    v.push((
+        "@@IOHR_VERSION@@".to_owned(),
+        env!("CARGO_PKG_VERSION").to_owned(),
+    ));
     v.extend(values(name, publisher, created_at, answers));
     v
 }
@@ -1224,8 +1225,19 @@ pub fn render(t: &Template, vals: &[(String, String)]) -> Result<Vec<(String, St
             vals.push((k, String::new()));
         }
     }
+    let ci = vals
+        .iter()
+        .find(|(x, _)| x == "@@CI@@")
+        .is_none_or(|(_, v)| v == "github");
     t.files
         .iter()
+        .filter(|(p, _)| {
+            ci || !t
+                .meta
+                .ci_paths
+                .iter()
+                .any(|c| p == c || (c.ends_with('/') && p.starts_with(c.as_str())))
+        })
         .map(|(p, text)| {
             let path = filled(p, &vals);
             let ok = !path.is_empty()
@@ -1276,7 +1288,9 @@ pub fn answer(
         }
         let a = if let Some(g) = given.get(&q.key) {
             g.clone()
-        } else if let Some(f) = ask.as_mut() {
+        } else if !q.hidden
+            && let Some(f) = ask.as_mut()
+        {
             f(q)?
         } else if let Some(d) = &q.default {
             d.clone()
@@ -1722,11 +1736,12 @@ mod tests {
     }
 
     #[test]
-    fn built_ins_load_and_coordinated_extends_demo() {
+    fn built_ins_load_and_coordinated_is_the_demo_under_its_old_name() {
         let root = Path::new("/nonexistent-iohr-test");
         let d = load(&Spec::Id("demo".into()), root).unwrap();
         let c = load(&Spec::Id("coordinated".into()), root).unwrap();
-        assert_eq!(c.files.len(), d.files.len() + 1);
+        // The Planner manifest comes from the base, so the two differ in words, not files.
+        assert_eq!(c.files.len(), d.files.len());
         assert!(c.meta.agent_prompt.is_some());
         assert_eq!(c.steps().len(), 3);
     }
@@ -1757,10 +1772,10 @@ mod tests {
         let paths: Vec<&str> = go.files.iter().map(|(p, _)| p.as_str()).collect();
         assert!(paths.contains(&"main.go"), "{paths:?}");
         assert!(paths.contains(&"extension.toml"), "{paths:?}");
+        // No Python program of the demo's other languages (the release helper is shared).
         assert!(
-            !paths
-                .iter()
-                .any(|p| Path::new(p).extension().is_some_and(|e| e == "py")),
+            !paths.iter().any(|p| *p != "tools/ext_artifact.py"
+                && Path::new(p).extension().is_some_and(|e| e == "py")),
             "{paths:?}"
         );
         assert_eq!(go.variant_files.len(), 0);

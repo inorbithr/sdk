@@ -589,6 +589,8 @@ async fn verbose_output_never_shows_the_token() {
         vec![
             "project",
             "init",
+            "--template",
+            "blank",
             "verbose-demo",
             "--dir",
             project_dir,

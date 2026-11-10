@@ -9,9 +9,9 @@ InOrbit. The built-in roles and memory it writes are on
 ## `iohr project init`
 
 ```sh
-iohr project init my-shop         # the coordinated template: a Planner plan comes with it
-iohr project init demo --template demo
-iohr project create my-shop --template coordinated --dir ~/work/my-shop --json
+iohr project init my-shop --set license=MIT   # the service template: a Planner plan comes with it
+iohr project init my-tool --template cli --lang rust --set license=Apache-2.0
+iohr project create my-shop --template agent --dir ~/work/my-shop --set license=MIT --json
 ```
 
 `iohr project init NAME` (also `iohr init NAME` and `iohr project create NAME`, the same
@@ -21,11 +21,10 @@ half:
 - a folder from a template: `--dir` if you pass it, else a menu of places at a terminal
   (`./NAME`, this folder when it is empty, beside the git repository you are in so the
   project does not nest, and `[project] root` in `config.toml` when set), else `./NAME`.
-  The default template, `coordinated`, is a private macOS service that heartbeats and
-  serves a tiny panel, with the manifest of `iohr ext init`, plus a `coordination.toml`
-  that names the project's Planner plan and an `ask` example you can file with
-  `iohr coordinator asks create`. `--template demo` is the same without the
-  `coordination.toml`;
+  The default template is `service` (see [Templates](#templates)); every template but
+  `blank` also writes the [enterprise floor](#the-enterprise-floor), and every template
+  has a `coordination.toml` that names the project's Planner plan and an `ask` example
+  you can file with `iohr coordinator asks create`;
 - a git repository with one commit;
 - the project's own state under `~/.inorbit/projects/NAME/`, never in the repository;
 - a Keychain slot reserved by name;
@@ -40,8 +39,8 @@ still refused. The template's `rust-version` is the toolchain you have installed
 agent started with `--describe` is told to keep it as the minimum.
 
 At a terminal, `init` is guided. It asks for the name when it is missing (the folder's name
-is the default), offers the templates as a menu (templates that are coming are listed dimmed
-and cannot be chosen), confirms the folder, shows each step as a spinner that ends ok, warn
+is the default), offers the templates as a menu (a template that is coming is listed dimmed and
+cannot be chosen, and only shown with `init --experimental`), confirms the folder, shows each step as a spinner that ends ok, warn
 or fail, folds what waits on an API into one line (`--verbose` lists it), and ends with the
 next commands. `--template` and `--yes` skip the menu and the confirmation. Without a
 terminal, or with `--json`, `NO_COLOR` or `TERM=dumb`, nothing is drawn or asked: the plain
@@ -50,7 +49,7 @@ question, Code asking before it opens the folder, is said once in the ending.
 
 ### The Planner plan
 
-The coordinated template adds one step, "The project's Planner plan". `init` makes the
+Every template has one step, "The project's Planner plan" (`blank` too). `init` makes the
 plan, or finds the one it made before (its `external_id` is `project:NAME`, so a second run
 makes no second plan), and writes its `plan_...` id under `[plan]` in `coordination.toml`.
 
@@ -155,18 +154,69 @@ PRD 0193 is meant to join it as another kind of file rather than a second reader
 ```sh
 iohr project template list        # name, status, origin, the default (*) and what it is
 iohr project template list --json
-iohr project template show demo   # what it asks, its languages, which files it writes, its steps
+iohr project template list --all  # also the hidden ones: demo and coordinated
+iohr project template show cli    # what it asks, its languages, which files it writes, its steps
 cd "$(iohr project template path my-sensor)"   # the folder of one of yours
 ```
 
-The built-in templates are `coordinated`, `demo` and `blank`; `macos-app` and `ui-panel`
-are `coming` and refuse until they exist. `iohr project templates` is the same as
+The picker offers these, in this order, after "Describe it" (below):
+
+| Template | What you get | Languages | Its own check (the smoke step) |
+|---|---|---|---|
+| `blank` | The smallest project: one runnable file, Roles and memory, no CI unless `--ci github` | Python, TypeScript, Go, Rust | the language's test command |
+| `service` (the default) | An HTTP service: `/healthz`, `/readyz`, `/metrics` (Prometheus text), `/v1/hello`, structured JSON logs with a `trace_id`, graceful shutdown, standard library only | Go, Python, Rust, TypeScript | its tests, which boot the server |
+| `agent` | An agent loop with a step, tool-call and token budget, a tool allow-list, approval for risky tools, and a log that never holds arguments or results; the model is a labelled stub | Python (`uv`), TypeScript | its tests |
+| `cli` | A command line with text and `--json` output, exit codes 0, 1 and 2, golden files, and a version that carries the commit | Go, Rust, Python | its tests, goldens included |
+| `mcp-server` | An MCP server on the official SDK, pinned exactly with a lockfile and built for the 2026-07-28 revision: one read-only tool with a typed output, one resource, deterministic `tools/list`, input limits | Python (`uv`, `mcp` 2.3.0), TypeScript (`@modelcontextprotocol/server` 2.4.0) | its tests, which start the server over stdio: `server/discover`, a `tools/list`, a `tools/call`, and a legacy-mode `initialize`. Needs the network once, to install the SDK |
+| `evals` | An offline eval suite: a JSONL dataset, a solver, deterministic scorers, a pass bar in `thresholds.toml`, `docs/how-to-grade.md` and an `evals.yml` workflow; the solver is a labelled stub (`stub: true`) | Python (standard library only) | its tests: the fixture meets the bar with the network refused, and lowering one expected answer fails the run and names the case |
+| `extension` | A private macOS extension that heartbeats and serves a tiny local panel (the former `demo`) | Python, TypeScript, Go, Rust | one heartbeat read back, with the token ask refused |
+
+Not offered yet, and said so: `macos-app` and `ui-panel` are `coming` and show only with
+`init --experimental` (the menu) or `template list --all`.
+
+The 2026-07-28 MCP revision is stateless: `initialize` and `notifications/initialized` are
+gone and a server answers `server/discover` (spec changelog,
+modelcontextprotocol.io/specification/2026-07-28/changelog). The `mcp-server` self-tests use
+the discover path, and one legacy-mode client still does the old `initialize` so a client
+that has not moved keeps working.
+A template that is coming refuses and names what is live. A variant is `live` only when its
+smoke test passes; it is `coming` until then. `iohr project templates` is the same as
 `template list`, kept for older scripts.
 
+`demo` and `coordinated` are the old defaults. They stay reachable by name (an existing
+config or script keeps working) and hidden from the picker; `template list --all` shows
+them. `demo` is `extension` under its old name, and `coordinated` is `demo`.
+
 Which template is used: `--template`, else `template` under `[project]` in `config.toml`
-(`template = "demo"`; you edit it, `iohr config` does not write it), else `coordinated`. A
+(`template = "cli"`; you edit it, `iohr config` does not write it), else `service`. A
 described project uses `blank`, whatever `[project]` says. A configured template that is
 coming refuses too.
+
+### The enterprise floor
+
+Every template but `blank` extends one shared floor, so what a team needs on day one is
+there and the same everywhere:
+
+| File | What it is |
+|---|---|
+| `.github/workflows/ci.yml` | `permissions: contents: read`, every action pinned to a full commit SHA, the template's own tests, a CycloneDX SBOM, and a secret scan |
+| `.github/workflows/release.yml` | On a tag: build, keyless `cosign` signing and build provenance attestation |
+| `.github/dependabot.yml` | Dependency and action updates, with the lockfile the language uses |
+| `.github/CODEOWNERS` | Who reviews; `@CHANGE-ME` until you set `--set code_owner=@team` |
+| `SECURITY.md` | How to report a vulnerability, to the contact init asks for (`--set security_contact=...`) |
+| `AGENTS.md` | Points an agent to `IO.md`, the file this project's instructions live in |
+| `.env.example` | Names only, never a value; `.env` is in `.gitignore` |
+| the licence | Asked as an SPDX identifier (`MIT`, `Apache-2.0`, `AGPL-3.0-only`, `LicenseRef-Proprietary`) and written into the project's metadata. There is no default: `--yes` without `--set license=ID` stops and names the key |
+
+`--ci none` writes none of the three files under `.github/workflows/` and `dependabot.yml`;
+the rest of the floor stays. `--ci github` is the default for every template but `blank`,
+which writes no CI unless you pass it. The files are generated from the template, so there is no
+claim in them that the project is compliant with anything; they are the things a review
+looks for.
+
+Each template has its own observability: the service its probes, metrics and traces; the
+agent a log of tool names and outcomes only; the extension its heartbeat; the cli its exit
+codes and a `--json` mode.
 
 ### Templates are data
 
@@ -177,8 +227,8 @@ one is compiled in except the built-ins, which are the same folders embedded
 ```toml
 id = "my-sensor"
 description = "what it is"
-status = "live"          # or "coming"
-extends = "demo"         # optional: its files, questions and steps come first; yours replace by path
+status = "live"          # or "coming", or "hidden" (reachable by name, not offered)
+extends = "service"      # optional: its files, questions and steps come first; yours replace by path
 agent_prompt = "Make @@NAME@@ read @@KIND@@."   # optional, used by the agent step and --describe
 
 [[questions]]
@@ -196,7 +246,7 @@ name = "git"             # git, register, smoke, or agent (labelled AI)
 ```
 
 Files are filled by the same `@@KEY@@` renderer as the built-ins (`@@NAME@@`, `@@ID@@`,
-`@@MODULE@@`, `@@CREATED_AT@@` plus your question keys), and path segments are filled too
+`@@MODULE@@`, `@@CREATED_AT@@`, `@@PROJECT_KIND@@` (the `kind` the template sets, written into `inorbit.toml`) plus your question keys), and path segments are filled too
 (`notes-@@KIND@@.md`). The shape follows copier's `copier.yml` (questions with a type,
 choices, default and `when`; layering) and cargo-generate's `cargo-generate.toml`
 (placeholders with a type, prompt, choices and regex).
@@ -207,7 +257,7 @@ The template comes from, in order: `--template PATH` (a folder), then
 branch or tag.
 
 ```sh
-iohr project template new my-sensor [--extends demo]   # a working template in ~/.inorbit/templates
+iohr project template new my-sensor [--extends service]   # a working template in ~/.inorbit/templates
 iohr project template lint ./my-sensor                 # checks keys, `when`, regexes, placeholders, a sample render
 iohr project template schema                           # the JSON Schema of template.toml
 iohr project template show my-sensor [--json]          # questions, `when`, files, the agent step
@@ -223,8 +273,9 @@ key.
 
 `iohr project init my-tool --template blank --lang rust` writes the smallest project in your
 language and nothing about InOrbit services: `README.md` (the name and a one-line
-description from your words), `.gitignore`, `inorbit.toml`, `.inorbit/space`, and a
-skeleton with one trivial test:
+description from your words), `.gitignore`, `SECURITY.md`, `.github/CODEOWNERS`,
+`inorbit.toml`, `.inorbit/space`, and a skeleton with one trivial test (no CI, SBOM or
+release files unless you pass `--ci github`):
 
 | Language | Skeleton |
 |---|---|
@@ -454,7 +505,7 @@ read (default `false`), but no background loop exists, so only `iohr sync` sends
 ## Try it without changing anything
 
 ```sh
-iohr project init my-shop --template demo --dry-run --yes
+iohr project init my-shop --template service --set license=MIT --dry-run --yes
 ```
 
 `--dry-run` (alias `--plan`) runs the whole flow, questions, defaults and `when` skips

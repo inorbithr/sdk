@@ -96,19 +96,23 @@ pub(crate) async fn run(
     let file = dir.join(MANIFEST);
     let text = std::fs::read_to_string(&file).ok();
     let title = "The project's Planner plan";
-    // `--no-sync` keeps the project on this machine: with no `coordination.toml` the plan
-    // would only exist for the shape item, so none is made (a coordinated project keeps
-    // making its plan, as it always did).
-    if local && text.is_none() && !skip {
+    // `--no-sync` keeps the project on this machine: nothing is made in the account, so no plan
+    // is made or looked up. A project with a `coordination.toml` (every template but blank) keeps
+    // its `[plan] id` empty and is told how to set it; one without would only have had the plan
+    // for the shape item, so it says nothing is filed in it.
+    // A plan id you chose with `--plan-id` is still written (and checked when signed in).
+    if local && !skip && (text.is_none() || chosen.is_none()) {
+        let said = if text.is_some() {
+            format!(
+                "left empty (--no-sync keeps this project on this machine); {}",
+                later(name)
+            )
+        } else {
+            "not made (--no-sync keeps this project on this machine), so nothing is filed in it"
+                .to_owned()
+        };
         return Planned {
-            step: step(
-                "plan",
-                title,
-                "skipped",
-                "not made (--no-sync keeps this project on this machine), so nothing is filed in it"
-                    .to_owned(),
-                "",
-            ),
+            step: step("plan", title, "skipped", said, ""),
             id: None,
         };
     }
