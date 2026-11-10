@@ -31,6 +31,7 @@ mod error;
 mod examples;
 mod handoff;
 mod headless;
+mod health;
 mod hints;
 mod io_signin;
 mod iomd;

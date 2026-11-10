@@ -74,6 +74,7 @@ ends its `--help` with real examples.
 | `iohr ui [serve] \| build \| dev \| check \| open` | Serve the built web UI on loopback, or run its package's own scripts | [below](#iohr-ui) |
 | `iohr tunnel` | A loopback SSH pipe into an environment's edge | [below](#iohr-tunnel) |
 | `iohr browser install [--print]` | Install InOrbit Trails, the browser extension | [below](#iohr-browser-install) |
+| `iohr doctor [--fix]` | Check this machine for the known problems (signed out, MCP bridge down, low disk, unreadable `config.toml`), say how to fix each, exit 1 on a failure. `--fix`, or `[doctor] auto_fix = true`, runs the safe fixes (restart a stopped bridge); the `?` card shows what it found | [below](#iohr-doctor) |
 | `iohr upgrade [--check]` | Update `iohr` the way it was installed | [Upgrade](install.md#upgrade) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell | |
 | `iohr help [COMMAND]` | The help | [below](#the-help) |
@@ -96,6 +97,23 @@ Kept but hidden from the help: `iohr packages` (now `iohr ext packages`),
 
 Results go to stdout (tables, or JSON with `--json`) and notes to stderr, so a pipe gets
 only data.
+
+## `iohr doctor`
+
+Looks at four things and prints one line each: `ok`, or `FAIL` with the fix on the next line.
+
+| Check | Fails when | Fix |
+|---|---|---|
+| `auth` | no usable sign-in on this machine | `iohr login` (shown, never run) |
+| `bridge` | the MCP bridge job exists but nothing answers on its port | restart it (the one safe fix) |
+| `disk` | less than 2 GiB free | free space (shown, never run) |
+| `config` | `config.toml` does not parse | edit it (shown, never run; `iohr` never rewrites it) |
+
+A machine without the bridge installed is not a failure. `--json` prints status codes
+(`ok`, `signed_out`, `down`, `low`, `invalid`) and counts, never file contents or tokens. Exit
+1 when a check fails after any fix. Turn on the safe fixes for good with
+[`[doctor] auto_fix = true`](../../docs/config.md#49-the-doctor-table); the `?` and `??` card
+then also names what it found, from the local checks only (it never asks the Keychain).
 
 ## The help
 
