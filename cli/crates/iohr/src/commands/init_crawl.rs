@@ -1176,6 +1176,7 @@ fn folder_part(host: &str) -> String {
 /// project keeps). A result of an earlier run is removed, so a crawl that fails is never
 /// read as the last one that worked.
 fn prepare_dir(root: &Path, dir: &Path, policy: &str) -> Result<(), String> {
+    crate::kb::ensure_crawl_dir(root)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let ignore = crate::kb::crawl_dir(root).join(".gitignore");
     if !ignore.exists() {
