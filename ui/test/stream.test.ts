@@ -21,7 +21,7 @@ const until = async (f: () => boolean) => {
 };
 
 test("parseSse reads ids, events and split chunks; comments carry no event", () => {
-  const a = parseSse(": hi\n\nid: 7\ndata: {\"a\":1}\n\nevent: error\ndata: x\n\nda");
+  const a = parseSse(': hi\n\nid: 7\ndata: {"a":1}\n\nevent: error\ndata: x\n\nda');
   assert.deepEqual(a.frames, [
     { id: "7", event: "message", data: '{"a":1}' },
     { id: null, event: "error", data: "x" },
@@ -34,7 +34,8 @@ test("a stream delivers events in order and reports live", async () => {
   const states: string[] = [];
   const stop = apiStream("/v1/t/one", (d) => got.push(d), {
     token,
-    fetcher: (async () => sse([": open\n\n", 'id: 1\ndata: {"n":1}\n\n', 'data: {"n"', ':2}\n\n'], true)) as typeof fetch,
+    fetcher: (async () =>
+      sse([": open\n\n", 'id: 1\ndata: {"n":1}\n\n', 'data: {"n"', ":2}\n\n"], true)) as typeof fetch,
     onState: (s) => states.push(s),
   });
   await until(() => got.length === 2);

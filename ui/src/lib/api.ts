@@ -366,7 +366,10 @@ async function overSocket(
 }
 
 /** The parsed events of an SSE byte stream: `id`, `event`, `data`; comments return `null`-data frames for liveness. */
-export function parseSse(buffer: string): { frames: { id: string | null; event: string; data: string }[]; rest: string } {
+export function parseSse(buffer: string): {
+  frames: { id: string | null; event: string; data: string }[];
+  rest: string;
+} {
   const frames: { id: string | null; event: string; data: string }[] = [];
   const parts = buffer.split(/\r?\n\r?\n/);
   const rest = parts.pop() ?? "";
@@ -402,7 +405,10 @@ export function apiStream<T = unknown>(
   const token = opts.token === undefined ? startToken() : opts.token;
   const sub: Sub = { onEvent: onEvent as Sub["onEvent"], ...(opts.onState ? { onState: opts.onState } : {}) };
   if (url === null || token === null) {
-    opts.onState?.("offline", url === null ? "That is not a path the page may stream." : "This page has no start token.");
+    opts.onState?.(
+      "offline",
+      url === null ? "That is not a path the page may stream." : "This page has no start token.",
+    );
     return () => {};
   }
   let shared = streams.get(url);
@@ -469,7 +475,8 @@ function openShared<T>(url: string, _path: string, opts: StreamOptions<T>, token
           () => set("live"),
           (data) => {
             attempt = 0;
-            const id = typeof (data as { sse_id?: unknown })?.sse_id === "string" ? (data as { sse_id: string }).sse_id : null;
+            const id =
+              typeof (data as { sse_id?: unknown })?.sse_id === "string" ? (data as { sse_id: string }).sse_id : null;
             if (id !== null && id !== "") lastId = id;
             for (const s of [...shared.subs]) s.onEvent(data as never, { event: "message", id });
           },
