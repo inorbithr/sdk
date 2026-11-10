@@ -2,20 +2,21 @@
 // pause, resume or revoke a sensor of theirs, read or delete what a sensor sent. The services decide who may; the
 // page only says plainly what happened.
 import { apiGet, type Read } from "../lib/api.ts";
+import { apiSend } from "../lib/live-shim.ts";
 import type { WireSent } from "../lib/sensors-consent.ts";
-import { apiSend } from "./live-shim.ts";
 
 export type Done = { ok: boolean; text: string };
 
-const why = (r: Read<unknown>, what: string): string =>
-  r.state === "signed-out" ? "You are signed out: sign in again." : r.state === "error" ? `${what}: ${r.reason}` : what;
+type Sent = Awaited<ReturnType<typeof apiSend>>;
+const why = (r: Sent, what: string): string =>
+  r.ok ? what : r.status === 401 ? "You are signed out: sign in again." : `${what}: ${r.reason}`;
 
 /** Asks the session's owner to let this person watch it; the owner answers in their own app. */
 export async function askToView(threadId: string | null): Promise<Done> {
   if (!threadId) return { ok: false, text: "This one has no thread to ask about." };
   const r = await apiSend("POST", `/v1/coordinator/threads/${encodeURIComponent(threadId)}/view-requests`, {});
-  if (r.state === "ok") return { ok: true, text: "Asked. Its owner sees your request and can say yes." };
-  if (r.state === "error" && r.status === 404)
+  if (r.ok) return { ok: true, text: "Asked. Its owner sees your request and can say yes." };
+  if (!r.ok && r.status === 404)
     return { ok: false, text: "Asking to view is not available: the coordinator does not take view requests here." };
   return { ok: false, text: why(r, "Could not ask") };
 }
@@ -30,7 +31,7 @@ const DONE: Record<Change, string> = {
 /** Pauses, resumes or revokes one sensor of the person's. */
 export async function changeSensor(id: string, what: Change): Promise<Done> {
   const r = await apiSend("POST", `/v1/atlas/sensors/${encodeURIComponent(id)}/${what}`, {});
-  return r.state === "ok" ? { ok: true, text: DONE[what] } : { ok: false, text: why(r, `Could not ${what}`) };
+  return r.ok ? { ok: true, text: DONE[what] } : { ok: false, text: why(r, `Could not ${what}`) };
 }
 
 /** What the platform keeps of what a sensor sent. */
@@ -41,7 +42,5 @@ export async function readSent(id: string): Promise<Read<WireSent>> {
 /** Deletes everything a sensor sent (readings and roll-ups); the sensor itself stays. */
 export async function deleteSent(id: string): Promise<Done> {
   const r = await apiSend("DELETE", `/v1/atlas/sensors/${encodeURIComponent(id)}/sent`);
-  return r.state === "ok"
-    ? { ok: true, text: "Deleted what it sent." }
-    : { ok: false, text: why(r, "Could not delete") };
+  return r.ok ? { ok: true, text: "Deleted what it sent." } : { ok: false, text: why(r, "Could not delete") };
 }

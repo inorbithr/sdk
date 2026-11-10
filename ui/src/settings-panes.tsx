@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { resetAll } from "./frame/arrange.ts";
 import { cn } from "./frame/cn.ts";
 import { closeDock, openDock } from "./frame/dock-frame.ts";
-import { FRAME_SHORTCUTS, LAYOUT_SHORTCUTS, symbols } from "./frame/shortcuts.ts";
 import { type SidebarMode, setMode } from "./frame/sidebar-frame.ts";
+import { type AccountRow, planLabel, roleLabel } from "./lib/accounts-core.ts";
+import type { AccountsState } from "./lib/accounts-store.ts";
 import type { SessionState } from "./lib/api.ts";
 import { updateArrangement, useArrangement } from "./lib/arrange-store.ts";
 import { updateDock, useDock } from "./lib/dock-store.ts";
@@ -13,10 +14,30 @@ import { allOnline, backOnline, undoLast, useFeatures, useUndo } from "./lib/fea
 import type { Space } from "./lib/home-core.ts";
 import { homeReads } from "./lib/home-data.ts";
 import { HELD, heldNow, type Pane } from "./lib/settings-core.ts";
-import { type Member, settingsReads, useRead } from "./lib/settings-data.ts";
+import { type Invite, type Member, settingsReads, useRead, useWrites } from "./lib/settings-data.ts";
 import { updateSidebar, useSidebar } from "./lib/sidebar-store.ts";
+import {
+  changeRole,
+  createTeam,
+  defaultAccount,
+  emailOk,
+  GRANTABLE,
+  invite,
+  isOpen,
+  manages,
+  memberRules,
+  openInvites,
+  personName,
+  removeMember,
+  renameTeam,
+  resendInvite,
+  revokeInvite,
+  roleWord,
+  teamNameOk,
+} from "./lib/team-core.ts";
 import { setThemeChoice, useThemeChoice } from "./lib/theme.ts";
 import { CHOICES } from "./lib/theme-core.ts";
+import { ShortcutList } from "./shortcuts-view.tsx";
 
 // The bodies of Settings' panes (RFC 0217, slice 4). Each shows what this page really has: a control that changes the
 // real state, or a read of the signed-in account, or a plain line that says it is empty or not built here. Nothing is
@@ -26,9 +47,13 @@ const card = "bg-card text-card-foreground rounded-2xl border shadow-xs";
 const btn =
   "hover:bg-accent hover:text-foreground rounded-md border px-2.5 py-1 text-[13px] disabled:opacity-50 outline-none focus-visible:ring-2 ring-ring";
 const muted = "text-muted-foreground";
+const field =
+  "bg-background rounded-md border px-2 py-1 text-[13px] outline-none focus-visible:ring-2 ring-ring min-w-0 disabled:opacity-50";
 
 export type PaneProps = {
   session: SessionState | null;
+  /** The accounts this person can act as and the one this tab does (RFC 0217.1). */
+  accounts: AccountsState;
   busy: boolean;
   onSignIn: () => void;
   onSignOut: () => void;
@@ -172,7 +197,7 @@ export function Appearance() {
   );
 }
 
-export function Accounts({ session, busy, onSignIn, onSignOut }: PaneProps) {
+export function Accounts({ session, accounts, busy, onSignIn, onSignOut }: PaneProps) {
   if (session === null) return <p className={cn(muted, "text-[13px]")}>Checking sign-in…</p>;
   if (session.state === "unreachable")
     return (
@@ -180,41 +205,160 @@ export function Accounts({ session, busy, onSignIn, onSignOut }: PaneProps) {
         {session.reason}
       </p>
     );
+  const current: AccountRow | undefined = accounts.rows.find((r) => r.id === accounts.active);
+  const me = accounts.me.state === "ok" ? accounts.me.data : null;
+  const who = me?.email || me?.name || "";
+  const signedIn = session.state === "signed-in";
   return (
-    <Section
-      title={session.state === "signed-in" ? "Signed in" : "Not signed in"}
-      note="Signing in is the same as `iohr login`: your browser opens, and the local server keeps the credential. This page never holds it."
-    >
-      {session.state === "signed-in" ? (
-        <>
-          <Row label="Profile">{session.profile}</Row>
-          <Row label="Kind">{session.kind}</Row>
-          <Row label="Account">{session.account === "" ? "none: this sign-in has no account" : session.account}</Row>
-          <Row label="Subject">
-            <span className="truncate">{session.subject}</span>
-          </Row>
-          <Row label="Scopes">
-            <span className="text-right">{session.scopes.length === 0 ? "none" : session.scopes.join(", ")}</span>
-          </Row>
-          <div className="pt-2">
-            <button type="button" className={btn} disabled={busy} onClick={onSignOut}>
-              Sign out
+    <>
+      <Section
+        title={session.state === "signed-in" ? "Signed in" : "Not signed in"}
+        note="Signing in is the same as `iohr login`: your browser opens, and the local server keeps the credential. This page never holds it."
+      >
+        {session.state === "signed-in" ? (
+          <>
+            <Row label="Profile">{session.profile}</Row>
+            <Row label="Kind">{session.kind}</Row>
+            <Row label="Account">{current?.name ?? "Your account"}</Row>
+            {current ? <Row label="Plan">{planLabel(current.plan)}</Row> : null}
+            {current ? <Row label="Your role">{roleLabel(current.role)}</Row> : null}
+            {who ? <Row label="Signed in as">{who}</Row> : null}
+            <Row label="Scopes">
+              <span className="text-right">{session.scopes.length === 0 ? "none" : session.scopes.join(", ")}</span>
+            </Row>
+            <div className="pt-2">
+              <button type="button" className={btn} disabled={busy} onClick={onSignOut}>
+                Sign out
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            {session.login === "failed" ? (
+              <span className="text-destructive text-[13px]" role="alert">
+                Sign-in failed{session.reason ? `: ${session.reason}` : ""}
+              </span>
+            ) : null}
+            <button type="button" className={btn} disabled={busy || session.login === "waiting"} onClick={onSignIn}>
+              {session.login === "waiting" ? "Finish in your browser…" : "Sign in"}
             </button>
           </div>
-        </>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2">
-          {session.login === "failed" ? (
-            <span className="text-destructive text-[13px]" role="alert">
-              Sign-in failed{session.reason ? `: ${session.reason}` : ""}
-            </span>
-          ) : null}
-          <button type="button" className={btn} disabled={busy || session.login === "waiting"} onClick={onSignIn}>
-            {session.login === "waiting" ? "Finish in your browser…" : "Sign in"}
+        )}
+      </Section>
+      {signedIn ? <TeamsSection accounts={accounts} /> : null}
+    </>
+  );
+}
+
+/** Rename this team, start another, and choose which account opens first (the console's Settings, through the API). */
+function TeamsSection({ accounts }: { accounts: AccountsState }) {
+  const w = useWrites();
+  const [name, setName] = useState("");
+  const [fresh, setFresh] = useState("");
+  const current = accounts.rows.find((r) => r.id === accounts.active);
+  const prefs = accounts.me.state === "ok" ? accounts.me.data.preferences : undefined;
+  const first = prefs?.default_account_id ?? prefs?.open_account_id ?? "";
+  const mayRename = current?.kind === "team" && manages(current.role);
+  return (
+    <Section title="Teams" note="The same changes as the console's Settings, made through the API as you.">
+      {current?.kind === "team" ? (
+        <Row label="Team name">
+          {mayRename ? (
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (accounts.active === null) return;
+                void w.run(renameTeam(accounts.active, name), "rename the team", () => {
+                  setName("");
+                  accounts.me.again();
+                });
+              }}
+            >
+              <input
+                className={field}
+                aria-label="New team name"
+                placeholder={current.name}
+                value={name}
+                maxLength={80}
+                onChange={(e) => setName(e.target.value)}
+              />
+              <button type="submit" className={btn} disabled={w.busy || !teamNameOk(name)}>
+                Rename
+              </button>
+            </form>
+          ) : (
+            <span className={muted}>Only an owner or admin renames the team.</span>
+          )}
+        </Row>
+      ) : null}
+      <Row label="New team">
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void w.run(createTeam(fresh), "create the team", () => {
+              setFresh("");
+              accounts.me.again();
+            });
+          }}
+        >
+          <input
+            className={field}
+            aria-label="Name of the new team"
+            placeholder="Team name"
+            value={fresh}
+            maxLength={80}
+            onChange={(e) => setFresh(e.target.value)}
+          />
+          <button type="submit" className={btn} disabled={w.busy || !teamNameOk(fresh)}>
+            Create team
           </button>
-        </div>
-      )}
+        </form>
+      </Row>
+      <Row label="Opens first">
+        <select
+          className={field}
+          aria-label="The account that opens first"
+          value={accounts.rows.some((r) => r.id === first) ? first : ""}
+          disabled={w.busy}
+          onChange={(e) => {
+            if (e.target.value !== "")
+              void w.run(defaultAccount(e.target.value), "save the account that opens first", accounts.me.again);
+          }}
+        >
+          <option value="" disabled>
+            Not chosen
+          </option>
+          {accounts.rows.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <WriteNote w={w} />
     </Section>
+  );
+}
+
+/** What the last write said, in words; a failure is an alert. */
+function WriteNote({ w }: { w: ReturnType<typeof useWrites> }) {
+  if (w.offline !== null)
+    return (
+      <p className="pt-2 text-[13px] text-destructive" role="status" data-write="offline">
+        {w.offline}
+      </p>
+    );
+  if (w.note === null) return null;
+  return (
+    <p
+      className={cn("pt-2 text-[13px]", w.note.ok ? muted : "text-destructive")}
+      role={w.note.ok ? "status" : "alert"}
+      data-write={w.note.ok ? "ok" : "failed"}
+    >
+      {w.note.text}
+    </p>
   );
 }
 
@@ -225,46 +369,214 @@ const when = (iso?: string) => {
     : new Date(t).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
 };
 
-export function Team({ session, onSignIn }: PaneProps) {
+export function Team({ session, accounts, onSignIn }: PaneProps) {
   const account = accountOf(session);
+  const current = accounts.rows.find((r) => r.id === accounts.active);
+  const mine = current?.role;
+  const may = manages(mine);
+  const selfId = accounts.me.state === "ok" ? (accounts.me.data.user_id ?? "") : "";
   const members = useRead<{ members?: Member[] }, Member[]>(
     account === null ? null : settingsReads(account).members,
     (w) => w.members ?? [],
   );
+  const invites = useRead<{ invitations?: Invite[] }, Invite[]>(
+    account === null || !may || current?.kind !== "team" ? null : settingsReads(account).invitations,
+    (w) => w.invitations ?? [],
+  );
+  const w = useWrites();
+  const [sure, setSure] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("member");
   if (session === null) return <p className={cn(muted, "text-[13px]")}>Checking sign-in…</p>;
   if (session.state === "signed-out")
     return <Why part={{ state: "signed-out" }} what="your team" onSignIn={onSignIn} onRetry={() => {}} />;
   if (account === null)
     return <p className={cn(muted, "text-[13px]")}>This sign-in has no account, so there is no team to list.</p>;
+  if (current?.kind === "personal")
+    return (
+      <p className={cn(muted, "text-[13px]")} data-pane-state="personal">
+        A personal account has no team. Start one under Accounts, or switch to a team from the menu at the top.
+      </p>
+    );
   if (members.state !== "ok")
     return <Why part={members} what="your team" onSignIn={onSignIn} onRetry={members.again} />;
-  if (members.data.length === 0) return <p className={cn(muted, "text-[13px]")}>The account lists no members.</p>;
+  const orgId = account;
+  const after = () => {
+    setSure(null);
+    members.again();
+    invites.again();
+  };
+  const list = members.data;
   return (
-    <section className={cn(card, "overflow-x-auto p-2")} aria-label="Members">
-      <table className="w-full text-left text-[13px]">
-        <thead className={muted}>
-          <tr>
-            <th className="px-2 py-1 font-medium">Name</th>
-            <th className="px-2 py-1 font-medium">Role</th>
-            <th className="px-2 py-1 font-medium">Second factor</th>
-            <th className="px-2 py-1 font-medium">Last seen</th>
-          </tr>
-        </thead>
-        <tbody>
-          {members.data.map((m) => (
-            <tr key={m.user_id ?? m.email} className="border-t" data-member>
-              <td className="px-2 py-1.5">
-                <div className="truncate">{m.name || m.email || m.user_id}</div>
-                {m.name && m.email ? <div className={cn(muted, "truncate text-[12px]")}>{m.email}</div> : null}
-              </td>
-              <td className="px-2 py-1.5 capitalize">{m.role || "unknown"}</td>
-              <td className="px-2 py-1.5">{m.mfa || "unknown"}</td>
-              <td className="px-2 py-1.5 whitespace-nowrap">{when(m.last_seen_at)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
+    <>
+      <section className={cn(card, "overflow-x-auto p-2")} aria-label="Members">
+        {list.length === 0 ? (
+          <p className={cn(muted, "px-2 py-1 text-[13px]")}>The account lists no members.</p>
+        ) : (
+          <table className="w-full text-left text-[13px]">
+            <thead className={muted}>
+              <tr>
+                <th className="px-2 py-1 font-medium">Name</th>
+                <th className="px-2 py-1 font-medium">Role</th>
+                <th className="px-2 py-1 font-medium">Second factor</th>
+                <th className="px-2 py-1 font-medium">Last seen</th>
+                <th className="px-2 py-1" />
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((m) => {
+                const rules = memberRules(m, selfId, mine);
+                const uid = m.user_id ?? "";
+                const who = personName(m);
+                const confirming = sure === uid && uid !== "";
+                return (
+                  <tr key={uid || m.email} className="border-t" data-member>
+                    <td className="px-2 py-1.5">
+                      <div className="truncate">
+                        {who}
+                        {uid !== "" && uid === selfId ? <span className={muted}> (you)</span> : null}
+                      </div>
+                      {m.name && m.email ? <div className={cn(muted, "truncate text-[12px]")}>{m.email}</div> : null}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {rules.changeRole ? (
+                        <select
+                          className={field}
+                          aria-label={`Role of ${who}`}
+                          value={m.role === "admin" ? "admin" : "member"}
+                          disabled={w.busy}
+                          onChange={(e) =>
+                            void w.run(changeRole(orgId, uid, e.target.value), `change ${who}'s role`, after)
+                          }
+                        >
+                          {GRANTABLE.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        roleWord(m.role)
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5">{m.mfa || "unknown"}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">{when(m.last_seen_at)}</td>
+                    <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                      {rules.remove || rules.leave ? (
+                        confirming ? (
+                          <>
+                            <button
+                              type="button"
+                              className={cn(btn, "text-destructive")}
+                              disabled={w.busy}
+                              onClick={() =>
+                                void w.run(
+                                  removeMember(orgId, uid),
+                                  rules.leave ? "leave the team" : `remove ${who}`,
+                                  after,
+                                )
+                              }
+                            >
+                              {rules.leave ? "Yes, leave" : "Yes, remove"}
+                            </button>{" "}
+                            <button type="button" className={btn} onClick={() => setSure(null)}>
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" className={btn} disabled={w.busy} onClick={() => setSure(uid)}>
+                            {rules.leave ? "Leave" : "Remove"}
+                          </button>
+                        )
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </section>
+      {may && current?.kind === "team" ? (
+        <Section
+          title="Invitations"
+          note="An invitation is a mailed link. Sending it again makes a new link and ends the old one."
+        >
+          {invites.state === "ok" ? (
+            openInvites(invites.data).length === 0 ? (
+              <p className={cn(muted, "text-[13px]")}>No invitations yet.</p>
+            ) : (
+              openInvites(invites.data).map((i) => (
+                <Row key={i.id ?? i.email} label={i.email ?? "Unknown address"}>
+                  <span className={muted} data-invite={isOpen(i) ? "open" : "closed"}>
+                    {roleWord(i.role)} · {i.status || "pending"}
+                  </span>
+                  {isOpen(i) && i.id ? (
+                    <>
+                      <button
+                        type="button"
+                        className={btn}
+                        disabled={w.busy}
+                        onClick={() =>
+                          void w.run(resendInvite(orgId, i.id ?? ""), `resend the invitation to ${i.email}`, after)
+                        }
+                      >
+                        Resend
+                      </button>
+                      <button
+                        type="button"
+                        className={btn}
+                        disabled={w.busy}
+                        onClick={() =>
+                          void w.run(revokeInvite(orgId, i.id ?? ""), `withdraw the invitation to ${i.email}`, after)
+                        }
+                      >
+                        Withdraw
+                      </button>
+                    </>
+                  ) : null}
+                </Row>
+              ))
+            )
+          ) : (
+            <Why part={invites} what="the invitations" onSignIn={onSignIn} onRetry={invites.again} />
+          )}
+          <form
+            className="flex flex-wrap items-center gap-2 pt-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void w.run(invite(orgId, email, role), `invite ${email.trim()}`, () => {
+                setEmail("");
+                after();
+              });
+            }}
+          >
+            <input
+              className={cn(field, "flex-1")}
+              type="email"
+              aria-label="E-mail address to invite"
+              placeholder="name@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <select className={field} aria-label="Role to give" value={role} onChange={(e) => setRole(e.target.value)}>
+              {GRANTABLE.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+            <button type="submit" className={btn} disabled={w.busy || !emailOk(email)}>
+              Send invitation
+            </button>
+          </form>
+        </Section>
+      ) : null}
+      {!may ? (
+        <p className={cn(muted, "text-[13px]")}>Only an owner or admin invites people or changes roles.</p>
+      ) : null}
+      <WriteNote w={w} />
+    </>
   );
 }
 
@@ -298,20 +610,7 @@ export function Projects({ session, onSignIn }: PaneProps) {
 }
 
 export function Keyboard() {
-  const table = (rows: { id: string; label: string; accel: string }[]) =>
-    rows.map((s) => (
-      <Row key={s.id} label={s.label}>
-        <kbd className="bg-muted rounded px-1.5 py-0.5 font-mono text-[12px]">{symbols(s.accel)}</kbd>
-      </Row>
-    ));
-  return (
-    <>
-      <Section title="Frame">{table(FRAME_SHORTCUTS)}</Section>
-      <Section title="Window layout" note="Only where the window is wide enough to arrange.">
-        {table(LAYOUT_SHORTCUTS)}
-      </Section>
-    </>
-  );
+  return <ShortcutList pages={["home", "settings"]} />;
 }
 
 export function Features({ onEdit }: PaneProps) {

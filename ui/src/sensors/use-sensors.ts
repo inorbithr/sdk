@@ -8,6 +8,7 @@
 //   clock    a tick every TICK_MS so "2 minutes ago" and staleness move between looks.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, type Read } from "../lib/api.ts";
+import { apiStream, type LiveState } from "../lib/live-shim.ts";
 import type { Reading } from "../lib/sensors-core.ts";
 import { diffEvents, mergeEvents, type SessionPreview, type SignalEvent, type Snapshot } from "../lib/sensors-core.ts";
 import {
@@ -24,7 +25,6 @@ import {
   type WireSignalEvent,
   withReadings,
 } from "../lib/sensors-wire.ts";
-import { apiStream, type LiveState } from "./live-shim.ts";
 
 export const TICK_MS = 10_000;
 export const SAFETY_POLL_MS = 60_000;
@@ -36,7 +36,7 @@ export type SensorsData = {
   events: SignalEvent[];
   fresh: SignalEvent[];
   sessions: SessionPreview[];
-  /** How the signal stream stands: connecting, live, reconnecting, offline. */
+  /** How the signal stream stands: connecting, live, reconnecting, off. */
   conn: LiveState;
   loading: boolean;
   signedOut: boolean;
