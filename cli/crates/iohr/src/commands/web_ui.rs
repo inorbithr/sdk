@@ -267,7 +267,9 @@ async fn serve_until_stopped(g: &Global, env: &Env, args: &UiServe, out: Out) ->
     }
     let folder = data_dir(g).map(|d| d.join("ui"));
     let recorded = match &folder {
-        Ok(f) => remember(f, &url, &root, server.launch()).map_err(|e| e.kind().to_string()),
+        Ok(f) => remember(f, &url, &root, &server.launch())
+            .map(|()| server.keep_record(f.clone(), url.clone(), root.clone()))
+            .map_err(|e| e.kind().to_string()),
         Err(e) => Err(e.to_string()),
     };
     if let Err(why) = &recorded {
@@ -372,8 +374,14 @@ impl Server {
 
     /// The per-launch secret that signs a browser in (`?launch=`); recorded for `iohr ui
     /// open`, never printed by `serve`.
-    pub(crate) fn launch(&self) -> &str {
+    pub(crate) fn launch(&self) -> String {
         self.site.access.launch()
+    }
+
+    /// Records where `iohr ui open` reads the launch secret, so the one that replaces a
+    /// spent secret is written there.
+    pub(crate) fn keep_record(&self, folder: PathBuf, url: String, root: PathBuf) {
+        self.site.access.keep_record(folder, url, root);
     }
 
     /// Answers connections until `stop` finishes, then stops every panel it started.

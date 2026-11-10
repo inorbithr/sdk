@@ -4,8 +4,10 @@
 //! login` uses (the system browser, PKCE, the same profile and credential store) and calls
 //! the API for the page with that credential; the page sees only what the API answered.
 //!
-//! Reaching the page takes the per-launch secret, which `iohr ui open` (or `serve --open`)
-//! puts in the first address as `?launch=`. The server compares it in constant time,
+//! Reaching the page takes the launch secret, which `iohr ui open` (or `serve --open`)
+//! puts in the first address as `?launch=`. It is one-shot: the first exchange spends it, a
+//! second use is refused, and the server makes a fresh one and records it for the next `iohr
+//! ui open`. The server compares it in constant time,
 //! answers `303` to `/` and sets a separate session cookie (`HttpOnly`, `SameSite=Strict`,
 //! one name per port, so two serves on one machine do not overwrite each other), so the
 //! secret leaves the address bar and the history. Every answer but that exchange needs the
@@ -20,6 +22,7 @@
 //! until it settles), `POST /api/session/logout` ends it as `iohr logout` does, and
 //! `GET /api/proxy/v1/...` forwards one read to the API with the signed-in credential.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -57,9 +60,18 @@ pub(super) enum Entry {
     Refused,
 }
 
+/// Where `iohr ui open` reads the launch secret: the record the server rewrites when a
+/// secret is spent.
+struct Record {
+    folder: PathBuf,
+    url: String,
+    root: PathBuf,
+}
+
 /// The launch secret, the session cookie it is exchanged for, and the sign-in state.
 pub(super) struct Access {
-    launch: String,
+    launch: Mutex<String>,
+    record: Mutex<Option<Record>>,
     session: String,
     cookie: String,
     global: Global,
@@ -71,7 +83,8 @@ pub(super) struct Access {
 impl Access {
     pub(super) fn new(global: Global, env: Env, port: u16) -> std::io::Result<Self> {
         Ok(Self {
-            launch: super::random_hex()?,
+            launch: Mutex::new(super::random_hex()?),
+            record: Mutex::new(None),
             session: super::random_hex()?,
             cookie: format!("iohr_ui_{port}"),
             global,
@@ -81,32 +94,63 @@ impl Access {
         })
     }
 
-    /// The secret `iohr ui open` puts in the first address; never printed by `serve`.
-    pub(super) fn launch(&self) -> &str {
-        &self.launch
+    /// The secret `iohr ui open` puts in the first address; never printed by `serve`. It
+    /// is the current one: a spent secret is replaced.
+    pub(super) fn launch(&self) -> String {
+        self.launch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Names the record `iohr ui open` reads, so a spent secret's replacement is written
+    /// there; `remember` has already written the first one.
+    pub(super) fn keep_record(&self, folder: PathBuf, url: String, root: PathBuf) {
+        *self.record.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some(Record { folder, url, root });
     }
 
     /// `<cookie name>=<session>|<launch secret>`, for the tests' browser.
     #[cfg(test)]
     pub(super) fn cookie_line(&self) -> String {
-        format!("{}={}|{}", self.cookie, self.session, self.launch)
+        format!("{}={}|{}", self.cookie, self.session, self.launch())
     }
 
-    /// Decides one request: a valid session cookie, else the launch secret in the query.
+    /// Decides one request: a valid session cookie, else the launch secret in the query of a
+    /// GET or HEAD. The secret is spent here, in one step with the comparison, so two
+    /// requests with it cannot both win; its replacement goes in the record.
     pub(super) fn entry(&self, request: &Request) -> Entry {
         if self.cookie_ok(request) {
             return Entry::Open;
+        }
+        if !matches!(request.method.as_str(), "GET" | "HEAD") {
+            return Entry::Refused;
         }
         let asked = request
             .target
             .split_once('?')
             .map(|(_, q)| q.split('#').next().unwrap_or_default())
             .and_then(|q| q.split('&').find_map(|pair| pair.strip_prefix("launch=")));
-        if asked.is_some_and(|a| same_bytes(a.as_bytes(), self.launch.as_bytes())) {
-            Entry::Exchange
-        } else {
-            Entry::Refused
+        let Some(asked) = asked else {
+            return Entry::Refused;
+        };
+        let next = {
+            let mut held = self.launch.lock().unwrap_or_else(PoisonError::into_inner);
+            if !same_bytes(asked.as_bytes(), held.as_bytes()) {
+                return Entry::Refused;
+            }
+            let Ok(next) = super::random_hex() else {
+                return Entry::Refused;
+            };
+            held.clone_from(&next);
+            next
+        };
+        if let Some(r) = &*self.record.lock().unwrap_or_else(PoisonError::into_inner) {
+            // A failed write leaves `iohr ui open` with the spent secret; it then says to
+            // restart the serve, which is the safe side of the failure.
+            let _ = super::remember(&r.folder, &r.url, &r.root, &next);
         }
+        Entry::Exchange
     }
 
     fn cookie_ok(&self, request: &Request) -> bool {
@@ -190,7 +234,7 @@ impl Access {
                 }
             }
             Err(Error::NotSignedIn(_)) => {}
-            Err(e) => body["reason"] = e.to_string().into(),
+            Err(e) => body["reason"] = safe(&e).into(),
         }
         Reply::json(&body)
     }
@@ -222,7 +266,7 @@ impl Access {
             me.forget();
             *me.phase() = match done {
                 Ok(()) => Phase::Idle,
-                Err(e) => Phase::Failed(e.to_string()),
+                Err(e) => Phase::Failed(safe(&e)),
             };
         });
         Reply::json(&serde_json::json!({ "login": "waiting" }))
@@ -234,7 +278,7 @@ impl Access {
         self.forget();
         match done {
             Ok(()) => Reply::json(&serde_json::json!({ "signed_in": false })),
-            Err(e) => Reply::problem("400 Bad Request", &e.to_string()),
+            Err(e) => Reply::problem("400 Bad Request", &safe(&e)),
         }
     }
 
@@ -250,7 +294,7 @@ impl Access {
             Err(Error::NotSignedIn(_)) => {
                 return Reply::problem("401 Unauthorized", "not signed in");
             }
-            Err(e) => return Reply::problem("502 Bad Gateway", &e.to_string()),
+            Err(e) => return Reply::problem("502 Bad Gateway", &safe(&e)),
         };
         let pairs: Vec<(&str, &str)> = query
             .iter()
@@ -275,10 +319,18 @@ impl Access {
             }
             Err(e) => {
                 let status = e.status().map_or("502 Bad Gateway", status_line);
-                Reply::problem(status, &Error::from(e).to_string())
+                Reply::problem(status, &safe(&Error::from(e)))
             }
         }
     }
+}
+
+/// An error's text as the page may see it: the runner's redaction (`crate::attach::scrub`:
+/// values after a secret's name, bearer values, JWTs, GitHub tokens, long secret-looking
+/// words, URLs and addresses) applied to what a failed call says. A failure can quote a
+/// header, a URL with a credential, or a body; none of that reaches the browser.
+pub(super) fn safe(error: &dyn std::fmt::Display) -> String {
+    crate::attach::scrub(&error.to_string())
 }
 
 /// The API path and query a `/api/proxy/...` target names, or `None` when it is not a plain

@@ -152,6 +152,77 @@ async fn the_launch_secret_is_exchanged_for_a_cookie_and_leaves_the_address() {
 }
 
 #[tokio::test]
+async fn the_launch_secret_is_spent_by_its_first_use_and_a_second_use_is_refused() {
+    let dir = built_ui();
+    let (addr, _stop) = start(dir.path()).await;
+    let host = super::host_of(addr);
+    let launch = launch_of(addr);
+
+    let first = send_bare(addr, &get(&format!("/?launch={launch}"), &host)).await;
+    assert!(first_line(&first).contains("303"), "{first}");
+
+    // The same address again, as a copied or leaked link would be: refused, no cookie.
+    let again = send_bare(addr, &get(&format!("/?launch={launch}"), &host)).await;
+    assert!(first_line(&again).contains("401"), "{again}");
+    assert!(!again.contains("Set-Cookie"), "{again}");
+}
+
+#[tokio::test]
+async fn a_launch_secret_is_never_spent_or_accepted_by_a_post() {
+    let dir = built_ui();
+    let (addr, _stop) = start(dir.path()).await;
+    let host = super::host_of(addr);
+    let launch = launch_of(addr);
+
+    let raw =
+        format!("POST /?launch={launch} HTTP/1.1\r\nHost: {host}\r\nContent-Length: 0\r\n\r\n");
+    let r = send_bare(addr, &raw).await;
+    assert!(first_line(&r).contains("401"), "{r}");
+
+    // The refused POST did not spend it: the first GET still gets in.
+    let r = send_bare(addr, &get(&format!("/?launch={launch}"), &host)).await;
+    assert!(first_line(&r).contains("303"), "{r}");
+}
+
+#[tokio::test]
+async fn a_spent_secret_is_replaced_in_the_record_so_iohr_ui_open_keeps_working() {
+    let dir = built_ui();
+    let folder = tempfile::tempdir().expect("folder");
+    let server = super::Server::bind(
+        dir.path(),
+        0,
+        Store::new(dir.path().join("no-extensions")),
+        panels_with(&[], Env::default()),
+    )
+    .await
+    .expect("bind");
+    let (addr, url) = (server.addr, server.url());
+    super::remember(folder.path(), &url, dir.path(), &server.launch()).expect("remember");
+    server.keep_record(folder.path().to_owned(), url, dir.path().to_owned());
+    let first = server.launch();
+    let access = server.site.access.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(server.serve(async {
+        let _ = rx.await;
+    }));
+
+    let host = super::host_of(addr);
+    let r = send_bare(addr, &get(&format!("/?launch={first}"), &host)).await;
+    assert!(first_line(&r).contains("303"), "{r}");
+
+    let next = access.launch();
+    assert_ne!(next, first, "the spent secret is replaced");
+    let text = std::fs::read_to_string(folder.path().join(super::SERVING)).expect("record");
+    assert_eq!(super::recorded_launch(&text), Some(next.clone()), "{text}");
+    assert!(!text.contains(&first), "the spent secret is gone: {text}");
+
+    // The replacement opens once, like the first did.
+    let r = send_bare(addr, &get(&format!("/?launch={next}"), &host)).await;
+    assert!(first_line(&r).contains("303"), "{r}");
+    let _ = tx.send(());
+}
+
+#[tokio::test]
 async fn the_session_state_says_not_signed_in_and_never_carries_a_credential() {
     let config = tempfile::tempdir().expect("config");
     let mock = MockServer::start().await;
@@ -343,4 +414,59 @@ async fn starting_a_sign_in_needs_the_token_and_reports_a_failure() {
         "{state}"
     );
     assert_eq!(state["signed_in"], false);
+}
+
+/// A failure whose text quotes a credential, as a transport error quoting a request
+/// would.
+struct Quoting(String);
+
+impl std::fmt::Display for Quoting {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[test]
+fn error_text_for_the_page_never_carries_anything_shaped_like_a_token() {
+    let token = jwt();
+    for said in [
+        format!("request failed: Authorization: Bearer {token}"),
+        format!("rejected the credential {token} for this call"),
+        "sent header authorization=Bearer fakebearer0123456789abcdefghij".to_owned(),
+        "body was {\"access_token\": \"fakebearer0123456789abcdefghij\"}".to_owned(),
+        "used ghp_0123456789abcdefghijklmnopqrstuvwxyz1234 to call".to_owned(),
+        "password=hunter2hunter2 refused".to_owned(),
+    ] {
+        let seen = super::session::safe(&Quoting(said.clone()));
+        for marker in [SECRET_MARK, "fakebearer", "ghp_0123", "hunter2"] {
+            assert!(!seen.contains(marker), "{said} -> {seen}");
+        }
+        assert!(seen.contains("[redacted]"), "{said} -> {seen}");
+    }
+    // Plain words stay readable.
+    assert_eq!(
+        super::session::safe(&Quoting("the sign-in was cancelled".into())),
+        "the sign-in was cancelled"
+    );
+}
+
+#[tokio::test]
+async fn a_failed_proxy_call_never_shows_the_page_the_credential() {
+    // Nothing listens at the base address, and it carries a credential in its user part,
+    // so the transport error has something to quote.
+    let config = tempfile::tempdir().expect("config");
+    let base = format!("http://user:{SECRET_MARK}pw@127.0.0.1:9");
+    let (_dir, addr, _stop, token) = signed_in(&base, config.path()).await;
+    let host = super::host_of(addr);
+
+    let r = send(
+        addr,
+        &api("/api/proxy/v1/orgs/org_1/monitors", &host, Some(&token)),
+    )
+    .await;
+    assert!(!first_line(&r).contains("200"), "{r}");
+    assert!(!r.contains(SECRET_MARK), "{r}");
+    assert!(!r.contains(&jwt()), "{r}");
+    let r = send(addr, &api("/api/session", &host, Some(&token))).await;
+    assert!(!r.contains(SECRET_MARK), "{r}");
 }

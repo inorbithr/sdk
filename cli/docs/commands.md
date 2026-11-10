@@ -246,9 +246,14 @@ browser (`IOHR_NO_BROWSER` prints the address instead).
 - Reaching the page takes a per-launch secret (RFC 0217, round 4). `iohr ui open` and
   `serve --open` put it in the first address (`/?launch=...`); the server answers `303` to
   `/` and sets a session cookie (`HttpOnly`, `SameSite=Strict`, named by the port), and
-  every other request without that cookie is `401`. `serve` never prints the secret; `open`
-  prints the address only when no browser could be opened. The secret is recorded in
-  `ui/serving.json` (private) for `open`.
+  every other request without that cookie is `401`. The secret is one-shot: only a GET or
+  HEAD can use it, the first use spends it, and a second use is `401`. The server then makes
+  a fresh one and rewrites it in `ui/serving.json` (private), so the next `open` still gets
+  in. `serve` never prints the secret; `open` prints the address only when no browser could
+  be opened.
+- Error text the page can see (a failed sign-in, a failed proxy call) goes through the same
+  redaction as `iohr ask` output: values after a secret's name, bearer values, JWTs, tokens
+  and URLs are replaced.
 - The page never holds a credential. `iohr ui serve` signs in as `iohr login` does (the
   same profile, the same credential store; `--profile`, `--env` and `IOHR_TOKEN` apply) and
   calls the API for the page: `GET /api/session` says who (never a token),
