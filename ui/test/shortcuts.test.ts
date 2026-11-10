@@ -1,7 +1,17 @@
 // The key rules moved from the Mac app's shortcuts.ts (its tests' cases kept), and the frame's own shortcut.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { accelOfEvent, canon, FRAME_SHORTCUTS, keysOf, matches, shortcutOf, symbols } from "../src/frame/shortcuts.ts";
+import {
+  accelOfEvent,
+  canon,
+  FRAME_SHORTCUTS,
+  isMac,
+  keysOf,
+  matches,
+  shortcutOf,
+  show,
+  symbols,
+} from "../src/frame/shortcuts.ts";
 
 const key = (
   k: string,
@@ -37,10 +47,27 @@ test("matching: Cmd and Ctrl are told apart, Ctrl stands in for Cmd off the Mac"
   assert.equal(matches("CmdOrCtrl+\\", key("\\", { ctrlKey: true, metaKey: true })), false);
 });
 
-test("the frame answers the Mac app's sidebar shortcut, and nothing else", () => {
-  assert.deepEqual(FRAME_SHORTCUTS, [{ id: "sidebar", label: "Toggle sidebar", accel: "CmdOrCtrl+\\" }]);
+test("the frame answers the Mac app's sidebar, palette and help keys, and nothing else", () => {
+  assert.deepEqual(
+    FRAME_SHORTCUTS.map((s) => [s.id, s.accel]),
+    [
+      ["sidebar", "CmdOrCtrl+\\"],
+      ["palette", "CmdOrCtrl+K"],
+      ["shortcuts", "CmdOrCtrl+/"],
+    ],
+  );
   assert.equal(shortcutOf(key("\\", { metaKey: true }))?.id, "sidebar");
   assert.equal(shortcutOf(key("\\")), undefined);
   assert.equal(shortcutOf(key("\\", { metaKey: true, shiftKey: true })), undefined);
-  assert.equal(shortcutOf(key("k", { metaKey: true })), undefined);
+  assert.equal(shortcutOf(key("k", { metaKey: true }))?.id, "palette");
+  assert.equal(shortcutOf(key("j", { metaKey: true })), undefined);
+});
+
+test("keys show as glyphs on a Mac and as words elsewhere", () => {
+  assert.equal(show("CmdOrCtrl+K", true), "⌘K");
+  assert.equal(show("CmdOrCtrl+K", false), "Ctrl+K");
+  assert.equal(show("Ctrl+Alt+ArrowLeft", false), "Ctrl+Alt+←");
+  assert.equal(show("Escape", true), "Esc");
+  assert.equal(isMac("MacIntel"), true);
+  assert.equal(isMac("Linux x86_64"), false);
 });

@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  Atom,
   FileText,
   House,
   LayoutGrid,
@@ -9,7 +10,7 @@ import {
   Settings as SettingsIcon,
   Wrench,
 } from "lucide-react";
-import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { lazy, type MouseEvent, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { Decisions } from "./decisions/page.tsx";
 import {
   applyLayout,
@@ -33,25 +34,36 @@ import { extensionsMenu } from "./frame/extensions-menu.ts";
 import { ARRANGE_MIN_WIDTH, Frame, useViewportWidth } from "./frame/frame.tsx";
 import { GridPicker } from "./frame/grid-picker.tsx";
 import { PanelFrame } from "./frame/panel-frame.tsx";
-import { useFrameShortcuts } from "./frame/shortcuts.ts";
 import { toggleHidden } from "./frame/sidebar-frame.ts";
 import { Home } from "./home.tsx";
+import { accountMenu, accountName } from "./lib/accounts-core.ts";
+import { useAccounts } from "./lib/accounts-store.ts";
 import { updateArrangement as updateArr, useArrangement } from "./lib/arrange-store.ts";
 import { DECISIONS, decisionsRoute } from "./lib/decisions-route.ts";
 import { useDock } from "./lib/dock-store.ts";
 import { type Listing, loadExtensions, type Panel } from "./lib/extensions.ts";
 import { entryOf, isDown, whyClosed } from "./lib/features-core.ts";
 import { allOnline, backOnline, putDown, undoLast, useFeatures, useUndo } from "./lib/features-store.ts";
+import type { Space } from "./lib/home-core.ts";
+import { homeReads } from "./lib/home-data.ts";
 import { add as addOrbit, HOME, remove as removeOrbit } from "./lib/orbits-core.ts";
 import { updateOrbits, useOrbits } from "./lib/orbits-store.ts";
 import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
 import { useSession } from "./lib/session-store.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
+import { useRead } from "./lib/settings-data.ts";
+import { BINDINGS } from "./lib/shortcut-tables.ts";
 import { useSidebar } from "./lib/sidebar-store.ts";
+import { useShortcuts } from "./lib/use-shortcuts.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
 import { Settings } from "./settings.tsx";
+import { HelpOverlay, keysShown, Palette, type PaletteItem } from "./shortcuts-view.tsx";
+
+// The Workload page (3D orbit, room, tree): its own chunk, so three loads only on /workload.
+const Workload = lazy(() => import("./workload.tsx"));
+const WORKLOAD = "/workload";
 
 // The page `iohr ui serve` serves, drawn in the shell frame from the Mac app (frame/frame.tsx, RFC 0217 C5): the
 // sidebar lists Home and the installed extensions that declare a panel, the page header holds the Extensions menu,
@@ -66,7 +78,14 @@ import { Settings } from "./settings.tsx";
 export function App() {
   const [sidebar, update] = useSidebar();
   const [dock, updateDock] = useDock();
-  const account = useSession();
+  const raw = useSession();
+  const accounts = useAccounts(raw.session);
+  const account = { ...raw, session: accounts.session };
+  const spaces = useRead<{ spaces?: Space[] }, Space[]>(
+    accounts.active === null ? null : homeReads(accounts.active).spaces,
+    (w) => w.spaces ?? [],
+  );
+  const accountLabel = accountName(accounts.rows, accounts.active);
   const [listing, setListing] = useState<Listing | null>(null);
   const [open, setOpen] = useState(false);
   const menu = useRef<number | null>(null);
@@ -83,7 +102,16 @@ export function App() {
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
   const inDecisions = decisionsRoute(window.location.pathname) !== null;
-  const pageKey = inSettings ? "settings" : inDecisions ? "decisions" : routed === null ? HOME : `ext:${routed}`;
+  const inWorkload = window.location.pathname === WORKLOAD;
+  const pageKey = inSettings
+    ? "settings"
+    : inDecisions
+      ? "decisions"
+      : inWorkload
+        ? "workload"
+        : routed === null
+          ? HOME
+          : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -148,8 +176,16 @@ export function App() {
   const openGrid = () => setGridAt((at) => (at ? null : layoutButton.current));
   const layoutActions = { layout: pick, grid: openGrid, back: () => updateArr(back) };
 
-  useFrameShortcuts({
+  const [help, setHelp] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const toggleHelp = () => setHelp((h) => !h);
+  useShortcuts("global", {
     sidebar: () => update(toggleHidden),
+    palette: () => setPalette((p) => !p),
+    shortcuts: toggleHelp,
+    "shortcuts-help": toggleHelp,
+    "go-home": () => goTo(HOME),
+    "go-settings": () => goTo("settings"),
     ...(wide
       ? {
           "layout-left": () => pick("left"),
@@ -168,9 +204,28 @@ export function App() {
     openContextMenu({ x: align === "right" ? r.right : r.left, y: r.bottom + 4 }, entries, { label, trigger: button });
   };
 
+  // The account switcher (RFC 0217.1): accounts, projects and the environment, as the Mac app's popover.
+  const openSwitcher = (button: HTMLElement) =>
+    menuAt(
+      button,
+      accountMenu({
+        rows: accounts.rows,
+        active: accounts.active,
+        projects: spaces.state === "ok" ? spaces.data.map((x) => ({ id: x.space_id, name: x.name })) : [],
+        profile: account.session?.state === "signed-in" ? account.session.profile : "",
+        signedIn: account.session?.state === "signed-in",
+        switchTo: accounts.switchTo,
+        signIn: account.signIn,
+        signOut: account.signOut,
+      }),
+      accountLabel,
+      "left",
+    );
+
   const pages = [
     { key: HOME, title: "Home" },
     { key: "decisions", title: "Decisions" },
+    { key: "workload", title: "Workload" },
     { key: "settings", title: "Settings" },
     ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
   ];
@@ -188,9 +243,26 @@ export function App() {
       window.location.assign(SETTINGS);
       return;
     }
+    if (key === "workload") {
+      window.location.assign(WORKLOAD);
+      return;
+    }
     const panel = panels.find((p) => `ext:${p.name}` === key);
     if (panel) choose(panel);
   };
+  const pageIds = ["home", "settings"];
+  const paletteItems: PaletteItem[] = [
+    ...pages.map((p) => {
+      const go = BINDINGS.find((b) => b.page === (p.key === HOME ? "home" : p.key));
+      return {
+        id: `go:${p.key}`,
+        label: `Go to ${p.title}`,
+        hint: go ? keysShown(go) : undefined,
+        run: () => goTo(p.key),
+      };
+    }),
+    { id: "help", label: "Keyboard shortcuts", hint: "?", run: () => setHelp(true) },
+  ];
   const orbitActions = {
     go: goTo,
     add: (k: string) => updateOrbits((o) => addOrbit(o, k)),
@@ -244,11 +316,15 @@ export function App() {
 
   const title = (
     <h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
-      <span className={cn((chosen || inSettings || inDecisions) && "text-muted-foreground")}>InOrbit</span>
-      {chosen || inSettings || inDecisions ? (
+      <span className={cn((chosen || inSettings || inDecisions || inWorkload) && "text-muted-foreground")}>
+        InOrbit
+      </span>
+      {chosen || inSettings || inDecisions || inWorkload ? (
         <>
           <span className="text-muted-foreground">/</span>
-          <span className="truncate">{inDecisions ? "Decisions" : inSettings ? "Settings" : chosen?.title}</span>
+          <span className="truncate">
+            {inDecisions ? "Decisions" : inSettings ? "Settings" : inWorkload ? "Workload" : chosen?.title}
+          </span>
         </>
       ) : null}
     </h1>
@@ -310,9 +386,10 @@ export function App() {
       )}
       <SessionControl
         session={account.session}
+        name={accountLabel}
         busy={account.busy}
         onSignIn={account.signIn}
-        onSignOut={account.signOut}
+        onOpen={openSwitcher}
       />
       <button
         type="button"
@@ -349,7 +426,7 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings && !inDecisions}
+          active={routed === null && !inSettings && !inDecisions && !inWorkload}
           onClick={() => window.location.assign("/")}
         />
         <NavItem
@@ -359,6 +436,7 @@ export function App() {
           active={inDecisions}
           onClick={() => window.location.assign(DECISIONS)}
         />
+        <NavItem rail={rail} label="Workload" icon={<Atom />} active={inWorkload} onClick={() => goTo("workload")} />
       </ul>
       <section aria-label="Extensions" className={cn("flex flex-col gap-0.5", rail && "items-center")}>
         {!rail && <h2 className="text-muted-foreground px-2 pb-0.5 text-[11px] font-medium">Extensions</h2>}
@@ -402,7 +480,7 @@ export function App() {
                 onClick={() => goTo("settings")}
               />
             </ul>
-            <RailAccount session={account.session} rail={rail} />
+            <RailAccount session={account.session} name={accountLabel} rail={rail} onOpen={openSwitcher} />
           </div>
         )}
         arrangement={arr}
@@ -448,9 +526,14 @@ export function App() {
           ) : null}
           {inDecisions ? (
             <Decisions session={account.session} />
+          ) : inWorkload ? (
+            <Suspense fallback={<p className="text-muted-foreground text-sm">Loading the workload…</p>}>
+              <Workload />
+            </Suspense>
           ) : inSettings ? (
             <Settings
               session={account.session}
+              accounts={accounts}
               busy={account.busy}
               onSignIn={account.signIn}
               onSignOut={account.signOut}
@@ -489,6 +572,8 @@ export function App() {
           )}
         </div>
       </Frame>
+      {help ? <HelpOverlay pages={pageIds} onClose={() => setHelp(false)} /> : null}
+      {palette ? <Palette items={paletteItems} onClose={() => setPalette(false)} /> : null}
       {gridAt ? <GridPicker at={gridAt} onPick={pickSpan} onClose={() => setGridAt(null)} /> : null}
       {editing ? (
         <MaintenanceForm id={editing} onSave={(why) => putDown(editing, why)} onClose={() => setEditing(null)} />

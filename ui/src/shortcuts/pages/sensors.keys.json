@@ -1,0 +1,13 @@
+{
+  "scope": "sensors",
+  "title": "Sensors",
+  "page": "sensors",
+  "where": "On Sensors",
+  "rows": [
+    { "id": "sensors-view-orbit", "label": "Orbit view", "accel": "1" },
+    { "id": "sensors-view-control", "label": "Control room", "accel": "2" },
+    { "id": "sensors-view-sessions", "label": "Sessions", "accel": "3" },
+    { "id": "sensors-consent", "label": "Open the consent switches", "accel": "Alt+C" },
+    { "id": "sensors-zoom-out", "label": "Zoom back out to all sources, or close the switches", "accel": "Escape" }
+  ]
+}
