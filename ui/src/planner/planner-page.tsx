@@ -1,3 +1,5 @@
+import { openContextMenu } from "../frame/context-menu.tsx";
+import { plannerMenu } from "../lib/planner-menus.ts";
 import { plannerRoute, plannerHref, MODES, MODE_LABEL } from "../lib/planner-route.ts";
 import { PreviewView, DecisionsView, ExploreView } from "./plan-extra.tsx";
 import { CanvasLink, PlanView, ProgressView } from "./plan-views.tsx";
@@ -18,7 +20,13 @@ export function PlannerPage() {
   const raw = read?.state === "ok" ? read.data : null;
   return (
     <section aria-label="Planner" className="flex flex-col gap-3">
-      <header className="flex flex-wrap items-center gap-3">
+      <header
+        className="flex flex-wrap items-center gap-3"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          openContextMenu({ x: e.clientX, y: e.clientY }, plannerMenu(route, { go: (h) => window.location.assign(h), copy: (t) => void navigator.clipboard?.writeText(`${window.location.origin}${t}`) }), { label: "Planner" });
+        }}
+      >
         <h1 className="text-lg font-semibold">
           <a href={plannerHref({})}>Planner</a>
           {planId ? <span className="text-muted-foreground"> / {plan.title || planId}</span> : null}
