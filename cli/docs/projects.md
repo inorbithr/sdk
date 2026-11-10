@@ -454,9 +454,11 @@ pages are not fetched a second time.
   `iohr atlas claims --prove ID` prints the proof tree, the evidence digest and whether
   the kept page still hashes to it. "Verified" means the page bytes contain the fact, not
   that the fact is true.
-- **The file is private.** `.inorbit/crawl` is created owner-only (`0700`); a folder that
-  is group or world accessible, a symlink, or one owned by someone else is refused with
-  the `chmod 700` to run. One process writes at a time (a second says so and exits), a
+- **The file is private.** `.inorbit/crawl` is created owner-only (`0700`). A folder an
+  older build made open to others is closed to `0700` in place, once, and says so on
+  stderr (the folder path only); a symlink, a folder owned by someone else, or a chmod
+  that fails is refused with the `chmod 700` to run.
+  One process writes at a time (a second says so and exits), a
   write is a transaction, a store over 2 GiB refuses more writes, and the database opens
   with no network listener and no outside file access. The tables are migrated by number
   (version 2 adds `evidence`, `claims` and `claim_evidence`); a store written by an older

@@ -24,6 +24,7 @@
 //!   configuration, so no statement can turn them back on.
 
 use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::ops::Deref;
 use std::os::unix::fs::{
     DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _,
@@ -52,6 +53,9 @@ pub(crate) struct Limits {
     pub(crate) memory: &'static str,
     /// The engine's temporary files (spill), as `DuckDB` says it.
     pub(crate) temp: &'static str,
+    /// A folder of ours that an older build left open to others is closed to 0700 in place
+    /// instead of refused (the crawl store, which older builds made with the default mode).
+    pub(crate) close_loose: bool,
 }
 
 impl Limits {
@@ -61,6 +65,14 @@ impl Limits {
         max_bytes: 2 * 1024 * 1024 * 1024,
         memory: "1GB",
         temp: "1GB",
+        close_loose: false,
+    };
+
+    /// [`Self::STORE`] for the crawl store, whose folder older builds made open to others:
+    /// a loose folder of ours is closed, never accepted as it was.
+    pub(crate) const CRAWL: Self = Self {
+        close_loose: true,
+        ..Self::STORE
     };
 }
 
@@ -115,18 +127,19 @@ impl Deref for Db {
 /// # Errors
 ///
 /// The folder is not ours alone, or cannot be made.
-pub(crate) fn private_dir(dir: &Path) -> Result<(), OpenError> {
+pub(crate) fn private_dir(dir: &Path, close_loose: bool) -> Result<(), OpenError> {
     let io = |e| OpenError::Io(dir.to_owned(), e);
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(dir)
         .map_err(io)?;
-    check_dir(dir)
+    check_dir(dir, close_loose)
 }
 
-/// The checks of [`private_dir`] on a folder that must already be there.
-fn check_dir(dir: &Path) -> Result<(), OpenError> {
+/// The checks of [`private_dir`] on a folder that must already be there: not a link, ours, and
+/// closed to others (closed in place when it was not, saying so once on stderr).
+fn check_dir(dir: &Path, close_loose: bool) -> Result<(), OpenError> {
     // Not `metadata`: a link is looked at, not followed.
     let meta = std::fs::symlink_metadata(dir).map_err(|e| OpenError::Io(dir.to_owned(), e))?;
     if !meta.is_dir() {
@@ -138,7 +151,19 @@ fn check_dir(dir: &Path) -> Result<(), OpenError> {
     }
     let mode = meta.permissions().mode() & 0o777;
     if mode & 0o077 != 0 {
-        return Err(OpenError::Loose(dir.to_owned(), mode));
+        if !close_loose {
+            return Err(OpenError::Loose(dir.to_owned(), mode));
+        }
+        // A real folder of ours that an older build made with the default mode (0755): close
+        // it in place, so a store written before this check opens after the upgrade. Never
+        // accepted loose; a chmod that fails is the refusal, with the command to run.
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode & !0o077))
+            .map_err(|_| OpenError::Loose(dir.to_owned(), mode))?;
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "iohr: {} was open to others (mode {mode:o}); it is now 700",
+            dir.display()
+        );
     }
     Ok(())
 }
@@ -169,8 +194,8 @@ pub(crate) fn open(path: &Path, access: Access) -> Result<Db, OpenError> {
 pub(crate) fn open_with(path: &Path, access: Access, limits: Limits) -> Result<Db, OpenError> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     match access {
-        Access::Write => private_dir(dir)?,
-        Access::Read => check_dir(dir)?,
+        Access::Write => private_dir(dir, limits.close_loose)?,
+        Access::Read => check_dir(dir, limits.close_loose)?,
     }
     let lock = take_lock(path, access)?;
     let io = |e| OpenError::Io(path.to_owned(), e);
@@ -332,23 +357,25 @@ mod tests {
 
     #[test]
     #[allow(clippy::unwrap_used, reason = "tests fail by panicking")]
-    fn a_folder_open_to_others_is_refused_and_left_as_it_is() {
+    fn a_folder_open_to_others_is_refused_unless_the_store_closes_it_in_place() {
         let t = private_tmp();
         let dir = t.path().join("crawl");
         std::fs::create_dir(&dir).unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         let file = dir.join("kb.duckdb");
         for access in [Access::Write, Access::Read] {
             let e = open(&file, access).unwrap_err();
             assert!(matches!(e, OpenError::Loose(_, 0o755)), "{e}");
             assert!(e.to_string().contains("chmod 700"), "{e}");
+            assert_eq!(mode(&dir), 0o755, "the strict opener leaves it as it is");
         }
-        assert_eq!(
-            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
-            0o755,
-            "never changed behind the person's back"
-        );
         assert!(!file.exists(), "nothing was made in it");
+        drop(open_with(&file, Access::Write, Limits::CRAWL).unwrap());
+        assert_eq!(mode(&dir), 0o700, "closed, never left loose");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        drop(open_with(&file, Access::Read, Limits::CRAWL).unwrap());
+        assert_eq!(mode(&dir), 0o700);
     }
 
     #[test]

@@ -62,7 +62,7 @@ impl Paths {
             )));
         }
         // The one folder check (`safe_open`): ours alone, not a link, closed to others.
-        crate::safe_open::private_dir(&self.dir).map_err(std::io::Error::other)?;
+        crate::safe_open::private_dir(&self.dir, false).map_err(std::io::Error::other)?;
         Ok(())
     }
 }

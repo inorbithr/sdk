@@ -197,8 +197,12 @@ impl Store {
     /// A message when the file cannot be opened or made, the folder is loose, another process
     /// holds it, or a migration fails.
     pub fn open(path: &Path) -> Result<Self, String> {
-        let db = crate::safe_open::open(path, crate::safe_open::Access::Write)
-            .map_err(|e| format!("the local index: {e}"))?;
+        let db = crate::safe_open::open_with(
+            path,
+            crate::safe_open::Access::Write,
+            crate::safe_open::Limits::CRAWL,
+        )
+        .map_err(|e| format!("the local index: {e}"))?;
         let store = Self::held(db)?;
         migrate::apply(&store.conn)?;
         Ok(store)
@@ -212,8 +216,12 @@ impl Store {
     ///
     /// A message when the file cannot be opened, the folder is loose, or a writer holds it.
     pub fn open_read(path: &Path) -> Result<Self, String> {
-        let db = crate::safe_open::open(path, crate::safe_open::Access::Read)
-            .map_err(|e| format!("the local index: {e}"))?;
+        let db = crate::safe_open::open_with(
+            path,
+            crate::safe_open::Access::Read,
+            crate::safe_open::Limits::CRAWL,
+        )
+        .map_err(|e| format!("the local index: {e}"))?;
         Self::held(db)
     }
 

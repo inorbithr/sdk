@@ -513,7 +513,7 @@ pub fn ensure_crawl_dir(root: &Path) -> Result<(), String> {
     let dir = crawl_dir(root);
     #[cfg(unix)]
     {
-        crate::safe_open::private_dir(&dir).map_err(|e| e.to_string())
+        crate::safe_open::private_dir(&dir, true).map_err(|e| e.to_string())
     }
     #[cfg(not(unix))]
     {

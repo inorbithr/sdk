@@ -84,18 +84,46 @@ fn a_store_written_by_today_s_code_opens_after_migration_with_its_pages_and_chun
 }
 
 #[test]
-fn a_folder_open_to_others_is_refused_with_the_command_that_fixes_it() {
+fn a_loose_folder_holding_a_v1_store_is_closed_in_place_and_opens_with_its_pages_intact() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("crawl");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     let file = dir.join("kb.duckdb");
+    {
+        // What an older build left: the default folder mode, today's tables.
+        let old = Connection::open(&file).unwrap();
+        old.execute_batch(OLD_TABLES).unwrap();
+    }
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&dir), 0o755);
+    drop(Store::open(&file).unwrap());
+    assert_eq!(mode(&dir), 0o700, "closed in place, never left loose");
+    let conn = Connection::open(&file).unwrap();
+    assert_eq!(count(&conn, "pages"), 1);
+    assert_eq!(count(&conn, "chunks"), 1);
+    drop(conn);
+    // A reader on a loose folder closes it too.
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    drop(Store::open_read(&file).unwrap());
+    assert_eq!(mode(&dir), 0o700);
+}
+
+#[test]
+fn a_link_in_place_of_the_crawl_folder_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let real = tmp.path().join("real");
+    private(&real);
+    let link = tmp.path().join("crawl");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let file = link.join("kb.duckdb");
     let err = Store::open(&file).unwrap_err();
-    assert!(err.contains("chmod 700"), "{err}");
-    assert!(!file.exists(), "a refused folder gets no file");
-    // And a reader is refused the same way.
-    std::fs::write(&file, b"").unwrap();
-    assert!(Store::open_read(&file).unwrap_err().contains("chmod 700"));
+    assert!(err.contains("not a folder"), "{err}");
+    assert!(
+        !real.join("kb.duckdb").exists(),
+        "nothing was made behind the link"
+    );
+    assert!(Store::open_read(&file).is_err());
 }
 
 #[test]
