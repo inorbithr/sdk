@@ -361,7 +361,7 @@ impl Session {
     }
 
     /// The person's keys, when the box has a say in them. Returns whether it took them.
-    /// Option+h (or Ctrl-]) folds and brings back the box (on the alternate screen it is the program's);
+    /// Option+h (Alt+h off macOS; Ctrl-] too) folds and brings back the box (on the alternate screen it is the program's);
     /// Esc stops a running answer; with the focus, the box reads the keys, except the
     /// panel's own menu key and mouse reports.
     pub(super) fn chat_input(&mut self, bytes: &[u8]) -> bool {
