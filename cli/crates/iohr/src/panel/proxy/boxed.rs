@@ -330,6 +330,12 @@ impl Session {
         if want != self.proxy.pty_size {
             let _ = rustix::termios::tcsetwinsize(&self.master, winsize(want.0, want.1));
             self.proxy.pty_size = want;
+            // The phone sees the shell's size, which the box's rows change too.
+            if let (Some(p), Ok(r), Ok(c)) =
+                (&self.phone, u16::try_from(want.0), u16::try_from(want.1))
+            {
+                p.send(phone::Cmd::Resize(c, r));
+            }
         }
     }
 

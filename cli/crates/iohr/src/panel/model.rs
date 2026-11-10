@@ -16,6 +16,7 @@
 mod auto;
 mod entry;
 mod reader;
+mod share;
 mod work;
 
 use time::OffsetDateTime;
@@ -26,6 +27,8 @@ use super::input::OpenKey;
 use super::workloads::{Snapshot, Workload};
 use crate::card::Rgb;
 use crate::commands::asks::{PanelAsk, PanelAuto};
+use share::Share;
+pub(super) use share::Told;
 
 /// Where a piece of data stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,21 +143,33 @@ pub(super) enum Effect {
     StopWork(String),
     /// Fold the chat box or bring it back (Option+h, or Ctrl-]).
     ChatToggle,
+    /// Show this terminal on the phone (the Mac app's terminal host does the sharing).
+    ShareOn,
+    /// Stop showing it.
+    ShareOff,
+    /// The person turned typing from the phone on (`true`) or off: what the link offers.
+    Typing(bool),
     /// Stop the panel: the shell goes on without it.
     Stop,
 }
 
 /// The menu: label, key, view it opens.
-const MENU: [(&str, char, View); 8] = [
+const MENU: [(&str, char, View); 10] = [
     ("Auto mode", 'a', View::Auto),
     ("Approvals", 'p', View::Approvals),
     ("Workloads", 'w', View::Workloads),
     ("Run", 'r', View::Run),
     ("Status", 's', View::Status),
     ("Chat box", 'c', View::Rest),
+    ("Share to phone", 'h', View::Menu),
+    ("Let phone type", 't', View::Menu),
     ("Help", '?', View::Help),
     ("Stop panel", 'x', View::Rest),
 ];
+
+/// The menu rows that act in place (they keep the menu open).
+const SHARE_ROW: usize = 6;
+const TYPING_ROW: usize = 7;
 
 /// Rows of asks shown at once.
 const VISIBLE: usize = 5;
@@ -177,6 +192,8 @@ pub(super) struct Model {
     /// The page open in `View::Reader`.
     reader: Option<reader::Reader>,
     note: Option<String>,
+    /// This terminal on the phone (RFC 0193), as the Mac app last said.
+    share: share::Share,
     stub: bool,
     /// What the sessions registry and the coordinator's picture gave.
     pub(super) work: Source<Snapshot>,
@@ -204,6 +221,7 @@ impl Model {
             entry: None,
             reader: None,
             note: None,
+            share: share::Share::Off,
             stub,
             work: Source::Loading,
             work_rows: Vec::new(),
@@ -406,6 +424,11 @@ impl Model {
             self.view = View::Rest;
             return Effect::ChatToggle;
         }
+        match i {
+            SHARE_ROW => return self.share_toggle(),
+            TYPING_ROW => return self.typing_toggle(),
+            _ => {}
+        }
         self.view = view;
         self.note = None;
         if matches!(view, View::Approvals | View::Workloads) {
@@ -531,6 +554,11 @@ impl Model {
         let mut spans = self.mode_spans();
         spans.push(sp("   ", TXT));
         spans.extend(self.waiting_spans());
+        let shared = self.share_spans();
+        if !shared.is_empty() {
+            spans.push(sp("   ", TXT));
+            spans.extend(shared);
+        }
         spans.extend([
             sp("   ", TXT),
             sp(self.open_key.label(), KEY),
@@ -556,10 +584,12 @@ impl Model {
             ("›".into(), MUTE),
             ("›".into(), MUTE),
             (self.open_key.hide_label().into(), MUTE),
+            self.share_menu_right(),
+            self.typing_menu_right(),
             (String::new(), MUTE),
             (String::new(), MUTE),
         ];
-        let body = MENU
+        let mut body: Vec<Line> = MENU
             .iter()
             .zip(rights)
             .enumerate()
@@ -568,6 +598,20 @@ impl Model {
                 selected: i == self.menu_sel,
             })
             .collect();
+        // What sharing last said (no Mac app, the Mac's answer), wrapped, never cut.
+        if let Some(line) = self.share_line() {
+            let tint = if matches!(self.share, Share::Shared { .. }) {
+                MUTE
+            } else {
+                AMBER
+            };
+            for row in reader::wrap(&line, width.saturating_sub(4).max(8)) {
+                body.push(Line {
+                    spans: vec![sp(&format!("  {row}"), tint)],
+                    selected: false,
+                });
+            }
+        }
         let footer = vec![
             sp("↑↓", KEY),
             sp(" move   ", MUTE),
@@ -702,6 +746,7 @@ impl Model {
             row(open_key.hide_label(), "fold or bring back the chat box"),
             row("a d q o", "phone-approve, deny, ask, read"),
             row("d y", "deny an ask, then confirm"),
+            row("h t", "share to phone, let the phone type"),
             row("", "your command line is kept as is"),
         ];
         (
@@ -870,7 +915,7 @@ mod tests {
         let mut m = model(2);
         m.key(Key::Menu);
         m.key(Key::Up);
-        assert_eq!(m.menu_sel, 7, "wraps to Stop panel");
+        assert_eq!(m.menu_sel, 9, "wraps to Stop panel");
         m.key(Key::Down);
         assert_eq!(m.menu_sel, 0);
         let text = rows(&m);
