@@ -111,3 +111,8 @@ export function failure(status: number, reason: string, what: string): string {
   if (status === 429) return `Could not ${what}: too many tries. Wait a moment and try again.`;
   return `Could not ${what}: ${reason}`;
 }
+
+/** Why writes are off when the API cannot be reached; null while it can. Reads then show what the page last had. */
+export const OFFLINE_WHY =
+  "InOrbit cannot be reached from this computer, so changes are off. Reading works; try again when the connection is back.";
+export const offlineWhy = (online: boolean): string | null => (online ? null : OFFLINE_WHY);

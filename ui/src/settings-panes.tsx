@@ -344,6 +344,12 @@ function TeamsSection({ accounts }: { accounts: AccountsState }) {
 
 /** What the last write said, in words; a failure is an alert. */
 function WriteNote({ w }: { w: ReturnType<typeof useWrites> }) {
+  if (w.offline !== null)
+    return (
+      <p className="pt-2 text-[13px] text-destructive" role="status" data-write="offline">
+        {w.offline}
+      </p>
+    );
   if (w.note === null) return null;
   return (
     <p

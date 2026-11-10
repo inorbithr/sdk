@@ -13,6 +13,7 @@ import {
   isOpen,
   manages,
   memberRules,
+  offlineWhy,
   openInvites,
   personName,
   rememberAccount,
@@ -197,4 +198,13 @@ test("Settings writes only through apiSend and useWrites, never a raw fetch; swi
   assert.match(panes, /useWrites\(\)/);
   assert.match(read("lib/settings-data.ts"), /apiSend\(/);
   assert.match(read("lib/accounts-store.ts"), /rememberAccount\(/);
+});
+
+test("offline, writes are off with a plain reason; online there is none", () => {
+  assert.equal(offlineWhy(true), null);
+  assert.match(String(offlineWhy(false)), /cannot be reached.*changes are off.*Reading works/);
+  const data = readFileSync(new URL("../src/lib/settings-data.ts", import.meta.url), "utf8");
+  assert.match(data, /offlineWhy\(useOnline\(\)\)/);
+  const panes = readFileSync(new URL("../src/settings-panes.tsx", import.meta.url), "utf8");
+  assert.match(panes, /data-write="offline"/);
 });
