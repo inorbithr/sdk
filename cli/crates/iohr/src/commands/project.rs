@@ -25,13 +25,6 @@ use crate::template::{self, Answer, Answers, Kind, LANGUAGE, Question, Spec, Ste
 use crate::toolchain::{self, Lang, State};
 use crate::ui::{Choice, Mark, Nav, Ui, cancel};
 
-/// The project's own state: `~/.inorbit/projects/<name>/`, never inside the repository.
-pub(super) fn state_root() -> Result<PathBuf, Error> {
-    etcetera::home_dir()
-        .map(|h| h.join(".inorbit").join("projects"))
-        .map_err(|e| Error::Failed(format!("no home folder: {e}")))
-}
-
 /// The publisher half of the id: `--publisher`, else the account's slug when signed in,
 /// else `local`. The private listing takes it when that step lands.
 fn publisher_of(asked: Option<&str>, account: Option<&str>) -> String {
@@ -1520,8 +1513,14 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         steps.insert(st, agent_step);
     }
 
-    let state_root = state_root()?;
-    let state = state_root.join(name);
+    // Where the notes, the crawl and the machine state live (light PRD 0210): asked once,
+    // recorded in inorbit.toml, then every writer follows it through one resolver.
+    let placed = super::project_place::decide(a, &dir, name, interactive, ui)?;
+    let layout = placed.layout.clone();
+    let seed = super::project_place::split_seed(&placed, &mut files);
+    let state = layout
+        .state()
+        .ok_or_else(|| Error::Failed("cannot find the home folder".into()))?;
     let signed_in = flow
         .act_async("signin", "check your sign-in (one call to /v1/me)", || {
             check_sign_in(g, env, ui)
@@ -1596,6 +1595,14 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             }
             report.files = written;
             report.steps.push(st);
+            // The place: recorded, the machine state ignored when it sits in the project,
+            // the starter notes written where they belong.
+            let at = flow.act("place", &placed.would(), || placed.apply(&dir, &seed));
+            match at {
+                Some(Ok(st)) => report.steps.push(st),
+                Some(Err(e)) => return Err(Error::Failed(e)),
+                None => {}
+            }
             report
                 .steps
                 .push(project_space::step(synced.as_ref(), &env_name));
@@ -1690,10 +1697,36 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
         report.steps.push(st);
     }
-    // A public site, read on this machine when the person said so (PRD 0190.1).
-    if let Some(plan) =
-        super::init_crawl::decide(&a.crawl, describe.as_deref(), interactive, ui, out)?
+    // The project's shape (PRD 0210): asked once, recorded, and filed as an item in the plan.
+    // A dry run asks nothing and only says what it would do.
     {
+        let answer = if dry {
+            a.place_args.shape.clone()
+        } else {
+            super::project_shape::pick(a.place_args.shape.as_deref(), interactive, ui, &dir)?
+        };
+        let what = super::project_shape::would(answer.as_deref());
+        let st = flow
+            .act_async("shape", &what, || {
+                super::project_shape::run(g, env, &dir, answer.as_deref())
+            })
+            .await;
+        if let Some(st) = st {
+            if st.state == "skipped" && !out.json {
+                ui.note("Planner", &st.said);
+            }
+            report.steps.push(st);
+        }
+    }
+    // A public site, read on this machine when the person said so (PRD 0190.1).
+    if let Some(plan) = super::init_crawl::decide(
+        &a.crawl,
+        describe.as_deref(),
+        &layout.shown(&layout.crawl()),
+        interactive,
+        ui,
+        out,
+    )? {
         let what = plan.would();
         let st = flow
             .act_async("crawl", &what, || {
@@ -1730,7 +1763,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 );
                 let sp = (!dry).then(|| ui.step("Registering the project"));
                 let r = flow.act("register", &what, || {
-                    project::register_step(&dir, &state_root, name, &tpl.meta.id, &created_at)
+                    project::register_in(&dir, &state, name, &tpl.meta.id, &created_at)
                 });
                 match r {
                     Some(Ok((_, st))) => {
