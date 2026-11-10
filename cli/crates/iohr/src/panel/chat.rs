@@ -238,6 +238,15 @@ pub(super) struct Chat {
     mode: String,
     last: String,
     paste: bool,
+    /// The start of a key sequence that was cut at the end of a read, kept for the next one.
+    held: Vec<u8>,
+    /// Nothing the person typed is on the shell's line: `? text` may open the box with its text.
+    clean: bool,
+    /// Keys went to the shell while it was not at its prompt (type-ahead): its next line is
+    /// not clean.
+    ahead: bool,
+    /// What the hide key is called on this terminal (`OpenKey::hide_label`).
+    hide_label: &'static str,
 }
 
 impl Chat {
@@ -259,7 +268,16 @@ impl Chat {
             mode: String::new(),
             last: String::new(),
             paste: false,
+            held: Vec::new(),
+            clean: false,
+            ahead: false,
+            hide_label: "\u{2325}h",
         }
+    }
+
+    /// Names the hide and show key as this terminal sends it.
+    pub(super) fn set_hide_label(&mut self, label: &'static str) {
+        self.hide_label = label;
     }
 
     /// The box can be shown or folded at all.
@@ -368,6 +386,8 @@ impl Chat {
             Msg::Idle { mode, ring } => {
                 self.hook_seen = true;
                 self.at_prompt = true;
+                self.clean = !self.ahead;
+                self.ahead = false;
                 self.delivered = None;
                 self.run = None;
                 self.back = false;
@@ -438,12 +458,51 @@ impl Chat {
         }
     }
 
-    /// The person's bytes while the box has focus.
+    /// The person's bytes while the box has focus. A key sequence cut at the end of the read
+    /// (`ESC [`, a UTF-8 lead byte) waits for the rest in the next one; a lone `ESC` is the
+    /// Esc key.
     pub(super) fn feed(&mut self, bytes: &[u8], now: Instant) -> Vec<Do> {
-        parse(bytes, &mut self.paste)
+        let mut data = std::mem::take(&mut self.held);
+        data.extend_from_slice(bytes);
+        let cut = data.len() - unfinished(&data);
+        self.held = data.split_off(cut);
+        parse(&data, &mut self.paste)
             .into_iter()
             .map(|k| self.press(&k, now))
             .collect()
+    }
+
+    /// Bytes of the person's went to the shell: its line is no longer clean.
+    pub(super) fn forwarded(&mut self) {
+        if self.at_prompt {
+            self.clean = false;
+        } else {
+            self.ahead = true;
+        }
+    }
+
+    /// `? text`, `?? text`, as one write or a bracketed paste, at a clean prompt: the shell's
+    /// `?` key never sees it (a paste skips key bindings), so the box takes it: it gets the
+    /// focus with the text, and nothing goes to the shell's line. Returns the box's answers
+    /// when it took the bytes.
+    pub(super) fn open_with(&mut self, bytes: &[u8], now: Instant) -> Option<Vec<Do>> {
+        if self.focus || !self.open() || !self.at_prompt || !self.clean || self.run.is_some() {
+            return None;
+        }
+        let (paste, rest) = match bytes.strip_prefix(b"\x1b[200~") {
+            Some(rest) => (true, rest),
+            None => (false, bytes),
+        };
+        let rest = rest.strip_prefix(b"?")?;
+        let (deeper, rest) = match rest.strip_prefix(b"?") {
+            Some(rest) => (true, rest),
+            None => (false, rest),
+        };
+        let rest = rest.strip_prefix(b" ")?;
+        self.focus_input();
+        self.deeper = deeper;
+        self.paste = paste;
+        Some(self.feed(rest, now))
     }
 
     /// One key.
@@ -579,7 +638,8 @@ impl Chat {
             bold(&chip, self.mode_color()),
         ];
         let title_len = 2 + 4 + 2 + chip.chars().count();
-        let right_text = "⌄ hide ^]";
+        let right_text = format!("⌄ hide {}", self.hide_label);
+        let right_text = right_text.as_str();
         let right = vec![sp(right_text, MUTE)];
         let right_len = right_text.chars().count();
         // The same test `lay_out` makes: the right header goes first when the title is long.
@@ -694,7 +754,7 @@ impl Chat {
                     sp(" deeper  ", MUTE),
                     key("⇧tab"),
                     sp(&format!(" mode: {}  ", self.mode_name()), MUTE),
-                    key("^]"),
+                    key(self.hide_label),
                     sp(" hide", MUTE),
                 ]
             };
@@ -768,7 +828,7 @@ impl Chat {
         } else {
             spans.push(bold("iohr ", ACC));
         }
-        spans.push(bold("^]", KEY));
+        spans.push(bold(self.hide_label, KEY));
         spans.push(sp(" shows the box ", MUTE));
         spans
             .iter()
@@ -837,6 +897,36 @@ fn bar(width: usize, run: &Run, elapsed: Duration) -> Vec<Span> {
         sp(&"━".repeat(head), ACC),
         sp(&"─".repeat(travel - at), FAINT),
     ]
+}
+
+/// How many bytes at the end of `bytes` are the start of a key that the next read finishes:
+/// `ESC [` or `ESC O` and its parameters with no final byte, or a UTF-8 character with its
+/// tail missing. A lone `ESC` is not one: it is the Esc key.
+fn unfinished(bytes: &[u8]) -> usize {
+    const MAX_HELD: usize = 32;
+    if let Some(esc) = bytes.iter().rposition(|b| *b == 0x1b) {
+        let tail = &bytes[esc..];
+        if tail.len() >= 2
+            && matches!(tail[1], b'[' | b'O')
+            && !tail[2..].iter().any(|b| (0x40..=0x7e).contains(b))
+            && tail.len() <= MAX_HELD
+        {
+            return tail.len();
+        }
+    }
+    let n = bytes.len();
+    for back in 1..=3.min(n) {
+        let b = bytes[n - back];
+        let need = match b {
+            0xc0..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf7 => 4,
+            0x80..=0xbf => continue,
+            _ => return 0,
+        };
+        return if back < need { back } else { 0 };
+    }
+    0
 }
 
 /// The keys in `bytes`; `paste` is whether a bracketed paste is open (kept between reads).

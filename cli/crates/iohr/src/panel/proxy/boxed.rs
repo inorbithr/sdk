@@ -361,7 +361,7 @@ impl Session {
     }
 
     /// The person's keys, when the box has a say in them. Returns whether it took them.
-    /// Ctrl-] folds and brings back the box (on the alternate screen it is the program's);
+    /// Option+h (or Ctrl-]) folds and brings back the box (on the alternate screen it is the program's);
     /// Esc stops a running answer; with the focus, the box reads the keys, except the
     /// panel's own menu key and mouse reports.
     pub(super) fn chat_input(&mut self, bytes: &[u8]) -> bool {
@@ -369,7 +369,7 @@ impl Session {
         if p.stopped || p.screen.alt() || !p.chat.available() {
             return false;
         }
-        if bytes == [0x1d] {
+        if OpenKey::is_hide(bytes) {
             self.proxy.chat.toggle();
             self.redraw();
             return true;
@@ -381,6 +381,28 @@ impl Session {
             self.redraw();
             return true;
         }
+        // The box has the keys only while it is on the screen: with its rows given back (a
+        // small terminal, a resize) nothing shows that it holds them.
+        if p.chat.focus && !p.reserved {
+            self.proxy.chat.focus = false;
+            return false;
+        }
+        let p = &self.proxy;
+        if !p.chat.focus
+            && p.reserved
+            && !p.model.open()
+            && !self.reader.pending()
+            && !input::is_mouse_report(bytes)
+            && !p.model.open_key().is(bytes)
+            && let Some(dos) = self.proxy.chat.open_with(bytes, now)
+        {
+            for d in dos {
+                self.apply_do(d);
+            }
+            self.redraw();
+            return true;
+        }
+        let p = &self.proxy;
         if !p.chat.focus
             || p.model.open()
             || self.reader.pending()
