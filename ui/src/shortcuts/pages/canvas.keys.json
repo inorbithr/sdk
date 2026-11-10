@@ -17,6 +17,7 @@
     { "id": "canvas-ask", "label": "Ask", "accel": "Q" },
     { "id": "canvas-suggest", "label": "Suggest a change", "accel": "U" },
     { "id": "canvas-panel", "label": "Show or hide the side panel", "accel": "Alt+P" },
-    { "id": "canvas-cancel", "label": "Cancel the tool", "accel": "Escape" }
+    { "id": "canvas-edit", "label": "Edit the selected item", "accel": "Enter" },
+    { "id": "canvas-cancel", "label": "Cancel the tool or leave edit", "accel": "Escape" }
   ]
 }

@@ -367,3 +367,19 @@ export function moveEnd(c: Canvas, id: string, which: "start" | "end", to: Pt): 
   delete next[which];
   return { ...c, items: c.items.map((i) => (i.item_id === id ? next : i)) };
 }
+
+/** The id of the one selected item that has text to edit (a note, frame or shape), or null: what Enter opens. */
+export function editTarget(c: Canvas, sel: readonly string[]): string | null {
+  if (sel.length !== 1) return null;
+  const it = c.items.find((i) => i.item_id === sel[0]);
+  return it && (it.type === "note" || it.type === "frame" || it.type === "shape") ? it.item_id : null;
+}
+
+/** The accessible name of an item: its type and a short title, never a note's body text. */
+export function itemLabel(it: Item): string {
+  const t = it.title.trim().slice(0, 60);
+  return t ? `${it.type}: ${t}` : it.type;
+}
+
+/** The DOM id an item is given, so the board host can name the selected one in aria-activedescendant. */
+export const itemDomId = (id: string) => `cv-item-${id}`;

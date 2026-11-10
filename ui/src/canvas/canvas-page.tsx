@@ -32,10 +32,13 @@ import {
   boundsOf,
   connect,
   duplicate,
+  editTarget,
   endpoints,
   HANDLES,
   type Handle,
   hitTest,
+  itemDomId,
+  itemLabel,
   itemsInRect,
   makeFrame,
   makeNote,
@@ -322,6 +325,10 @@ function Editor({ id }: { id: string }) {
     "canvas-fit-selection": () => fitTo(canvas ? boundsOf(canvas, sel) : null),
     "canvas-fit-all": () => fitTo(canvas ? boundsOf(canvas) : null),
     "canvas-delete": remove,
+    "canvas-edit": () => {
+      const id = canvas ? editTarget(canvas, sel) : null;
+      if (id) setEditing(id);
+    },
     "canvas-note": () => pick("note"),
     "canvas-arrow": () => setTool("arrow"),
     "canvas-cancel": () => {
@@ -551,8 +558,10 @@ function Editor({ id }: { id: string }) {
         <div
           ref={host}
           data-canvas-board
-          role="tree"
+          role="listbox"
           aria-label="Canvas board"
+          aria-multiselectable="true"
+          aria-activedescendant={sel[0] ? itemDomId(sel[0]) : undefined}
           className="bg-muted/40 relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden rounded-md border outline-none"
           style={{ cursor }}
           tabIndex={0}
@@ -817,8 +826,11 @@ function ItemView({
       <div
         className={cn("absolute rounded-md border-2 border-dashed", TONE[it.tone ?? "plain"], "bg-opacity-30", ring)}
         style={box}
-        role="document"
-        aria-label={it.type}
+        role="option"
+        id={itemDomId(it.item_id)}
+        aria-selected={selected}
+        tabIndex={-1}
+        aria-label={itemLabel(it)}
         onDoubleClick={onEdit}
       >
         {detail !== "block" ? <div className="px-2 pt-1 text-[12px] font-medium opacity-70">{it.title}</div> : null}
@@ -830,8 +842,11 @@ function ItemView({
       <div
         className={cn("absolute rounded-sm border shadow-sm", TONE[it.tone ?? "amber"], ring)}
         style={box}
-        role="document"
-        aria-label={it.type}
+        role="option"
+        id={itemDomId(it.item_id)}
+        aria-selected={selected}
+        tabIndex={-1}
+        aria-label={itemLabel(it)}
         onDoubleClick={onEdit}
       >
         {body}
@@ -847,8 +862,11 @@ function ItemView({
           ring,
         )}
         style={box}
-        role="document"
-        aria-label={it.type}
+        role="option"
+        id={itemDomId(it.item_id)}
+        aria-selected={selected}
+        tabIndex={-1}
+        aria-label={itemLabel(it)}
         onDoubleClick={onEdit}
       >
         {body}
