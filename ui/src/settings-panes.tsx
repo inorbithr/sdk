@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { resetAll } from "./frame/arrange.ts";
 import { cn } from "./frame/cn.ts";
 import { closeDock, openDock } from "./frame/dock-frame.ts";
-import { FRAME_SHORTCUTS, LAYOUT_SHORTCUTS, symbols } from "./frame/shortcuts.ts";
 import { type SidebarMode, setMode } from "./frame/sidebar-frame.ts";
 import type { SessionState } from "./lib/api.ts";
 import { updateArrangement, useArrangement } from "./lib/arrange-store.ts";
@@ -14,6 +13,7 @@ import type { Space } from "./lib/home-core.ts";
 import { homeReads } from "./lib/home-data.ts";
 import { HELD, heldNow, type Pane } from "./lib/settings-core.ts";
 import { type Member, settingsReads, useRead } from "./lib/settings-data.ts";
+import { ShortcutList } from "./shortcuts-view.tsx";
 import { updateSidebar, useSidebar } from "./lib/sidebar-store.ts";
 import { setThemeChoice, useThemeChoice } from "./lib/theme.ts";
 import { CHOICES } from "./lib/theme-core.ts";
@@ -298,20 +298,7 @@ export function Projects({ session, onSignIn }: PaneProps) {
 }
 
 export function Keyboard() {
-  const table = (rows: { id: string; label: string; accel: string }[]) =>
-    rows.map((s) => (
-      <Row key={s.id} label={s.label}>
-        <kbd className="bg-muted rounded px-1.5 py-0.5 font-mono text-[12px]">{symbols(s.accel)}</kbd>
-      </Row>
-    ));
-  return (
-    <>
-      <Section title="Frame">{table(FRAME_SHORTCUTS)}</Section>
-      <Section title="Window layout" note="Only where the window is wide enough to arrange.">
-        {table(LAYOUT_SHORTCUTS)}
-      </Section>
-    </>
-  );
+  return <ShortcutList pages={["home", "settings"]} />;
 }
 
 export function Features({ onEdit }: PaneProps) {

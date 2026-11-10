@@ -32,6 +32,8 @@ import { ARRANGE_MIN_WIDTH, Frame, useViewportWidth } from "./frame/frame.tsx";
 import { GridPicker } from "./frame/grid-picker.tsx";
 import { PanelFrame } from "./frame/panel-frame.tsx";
 import { useShortcuts } from "./lib/use-shortcuts.ts";
+import { HelpOverlay, Palette, type PaletteItem, keysShown } from "./shortcuts-view.tsx";
+import { BINDINGS } from "./lib/shortcut-tables.ts";
 import { toggleHidden } from "./frame/sidebar-frame.ts";
 import { Home } from "./home.tsx";
 import { updateArrangement as updateArr, useArrangement } from "./lib/arrange-store.ts";
@@ -144,8 +146,16 @@ export function App() {
   const openGrid = () => setGridAt((at) => (at ? null : layoutButton.current));
   const layoutActions = { layout: pick, grid: openGrid, back: () => updateArr(back) };
 
+  const [help, setHelp] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const toggleHelp = () => setHelp((h) => !h);
   useShortcuts("global", {
     sidebar: () => update(toggleHidden),
+    palette: () => setPalette((p) => !p),
+    shortcuts: toggleHelp,
+    "shortcuts-help": toggleHelp,
+    "go-home": () => goTo(HOME),
+    "go-settings": () => goTo("settings"),
     ...(wide
       ? {
           "layout-left": () => pick("left"),
@@ -182,6 +192,14 @@ export function App() {
     const panel = panels.find((p) => `ext:${p.name}` === key);
     if (panel) choose(panel);
   };
+  const pageIds = ["home", "settings"];
+  const paletteItems: PaletteItem[] = [
+    ...pages.map((p) => {
+      const go = BINDINGS.find((b) => b.page === (p.key === HOME ? "home" : p.key));
+      return { id: `go:${p.key}`, label: `Go to ${p.title}`, hint: go ? keysShown(go) : undefined, run: () => goTo(p.key) };
+    }),
+    { id: "help", label: "Keyboard shortcuts", hint: "?", run: () => setHelp(true) },
+  ];
   const orbitActions = {
     go: goTo,
     add: (k: string) => updateOrbits((o) => addOrbit(o, k)),
@@ -471,6 +489,8 @@ export function App() {
           )}
         </div>
       </Frame>
+      {help ? <HelpOverlay pages={pageIds} onClose={() => setHelp(false)} /> : null}
+      {palette ? <Palette items={paletteItems} onClose={() => setPalette(false)} /> : null}
       {gridAt ? <GridPicker at={gridAt} onPick={pickSpan} onClose={() => setGridAt(null)} /> : null}
       {editing ? (
         <MaintenanceForm id={editing} onSave={(why) => putDown(editing, why)} onClose={() => setEditing(null)} />
