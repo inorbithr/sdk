@@ -38,3 +38,4 @@ export function setDockWidth<S extends DockFrame>(s: S, w: number, win?: number)
 
 export const toggleDock = <S extends DockFrame>(s: S): S => ({ ...s, open: !s.open });
 export const closeDock = <S extends DockFrame>(s: S): S => (s.open ? { ...s, open: false } : s);
+export const openDock = <S extends DockFrame>(s: S): S => (s.open ? s : { ...s, open: true });

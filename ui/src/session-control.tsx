@@ -5,7 +5,7 @@ import type { SessionState } from "./lib/api.ts";
 // Who this page acts as, and the sign-in and sign-out (RFC 0217, round 4). Sign-in is `iohr login --web`: the person's
 // browser opens and the local `iohr ui serve` keeps the credential, never this page.
 const button =
-  "hover:bg-accent hover:text-foreground text-muted-foreground flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] disabled:opacity-50 [&>svg]:size-3.5";
+  "hover:bg-accent hover:text-foreground text-muted-foreground flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[13px] disabled:opacity-50 [&>svg]:size-3.5";
 
 export function SessionControl({
   session,
@@ -29,14 +29,14 @@ export function SessionControl({
     return (
       <div className="flex items-center gap-1">
         <span
-          className="text-muted-foreground max-w-48 truncate px-2 text-[13px]"
+          className="text-muted-foreground max-w-48 truncate px-2 text-[13px] @max-[640px]:hidden"
           title={`${session.profile} · ${session.subject}`}
         >
           {session.account === "" ? session.subject : session.account}
         </span>
-        <button type="button" className={button} disabled={busy} onClick={onSignOut}>
+        <button type="button" aria-label="Sign out" className={button} disabled={busy} onClick={onSignOut}>
           <LogOut aria-hidden="true" />
-          Sign out
+          <span className="@max-[640px]:hidden">Sign out</span>
         </button>
       </div>
     );
@@ -48,10 +48,43 @@ export function SessionControl({
           Sign-in failed
         </span>
       ) : null}
-      <button type="button" className={cn(button, "text-foreground")} disabled={busy || waiting} onClick={onSignIn}>
+      <button
+        type="button"
+        aria-label={waiting ? "Finish in your browser" : "Sign in"}
+        className={cn(button, "text-foreground")}
+        disabled={busy || waiting}
+        onClick={onSignIn}
+      >
         <LogIn aria-hidden="true" />
-        {waiting ? "Finish in your browser…" : "Sign in"}
+        <span className="@max-[640px]:hidden">{waiting ? "Finish in your browser…" : "Sign in"}</span>
       </button>
+    </div>
+  );
+}
+
+/** The rail's footer, as the Mac app's avatar at the bottom of the rail: who the page acts as, nothing else. */
+export function RailAccount({ session, rail }: { session: SessionState | null; rail: boolean }) {
+  const name = session?.state === "signed-in" ? (session.account === "" ? session.subject : session.account) : null;
+  const label =
+    name ??
+    (session === null ? "Checking sign-in…" : session.state === "unreachable" ? "Not connected" : "Not signed in");
+  const initial = name ? name.trim().charAt(0).toUpperCase() : "?";
+  return (
+    <div
+      className={cn("flex items-center gap-2 text-[13px]", rail && "justify-center")}
+      title={label}
+      data-account={name === null ? "none" : "signed-in"}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "flex size-7 shrink-0 items-center justify-center rounded-full text-[12px] font-medium",
+          name ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+        )}
+      >
+        {initial}
+      </span>
+      {rail ? <span className="sr-only">{label}</span> : <span className="min-w-0 flex-1 truncate">{label}</span>}
     </div>
   );
 }
