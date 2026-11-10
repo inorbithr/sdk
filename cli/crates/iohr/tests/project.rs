@@ -1797,10 +1797,26 @@ fn init_no_plan_and_plan_id_and_dry_run() {
 }
 
 #[test]
-fn the_demo_template_has_no_plan_step() {
+fn the_demo_template_names_why_its_plan_id_is_not_written_down() {
     let h = tempfile::tempdir().unwrap();
     let (out, dir, v) = made(h.path(), "plaindemo", &["--template", "demo"]);
     assert!(out.status.success(), "{}", text(&out));
     assert!(!dir.join("coordination.toml").exists());
-    assert!(plan_step(&v).is_null(), "{v}");
+    // The plan is still made or found (the shape item is filed in it), so the step always
+    // prints a mark or a reason; signed out, it is a skip that says why.
+    let st = plan_step(&v);
+    assert!(!st.is_null(), "{v}");
+    assert_eq!(st["state"], "skipped", "{v}");
+    assert!(st["said"].as_str().is_some_and(|s| !s.is_empty()), "{v}");
+}
+
+#[test]
+fn a_blank_project_kept_local_makes_no_plan_and_says_so() {
+    let h = tempfile::tempdir().unwrap();
+    let (out, dir, v) = made(h.path(), "localdemo", &["--template", "demo", "--no-sync"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!dir.join("coordination.toml").exists());
+    let st = plan_step(&v);
+    assert_eq!(st["state"], "skipped", "{v}");
+    assert!(st["said"].as_str().unwrap().contains("--no-sync"), "{v}");
 }

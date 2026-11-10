@@ -2446,11 +2446,13 @@ pub struct InitArgs {
 #[derive(Debug, Args)]
 pub struct InitPlaceArgs {
     /// Keep the project's notes (ADRs, memory), the crawl and the state in the project
-    /// folder (`project`: `.inorbit/`, travels with the repository) or in your home folder
-    /// (`home`: `~/.inorbit/projects/NAME/`, stays on this machine). The answer is written to
+    /// folder (`project`: `.inorbit/`, travels with the repository), in your home folder
+    /// (`home`: `~/.inorbit/projects/NAME/`, stays on this machine) or in a folder you name
+    /// (`~/notes/shop`, `../shared`, `/srv/shop`: `~` is your home, a relative path starts at
+    /// the project; the folder is made when the run is confirmed). The answer is written to
     /// `[project] data` in inorbit.toml and every later command follows it. At a terminal it
     /// is asked once; without a choice the layout older versions made stays as it is.
-    #[arg(long = "keep-in", value_name = "WHERE", env = "IOHR_INIT_KEEP_IN", value_parser = ["project", "home"])]
+    #[arg(long = "keep-in", value_name = "WHERE", env = "IOHR_INIT_KEEP_IN")]
     pub keep_in: Option<String>,
     /// When the place changes, copy what the old place holds into the new one (nothing is
     /// ever deleted, nothing already there is overwritten). At a terminal it is offered.
