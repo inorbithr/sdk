@@ -1,0 +1,17 @@
+{
+  "scope": "planner",
+  "title": "Planner",
+  "page": "planner",
+  "where": "On the Planner",
+  "rows": [
+    { "id": "planner-mode-plan", "label": "Plan view", "accel": "1" },
+    { "id": "planner-mode-progress", "label": "Progress view", "accel": "2" },
+    { "id": "planner-mode-canvas", "label": "Canvas view", "accel": "3" },
+    { "id": "planner-mode-preview", "label": "Preview view", "accel": "4" },
+    { "id": "planner-mode-write", "label": "Write view", "accel": "5" },
+    { "id": "planner-mode-decisions", "label": "Decisions view", "accel": "6" },
+    { "id": "planner-mode-explore", "label": "Explore view", "accel": "7" },
+    { "id": "planner-search", "label": "Search the plans", "accel": "/" },
+    { "id": "planner-chat", "label": "Show or hide the coordinator chat", "accel": "Alt+C" }
+  ]
+}
