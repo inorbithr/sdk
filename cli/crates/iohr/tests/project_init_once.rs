@@ -61,11 +61,15 @@ fn on_screen(s: &vt100::Screen, text: &str) -> bool {
     s.contents().contains(text)
 }
 
-/// How often `needle` was drawn as a finished prompt (a question answered prints `◇`).
+/// How often `needle` was drawn as a finished prompt: a question answered prints `◇`, or `o`
+/// where the locale is not UTF-8 and cliclack falls back to ASCII (CI, a bare server). The
+/// question being asked prints another mark (`◆` or `*`), so it is never counted.
 fn answered(s: &Session, needle: &str) -> usize {
-    plain(&s.transcript)
-        .matches(&format!("\u{25c7}  {needle}"))
-        .count()
+    let text = plain(&s.transcript);
+    ["\u{25c7}", "o"]
+        .iter()
+        .map(|mark| text.matches(&format!("{mark}  {needle}")).count())
+        .sum()
 }
 
 /// The text without colour sequences.
