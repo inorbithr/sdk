@@ -1,0 +1,7 @@
+@@IGNORE@@
+.DS_Store
+dist/
+# Secrets never live in the repository: `.env.example` names the variables, you set them.
+.env
+.env.*
+!.env.example

@@ -1,0 +1,68 @@
+# The agent template as data (PRD 0088.1, ADR 0221): a small agent loop with the three limits a
+# team asks about first: a budget (steps, tool calls, tokens), an allow-list of tools and an
+# approval step for any tool that changes something. Python on uv and TypeScript on Node, each
+# on its standard library alone. The model is a scripted stub, labelled as one, so the project
+# runs and tests offline and holds no API key; swap in your provider behind `Model.next`. The
+# enterprise floor (CI, signed and attested release, SBOM, dependency updates, secret scan)
+# comes from `floor`.
+#
+# The test of each variant is the passes-on-init check: a scripted run finishes within budget; a
+# run that would pass a budget stops with a named reason; a tool outside the allow-list is
+# refused and never runs; a tool that needs approval does not run without an answer. A variant
+# is `live` only when that test passes.
+id = "agent"
+description = "An agent loop with a budget, a tool allow-list and approval for risky tools (Python or TypeScript)"
+status = "live"
+extends = "floor"
+kind = "agent"
+default_variant = "python"
+agent_prompt = "This folder is a fresh InOrbit project from the `@@TEMPLATE@@` template: an agent loop in @@LANGUAGE_LABEL@@ (@@SOURCE@@). Build what is described below by editing this folder. Keep the budget, the allow-list and the approval step in the loop, mark every tool that writes, sends or deletes as needing approval, never log a tool argument or result, never add an API key to the project, and keep the test passing (@@RUN_TEST@@)."
+
+[[variants]]
+id = "python"
+label = "Python 3.12 or newer on uv (standard library only)"
+status = "live"
+needs = ["python3"]
+toolchain = ["python3", "--version"]
+agent_allow = ["python3 -m unittest", "python3 -m py_compile", "uv lock", "uv build"]
+smoke = "test"
+test = ["python3", "-m", "unittest", "discover", "-s", "tests"]
+[variants.env]
+PYTHONPATH = "$DIR/src"
+PYTHONDONTWRITEBYTECODE = "1"
+[variants.vars]
+SOURCE = "src/@@MODULE@@/, tests in tests/"
+IGNORE = "__pycache__/\n*.pyc\n.venv/\n*.egg-info/"
+RUN_TEST = "`python3 -m unittest discover -s tests` with PYTHONPATH=src"
+README_TEST = "PYTHONPATH=src python3 -m unittest discover -s tests"
+RUN = "PYTHONPATH=src python3 -m @@MODULE@@"
+TOOLCHAIN_MINOR = "3.12"
+LAYOUT = '''- `src/@@MODULE@@/agent.py`: the loop, the budget and the stop reasons.
+- `src/@@MODULE@@/tools.py`: your tools, the allow-list and which tools need approval.
+- `src/@@MODULE@@/model.py`: the scripted stub model; replace it with your provider.
+- `src/@@MODULE@@/__main__.py`: runs one task and prints the outcome.
+- `tests/test_agent.py`: the passes-on-init test.
+- `uv.lock`: the lockfile (`uv lock` refreshes it).'''
+
+[[variants]]
+id = "typescript"
+label = "TypeScript on Node 22.18 or newer (standard library only)"
+status = "live"
+needs = ["node"]
+toolchain = ["node", "--version"]
+agent_allow = ["node --test", "node --check", "npm test"]
+smoke = "test"
+test = ["node", "--test", "tests/**/*.test.ts"]
+[variants.vars]
+SOURCE = "src/, tests in tests/"
+IGNORE = "node_modules/"
+RUN_TEST = "`node --test 'tests/**/*.test.ts'`"
+README_TEST = "node --test 'tests/**/*.test.ts'"
+RUN = "node src/main.ts"
+TOOLCHAIN_MINOR = "22.18"
+LAYOUT = '''- `src/agent.ts`: the loop, the budget and the stop reasons. Node runs the TypeScript as it is (22.18 or newer): nothing to build.
+- `src/tools.ts`: your tools, the allow-list and which tools need approval.
+- `src/model.ts`: the scripted stub model; replace it with your provider.
+- `src/main.ts`: runs one task and prints the outcome.
+- `tests/agent.test.ts`: the passes-on-init test.
+- `package-lock.json`: the lockfile.'''

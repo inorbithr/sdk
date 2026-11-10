@@ -2342,6 +2342,26 @@ pub struct InitPlanArgs {
     pub no_plan: bool,
 }
 
+/// What `project init --ci` takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InitCi {
+    /// Write the GitHub Actions workflows and the dependency updates.
+    Github,
+    /// Write none of them.
+    None,
+}
+
+impl InitCi {
+    /// The answer the template reads.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Github => "github",
+            Self::None => "none",
+        }
+    }
+}
+
 /// The flags of `project init`: one struct, boxed in [`ProjectCommand::Init`] because the
 /// variant is far larger than its siblings (clippy `large_enum_variant`, seen on Windows where
 /// `PathBuf` is wider).
@@ -2355,7 +2375,7 @@ pub struct InitArgs {
     /// The template: an id (`iohr project template list` shows them), a folder
     /// (`./my-template`), or a git repository (`gh:owner/repo[//subdir][@ref]`,
     /// `git:URL[//subdir][@ref]`). Default: `[project] template` in iohr's config.toml,
-    /// else coordinated. A template that is coming says so and refuses. At a terminal, leaving
+    /// else service. A template that is coming says so and refuses. At a terminal, leaving
     /// it out offers the templates as a menu.
     #[arg(long)]
     pub template: Option<String>,
@@ -2424,6 +2444,14 @@ pub struct InitArgs {
     /// Skip the smoke test (it runs the project once with the language's own runtime).
     #[arg(long)]
     pub no_smoke: bool,
+    /// The CI files: `github` writes the workflows, the release and the dependency updates
+    /// (every template but `blank`, which writes none unless you say `github`); `none`
+    /// writes none of them. The rest of the enterprise floor stays.
+    #[arg(long, value_enum)]
+    pub ci: Option<InitCi>,
+    /// Also show the templates that are not ready (coming) in the menu.
+    #[arg(long)]
+    pub experimental: bool,
     /// Do not write the starter IO.md at the project root.
     ///
     /// `IO.md` is the file `?` and `??` read for context in this folder, like a CLAUDE.md:
@@ -2640,9 +2668,14 @@ pub enum TemplateCommand {
     /// List the templates `init` accepts.
     ///
     /// The templates `init` and `create` accept: name, live or coming, where each comes
-    /// from, which one is the default (`[project] template` in config.toml, else coordinated) and
-    /// what it is. `--json` prints the same as a list.
-    List,
+    /// from, which one is the default (`[project] template` in config.toml, else service) and
+    /// what it is. `--json` prints the same as a list. `--all` adds the hidden ones (demo and
+    /// coordinated, still there by name) and the ones that are coming.
+    List {
+        /// Also the hidden and the coming templates.
+        #[arg(long)]
+        all: bool,
+    },
     /// Show what a template asks, writes and runs.
     ///
     /// Show one template: where it comes from, what it extends, every question (id, type,

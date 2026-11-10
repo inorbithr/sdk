@@ -1,0 +1,71 @@
+# The MCP server template as data (PRD 0088.1, ADR 0221): a server on the official MCP SDK, not on
+# one of ours, at a version that names the 2026-07-28 revision of the protocol: Python `mcp` 2.3.0
+# and TypeScript `@modelcontextprotocol/server` 2.4.0 (both pinned exactly). Stdio only: no HTTP
+# listener, no port, no credential. The enterprise floor (CI, signed and attested release, SBOM,
+# dependency updates, secret scan) comes from `floor`.
+#
+# 2026-07-28 removed the `initialize` handshake (a client calls `server/discover`, or just calls)
+# and the SDKs still answer `initialize` for hosts on 2025-11-25. So the test of each variant,
+# the passes-on-init check, starts the server as a child process over stdio and speaks to it
+# with the SDK's own client: a connection on 2026-07-28, a connection through the older
+# handshake, `tools/list` (named tool, same order twice, cache fields), `tools/call` (structured
+# result), a refused bad argument, and the rule every tool must meet (a description, a
+# read-only or destructive annotation, bounded inputs). A variant is `live` only when that test
+# passes.
+id = "mcp-server"
+description = "An MCP server on the official SDK, protocol revision 2026-07-28, over stdio (Python or TypeScript)"
+status = "live"
+extends = "floor"
+kind = "mcp-server"
+default_variant = "python"
+agent_prompt = "This folder is a fresh InOrbit project from the `@@TEMPLATE@@` template: an MCP server in @@LANGUAGE_LABEL@@ on the official MCP SDK (@@SOURCE@@), stdio only. Build what is described below by editing this folder. Give every tool a description, an annotation that says whether it only reads, and bounded inputs; never write to stdout except through the SDK (stdout is the protocol); never log a tool argument or result; never add a credential to the project; and keep the test passing (@@RUN_TEST@@)."
+
+[[variants]]
+id = "python"
+label = "Python 3.12 or newer on uv, official `mcp` SDK 2.3.0"
+status = "live"
+needs = ["uv"]
+toolchain = ["uv", "--version"]
+agent_allow = ["uv run", "uv lock", "uv build", "uv sync"]
+smoke = "test"
+test = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tests"]
+[variants.vars]
+SOURCE = "src/@@MODULE@@/, tests in tests/"
+IGNORE = "__pycache__/\n*.pyc\n.venv/\n*.egg-info/\ndist/"
+RUN_TEST = "`uv run --locked python -m unittest discover -s tests`"
+README_TEST = "uv run --locked python -m unittest discover -s tests"
+RUN = "uv run --locked python -m @@MODULE@@"
+TOOLCHAIN_MINOR = "3.12"
+CI_SETUP = "      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3"
+CI_TEST = "uv run --locked python -m unittest discover -s tests"
+LAYOUT = '''- `src/@@MODULE@@/server.py`: the server, one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `src/@@MODULE@@/__main__.py`: starts the server over stdio, the way a host does.
+- `tests/test_server.py`: the passes-on-init test; it starts the server and speaks to it with the SDK's client.
+- `pyproject.toml`: the SDK pinned to an exact version.
+- `uv.lock`: the lockfile (`uv lock` refreshes it).'''
+
+[[variants]]
+id = "typescript"
+label = "TypeScript on Node 22.18 or newer, official @modelcontextprotocol/server 2.4.0"
+status = "live"
+needs = ["node", "npm"]
+toolchain = ["node", "--version"]
+agent_allow = ["node --test", "node --check", "npm test", "npm ci"]
+# Node runs the TypeScript as it is (22.18 or newer); only the dependencies are installed,
+# from the lockfile, with no install scripts, before the test.
+build = ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"]
+smoke = "test"
+test = ["node", "--test", "tests/**/*.test.ts"]
+[variants.vars]
+SOURCE = "src/, tests in tests/"
+IGNORE = "node_modules/"
+RUN_TEST = "`npm ci --ignore-scripts && node --test 'tests/**/*.test.ts'`"
+README_TEST = "npm ci --ignore-scripts && node --test 'tests/**/*.test.ts'"
+RUN = "node src/main.ts"
+TOOLCHAIN_MINOR = "22.18"
+CI_TEST = "npm ci --ignore-scripts && node --test 'tests/**/*.test.ts'"
+LAYOUT = '''- `src/server.ts`: the server, one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `src/main.ts`: starts the server over stdio, the way a host does. Node runs the TypeScript as it is (22.18 or newer): nothing to build.
+- `tests/server.test.ts`: the passes-on-init test; it starts the server and speaks to it with the SDK's client.
+- `package.json`: the SDK pinned to an exact version.
+- `package-lock.json`: the lockfile.'''
