@@ -48,6 +48,7 @@ import { Inspector } from "./inspector.tsx";
 import { type CardKind, pick as pickCard } from "./picker-core.ts";
 import { useShortcuts } from "./keys-shim.ts";
 import { type Box, type Item, type Tone, paintOrder, removeItems, type ShapeItem } from "./schema.ts";
+import { CoordinateBar } from "./coordinate-bar.tsx";
 import { useBoard } from "./use-board.ts";
 import { type View, detailAt, fit, freeSpot, linkPath, toBoard, zoomAt } from "./viewport.ts";
 
@@ -590,6 +591,7 @@ function Editor({ id }: { id: string }) {
           onTone={(t) => edit((c) => setTone(c, [single.item_id], t))}
         />
       ) : null}
+      <CoordinateBar canvas={canvas} sel={sel} />
       </div>
     </section>
   );
