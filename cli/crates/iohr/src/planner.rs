@@ -324,6 +324,17 @@ impl<'a> Plans<'a> {
         }
     }
 
+    /// Add the step's item as `proposed` (title and kind from the step); the item stays open
+    /// for whoever answers it. The caller has checked the plan lacks it.
+    pub(crate) async fn add_item(&self, step: &Step<'_>) -> Result<Value, Error> {
+        let mut fields = Map::new();
+        fields.insert("title".into(), json!(step.title));
+        fields.insert("kind".into(), json!(step.kind));
+        fields.insert("status".into(), json!("proposed"));
+        self.upsert(step.plan, step.item, fields, 0, step.holder)
+            .await
+    }
+
     /// Run one build step as a Planner item: add it when the plan lacks it, skip it when
     /// it is done, claim it, mark it building, run `work`, then write a note and the
     /// status the result earned (see the module's states).
@@ -362,12 +373,7 @@ impl<'a> Plans<'a> {
                 )));
             }
         } else {
-            let mut fields = Map::new();
-            fields.insert("title".into(), json!(step.title));
-            fields.insert("kind".into(), json!(step.kind));
-            fields.insert("status".into(), json!("proposed"));
-            self.upsert(step.plan, step.item, fields, 0, step.holder)
-                .await?;
+            self.add_item(step).await?;
         }
         self.claim(
             step.plan,

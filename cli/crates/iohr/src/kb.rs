@@ -96,6 +96,20 @@ mod index_types {
 /// Where a project keeps its crawls.
 pub const DIR: &str = ".inorbit/crawl";
 
+/// The folder a crawl keeps its pages and index in: [`DIR`] unless the project keeps its
+/// knowledge in the home folder (`[project] data`, see [`crate::project::place`]).
+#[must_use]
+pub fn crawl_dir(root: &Path) -> PathBuf {
+    crate::project::place::Layout::of(root).crawl()
+}
+
+/// [`crawl_dir`] as a person reads it: `.inorbit/crawl`, or the full path when it is in home.
+#[must_use]
+pub fn crawl_shown(root: &Path) -> String {
+    let l = crate::project::place::Layout::of(root);
+    l.shown(&l.crawl())
+}
+
 /// The message on a build without the `DuckDB` index.
 #[cfg(not(unix))]
 const UNAVAILABLE: &str = "the local index needs DuckDB, which this build does not include";
@@ -167,6 +181,8 @@ pub struct Report {
     pub embeddings: String,
     /// Why the index was not written, when it was not.
     pub index_error: Option<String>,
+    /// The crawl folder as a person reads it (empty reads as [`DIR`]).
+    pub kept_in: String,
 }
 
 impl Report {
@@ -206,7 +222,12 @@ impl Report {
             None => {
                 let _ = write!(
                     s,
-                    "\n  index: {DIR}/kb.duckdb   ask: iohr atlas search \"...\" --site {site}   embeddings: {}",
+                    "\n  index: {}/kb.duckdb   ask: iohr atlas search \"...\" --site {site}   embeddings: {}",
+                    if self.kept_in.is_empty() {
+                        DIR
+                    } else {
+                        &self.kept_in
+                    },
                     self.embeddings
                 );
             }
@@ -369,7 +390,7 @@ pub async fn build(
     o: &Opts,
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> Result<Built, String> {
-    let dir = root.join(DIR).join(site);
+    let dir = crawl_dir(root).join(site);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let urls: Vec<String> = input.iter().map(|p| p.url.clone()).collect();
     let reach = fetch::Reach {
@@ -423,6 +444,7 @@ pub async fn build(
             shells,
             embeddings: embed::STATUS.to_owned(),
             index_error,
+            kept_in: crawl_shown(root),
         },
     })
 }
@@ -430,7 +452,7 @@ pub async fn build(
 /// Where the index is.
 #[must_use]
 pub fn index_path(root: &Path) -> PathBuf {
-    root.join(DIR).join("kb.duckdb")
+    crawl_dir(root).join("kb.duckdb")
 }
 
 #[cfg(unix)]

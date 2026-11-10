@@ -21,6 +21,7 @@ use crate::template::Runner;
 
 /// The template used when neither `--template` nor `[project] template` names one.
 pub mod folder;
+pub mod place;
 pub mod space;
 pub(crate) mod wizard;
 
@@ -547,7 +548,23 @@ pub fn register_step(
     template: &str,
     now: &str,
 ) -> Result<(PathBuf, Step), String> {
-    let state = state_root.join(name);
+    register_in(dir, &state_root.join(name), name, template, now)
+}
+
+/// [`register_step`] with the state folder already chosen (the place resolver's answer, see
+/// [`place::Layout::state`]).
+///
+/// # Errors
+///
+/// A folder or the record could not be written.
+pub fn register_in(
+    dir: &Path,
+    state: &Path,
+    name: &str,
+    template: &str,
+    now: &str,
+) -> Result<(PathBuf, Step), String> {
+    let state = state.to_path_buf();
     private_dir(&state.join("state"))?;
     private_dir(&state.join("cache"))?;
     let file = state.join("project.toml");

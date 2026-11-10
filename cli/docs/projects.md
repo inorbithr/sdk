@@ -66,6 +66,49 @@ Planner step is skipped, it prints how to set the id later (`iohr login`, then
 another audience, an expired one) is skipped the same way, and the message names the real
 reason instead of "not signed in".
 
+### Where the project keeps its data
+
+By default the ADRs and notes (`memory/`) and the crawl live in the project's `.inorbit/`
+and the machine state (the registry entry and caches) in `~/.inorbit/projects/NAME`. On the
+first init at a terminal, `init` asks where all of it should go, and writes the answer as
+`[project] data` in `inorbit.toml`:
+
+| Answer | Notes, crawl | State |
+|---|---|---|
+| `project` (the default offered) | `<project>/.inorbit/memory`, `.inorbit/crawl` | `<project>/.inorbit/state`, `cache` (ignored by git through `.inorbit/.gitignore`) |
+| `home` | `~/.inorbit/projects/NAME/memory`, `crawl` | `~/.inorbit/projects/NAME` |
+| nothing recorded | `<project>/.inorbit/memory`, `.inorbit/crawl` | `~/.inorbit/projects/NAME` |
+
+The third row is the layout every project had before this question existed, and it stays
+as it is: no project changes until its owner chooses. The atlas stays in the project in
+both places. The notes store, the crawl, the knowledge base and the project registry ask one
+resolver (`project::place::Layout`), so they move together; the other writers (role notes,
+handoff, permissions) still use the project's `.inorbit/` and follow in a later change.
+
+| Flag | What it does |
+|---|---|
+| `--keep-in project\|home` | Answer the question. Also `IOHR_INIT_KEEP_IN`; the flag wins, then the variable, then what `inorbit.toml` records, then the question. With `--yes`, `--json` or no terminal and none of these, nothing is asked or recorded |
+| `--copy-data` | When the place changes, copy what the old place holds into the new one. At a terminal it is offered instead. Nothing is ever deleted and nothing already in the new place is overwritten |
+
+A dry run records and writes nothing and says what it would do.
+
+### The project's shape
+
+Init asks once whether the project is a monolith, microservices or combined, and files the
+question as an item (`project-shape`, kind `question`) in the project's Planner plan, so
+the answer is work the Mac app and the phone see as well. The answer is written as
+`[project] shape` in `inorbit.toml` and as one fact in the project's notes, which `?` and
+`??` read.
+
+- At a terminal init asks inline, records the answer and marks the item done.
+- `--shape monolith|microservices|combined` (or `IOHR_INIT_SHAPE`) answers without
+  asking, with the same result.
+- Without a terminal and without the flag the item stays open (`proposed`), for the Mac
+  app or the phone to answer; nothing is recorded in the project yet.
+- Signed out or offline, an answer is still kept in the project and the step says the item
+  was not filed. Without a plan (`--no-plan`) there is nowhere to file it, and it says so.
+- A dry run asks nothing.
+
 ## IO.md: instructions for the folder
 
 An `IO.md` (or `io.md`) file holds what you want your agent to know about a folder, the way a

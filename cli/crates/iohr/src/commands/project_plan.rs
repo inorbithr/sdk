@@ -49,7 +49,7 @@ fn later(name: &str) -> String {
 }
 
 /// What the step can call the Planner with: a session, or the reason there is none.
-enum Access<'a> {
+pub(super) enum Access<'a> {
     In(&'a Api),
     /// No session, and why, in words fit to follow "not checked:" or begin a sentence.
     Without(String),
@@ -58,7 +58,10 @@ enum Access<'a> {
 /// The session init would call with. Only a machine with no profile and no token is "not
 /// signed in"; any other refusal (a token for another audience, an expired one, a store
 /// that cannot be read) says what it is.
-async fn access(g: &Global, env: &Env) -> Result<std::sync::Arc<crate::context::Session>, String> {
+pub(super) async fn access(
+    g: &Global,
+    env: &Env,
+) -> Result<std::sync::Arc<crate::context::Session>, String> {
     let ctx = Ctx::load(g).map_err(|e| first_line(&e.to_string()))?;
     if env.token.is_none() && run_profile(g, env, &ctx).is_none() {
         return Err("you are not signed in".to_owned());
@@ -188,7 +191,7 @@ async fn settle(
     }
 }
 
-fn first_line(s: &str) -> String {
+pub(super) fn first_line(s: &str) -> String {
     s.lines().next().unwrap_or_default().to_owned()
 }
 
