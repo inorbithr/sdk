@@ -14,7 +14,13 @@ const pageFiles = import.meta.glob<Omit<Group, "source">>("../shortcuts/pages/*.
 
 export const GROUPS: Group[] = [
   { scope: "global", title: "Frame", source: "frame", rows: frameTable as Row[] },
-  { scope: "global", title: "Window layout", source: "layout", where: "Where the window is wide enough to arrange", rows: layoutTable as Row[] },
+  {
+    scope: "global",
+    title: "Window layout",
+    source: "layout",
+    where: "Where the window is wide enough to arrange",
+    rows: layoutTable as Row[],
+  },
   { scope: "global", title: "Go to", source: "web", rows: webTable as Row[] },
   ...Object.values(pageFiles).map((g) => ({ ...g, source: "page" as const })),
 ];

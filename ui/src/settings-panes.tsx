@@ -13,10 +13,10 @@ import type { Space } from "./lib/home-core.ts";
 import { homeReads } from "./lib/home-data.ts";
 import { HELD, heldNow, type Pane } from "./lib/settings-core.ts";
 import { type Member, settingsReads, useRead } from "./lib/settings-data.ts";
-import { ShortcutList } from "./shortcuts-view.tsx";
 import { updateSidebar, useSidebar } from "./lib/sidebar-store.ts";
 import { setThemeChoice, useThemeChoice } from "./lib/theme.ts";
 import { CHOICES } from "./lib/theme-core.ts";
+import { ShortcutList } from "./shortcuts-view.tsx";
 
 // The bodies of Settings' panes (RFC 0217, slice 4). Each shows what this page really has: a control that changes the
 // real state, or a read of the signed-in account, or a plain line that says it is empty or not built here. Nothing is

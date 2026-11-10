@@ -85,7 +85,8 @@ export function clash(a: Binding, b: Binding): boolean {
 /** Every pair of bindings that take the same key. Empty is the goal. */
 export function collisions(bs: Binding[]): [Binding, Binding][] {
   const out: [Binding, Binding][] = [];
-  for (let i = 0; i < bs.length; i++) for (let j = i + 1; j < bs.length; j++) if (clash(bs[i], bs[j])) out.push([bs[i], bs[j]]);
+  for (let i = 0; i < bs.length; i++)
+    for (let j = i + 1; j < bs.length; j++) if (clash(bs[i], bs[j])) out.push([bs[i], bs[j]]);
   return out;
 }
 
@@ -113,19 +114,23 @@ export function problems(bs: Binding[], reserved: Reserved[]): string[] {
     if (seen.has(b.id)) out.push(`${b.id}: listed twice`);
     seen.add(b.id);
     if (b.label.trim() === "") out.push(`${b.id}: no label`);
-    if ((b.accel === undefined) === (b.seq === undefined)) out.push(`${b.id}: needs an accel or a seq, not both and not neither`);
-    if (b.seq && (b.seq.length < 2 || b.seq.some((k) => k.length !== 1))) out.push(`${b.id}: a seq is two or more single keys`);
+    if ((b.accel === undefined) === (b.seq === undefined))
+      out.push(`${b.id}: needs an accel or a seq, not both and not neither`);
+    if (b.seq && (b.seq.length < 2 || b.seq.some((k) => k.length !== 1)))
+      out.push(`${b.id}: a seq is two or more single keys`);
     if (b.accel !== undefined) {
       const why = reservedWhy(b.accel, b.scope, reserved);
       if (why) out.push(`${b.id}: ${b.accel} is the browser's (${why})`);
     }
     if (b.overrides !== undefined) {
       const target = bs.find((x) => x.id === b.overrides);
-      if (!target || target.scope !== GLOBAL) out.push(`${b.id}: overrides ${b.overrides}, which is not a global binding`);
+      if (!target || target.scope !== GLOBAL)
+        out.push(`${b.id}: overrides ${b.overrides}, which is not a global binding`);
       if (b.scope === GLOBAL) out.push(`${b.id}: a global binding cannot override`);
     }
   }
-  for (const [a, b] of collisions(bs)) out.push(`${a.id} and ${b.id} both take ${a.accel ?? a.seq?.join(" ")} / ${b.accel ?? b.seq?.join(" ")}`);
+  for (const [a, b] of collisions(bs))
+    out.push(`${a.id} and ${b.id} both take ${a.accel ?? a.seq?.join(" ")} / ${b.accel ?? b.seq?.join(" ")}`);
   return out;
 }
 
@@ -141,7 +146,9 @@ export function typingIn(t: Target | undefined): boolean {
   const tag = (t.tagName ?? "").toUpperCase();
   if (tag === "TEXTAREA" || tag === "SELECT") return true;
   if (tag !== "INPUT") return false;
-  return !["button", "checkbox", "radio", "range", "submit", "reset", "color", "file", "image"].includes((t.type ?? "text").toLowerCase());
+  return !["button", "checkbox", "radio", "range", "submit", "reset", "color", "file", "image"].includes(
+    (t.type ?? "text").toLowerCase(),
+  );
 }
 
 /** Whether a key event is this chord. A bare symbol such as ? matches however the layout reaches it. */
@@ -225,7 +232,9 @@ export function createHost(bindings: Binding[]) {
     press(e: Press, now: number): boolean {
       const typing = typingIn(e.target);
       const bs = live();
-      const chord = bs.find(({ b }) => b.accel !== undefined && chordMatches(b.accel, e) && (!typing || worksInText(b)));
+      const chord = bs.find(
+        ({ b }) => b.accel !== undefined && chordMatches(b.accel, e) && (!typing || worksInText(b)),
+      );
       if (chord) {
         seq = SEQ_START;
         e.preventDefault?.();

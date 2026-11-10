@@ -204,50 +204,32 @@
     {
       "accel": "CmdOrCtrl+A",
       "why": "select all",
-      "allowIn": [
-        "canvas",
-        "decisions"
-      ]
+      "allowIn": ["canvas", "decisions"]
     },
     {
       "accel": "CmdOrCtrl+C",
       "why": "copy",
-      "allowIn": [
-        "canvas",
-        "decisions"
-      ]
+      "allowIn": ["canvas", "decisions"]
     },
     {
       "accel": "CmdOrCtrl+V",
       "why": "paste",
-      "allowIn": [
-        "canvas",
-        "decisions"
-      ]
+      "allowIn": ["canvas", "decisions"]
     },
     {
       "accel": "CmdOrCtrl+X",
       "why": "cut",
-      "allowIn": [
-        "canvas",
-        "decisions"
-      ]
+      "allowIn": ["canvas", "decisions"]
     },
     {
       "accel": "CmdOrCtrl+Z",
       "why": "undo",
-      "allowIn": [
-        "canvas",
-        "decisions"
-      ]
+      "allowIn": ["canvas", "decisions"]
     },
     {
       "accel": "CmdOrCtrl+Shift+Z",
       "why": "redo",
-      "allowIn": [
-        "canvas",
-        "decisions"
-      ]
+      "allowIn": ["canvas", "decisions"]
     }
   ]
 }

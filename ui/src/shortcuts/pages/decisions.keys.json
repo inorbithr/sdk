@@ -4,11 +4,21 @@
   "page": "decisions",
   "where": "On Decisions",
   "rows": [
-    { "id": "decisions-palette", "label": "Jump to a view, space or document", "accel": "CmdOrCtrl+K", "overrides": "palette" },
+    {
+      "id": "decisions-palette",
+      "label": "Jump to a view, space or document",
+      "accel": "CmdOrCtrl+K",
+      "overrides": "palette"
+    },
     { "id": "decisions-next", "label": "Next document in the list", "accel": "J" },
     { "id": "decisions-prev", "label": "Previous document in the list", "accel": "K" },
     { "id": "decisions-open", "label": "Open the highlighted document", "accel": "Enter" },
     { "id": "decisions-search", "label": "Search the document list", "accel": "/" },
-    { "id": "decisions-save", "label": "Save the document as a new version", "accel": "CmdOrCtrl+Enter", "inText": true }
+    {
+      "id": "decisions-save",
+      "label": "Save the document as a new version",
+      "accel": "CmdOrCtrl+Enter",
+      "inText": true
+    }
   ]
 }

@@ -50,7 +50,9 @@ export function ShortcutList({ pages }: { pages: string[] }) {
           <div key={t.id} className="flex min-h-8 items-center justify-between gap-3 border-t py-1 first:border-t-0">
             <span className="min-w-0">
               {t.label}
-              {t.agree === "differs" ? <span className="text-muted-foreground"> (web: {t.note ?? "different key"})</span> : null}
+              {t.agree === "differs" ? (
+                <span className="text-muted-foreground"> (web: {t.note ?? "different key"})</span>
+              ) : null}
             </span>
             <kbd className={kbd}>{t.keys}</kbd>
           </div>
@@ -75,15 +77,21 @@ function Modal({ label, onClose, children }: { label: string; onClose: () => voi
     };
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-[12vh]" onMouseDown={onClose} role="presentation">
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[12vh]">
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute inset-0 cursor-default bg-black/40"
+      />
       <div
         ref={ref}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={label}
-        onMouseDown={(e) => e.stopPropagation()}
-        className="bg-card text-card-foreground max-h-[75vh] w-full max-w-lg overflow-auto rounded-2xl border p-4 shadow-lg outline-none"
+        className="bg-card text-card-foreground relative max-h-[75vh] w-full max-w-lg overflow-auto rounded-2xl border p-4 shadow-lg outline-none"
       >
         {children}
       </div>
@@ -119,8 +127,7 @@ export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () 
   return (
     <Modal label="Command palette" onClose={onClose}>
       <input
-        // biome-ignore lint/a11y/noAutofocus: a palette opens to type
-        autoFocus
+        ref={(el) => el?.focus()}
         value={q}
         placeholder="Go to a page, or find a shortcut"
         aria-label="Command"
@@ -130,20 +137,28 @@ export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () 
           setAt(0);
         }}
         onKeyDown={(e) => {
-          if (e.key === "ArrowDown") (e.preventDefault(), setAt((a) => Math.min(a + 1, shown.length - 1)));
-          else if (e.key === "ArrowUp") (e.preventDefault(), setAt((a) => Math.max(a - 1, 0)));
-          else if (e.key === "Enter") pick(shown[at]);
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setAt((a) => Math.min(a + 1, shown.length - 1));
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setAt((a) => Math.max(a - 1, 0));
+          } else if (e.key === "Enter") pick(shown[at]);
         }}
       />
       {shown.length === 0 ? <p className="text-muted-foreground text-[13px]">Nothing matches.</p> : null}
-      <ul role="listbox" aria-label="Commands">
+      <ul aria-label="Commands">
         {shown.map((i, n) => (
-          <li key={i.id} role="option" aria-selected={n === at}>
+          <li key={i.id}>
             <button
               type="button"
+              aria-current={n === at ? "true" : undefined}
               onClick={() => pick(i)}
               onMouseMove={() => setAt(n)}
-              className={cn("flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[13px]", n === at && "bg-accent")}
+              className={cn(
+                "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[13px]",
+                n === at && "bg-accent",
+              )}
             >
               <span>{i.label}</span>
               {i.hint ? <kbd className={kbd}>{i.hint}</kbd> : null}

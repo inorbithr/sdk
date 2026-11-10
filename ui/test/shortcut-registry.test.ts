@@ -43,7 +43,15 @@ const ev = (key: string, o: Partial<Press> = {}): Press => ({
   shiftKey: false,
   ...o,
 });
-const b = (id: string, scope: string, r: Partial<Row> & { source?: Binding["source"] }): Binding => ({ id, label: id, scope, title: scope, source: "page", where: "", ...r });
+const b = (id: string, scope: string, r: Partial<Row> & { source?: Binding["source"] }): Binding => ({
+  id,
+  label: id,
+  scope,
+  title: scope,
+  source: "page",
+  where: "",
+  ...r,
+});
 
 test("every shipped binding is sound: no collision, no browser key, no malformed row", () => {
   assert.deepEqual(problems(all, R), []);
@@ -52,10 +60,17 @@ test("every shipped binding is sound: no collision, no browser key, no malformed
 
 test("two bindings on one key are found", () => {
   assert.equal(collisions([b("a", "global", { accel: "CmdOrCtrl+K" }), b("b", "x", { accel: "Cmd+K" })]).length, 1);
-  assert.equal(collisions([b("a", "x", { accel: "N" }), b("b", "y", { accel: "N" })]).length, 0, "two pages may share a key");
+  assert.equal(
+    collisions([b("a", "x", { accel: "N" }), b("b", "y", { accel: "N" })]).length,
+    0,
+    "two pages may share a key",
+  );
   assert.equal(collisions([b("a", "x", { accel: "N" }), b("b", "x", { accel: "N" })]).length, 1);
   assert.equal(collisions([b("a", "global", { seq: ["g", "d"] }), b("b", "global", { seq: ["g", "d"] })]).length, 1);
-  assert.ok(clash(b("a", "global", { seq: ["g", "d"] }), b("b", "x", { accel: "G" })), "a bare key under a sequence's first key");
+  assert.ok(
+    clash(b("a", "global", { seq: ["g", "d"] }), b("b", "x", { accel: "G" })),
+    "a bare key under a sequence's first key",
+  );
   assert.ok(clash(b("a", "global", { seq: ["g"] }), b("b", "global", { seq: ["g", "d"] })), "a prefix");
   const g = b("pal", "global", { accel: "CmdOrCtrl+K" });
   assert.equal(clash(g, b("p", "decisions", { accel: "CmdOrCtrl+K", overrides: "pal" })), false, "a named override");
@@ -70,7 +85,10 @@ test("the browser's own keys are refused, a text-editing key only where the surf
 });
 
 test("malformed rows and bad overrides are reported", () => {
-  const p = problems([b("a", "x", {}), b("c", "x", { accel: "Q", seq: ["g", "x"] }), b("o", "x", { accel: "J", overrides: "nope" })], R);
+  const p = problems(
+    [b("a", "x", {}), b("c", "x", { accel: "Q", seq: ["g", "x"] }), b("o", "x", { accel: "J", overrides: "nope" })],
+    R,
+  );
   assert.equal(p.length, 3, p.join("; "));
 });
 
@@ -94,7 +112,11 @@ test("the host: chords, sequences, page before global, text fields, no handler p
   ];
   const host = createHost(bs);
   const hit: string[] = [];
-  const off = host.mount("global", () => ({ pal: () => hit.push("pal"), "go-d": () => hit.push("go-d"), help: () => hit.push("help") }));
+  const off = host.mount("global", () => ({
+    pal: () => hit.push("pal"),
+    "go-d": () => hit.push("go-d"),
+    help: () => hit.push("help"),
+  }));
   let prevented = 0;
   const press = (e: Press, t = 0) => host.press({ ...e, preventDefault: () => void prevented++ }, t);
   assert.equal(press(ev("k", { metaKey: true })), true);
@@ -141,7 +163,10 @@ test("the terminal panel's keys are still bound where the table says, and each w
   const ids = new Set(all.map((x) => x.id));
   const agree = new Set(["same", "differs", "terminal"]);
   for (const t of terminal.rows as { id: string; source: string; probe: string; web?: string; agree: string }[]) {
-    assert.ok(readFileSync(new URL(t.source, root), "utf8").includes(t.probe), `${t.id}: ${t.probe} is not in ${t.source}`);
+    assert.ok(
+      readFileSync(new URL(t.source, root), "utf8").includes(t.probe),
+      `${t.id}: ${t.probe} is not in ${t.source}`,
+    );
     assert.ok(agree.has(t.agree), t.id);
     if (t.web) assert.ok(ids.has(t.web), `${t.id}: no web binding ${t.web}`);
     assert.equal(t.agree === "terminal", t.web === undefined && t.agree !== "same", t.id);

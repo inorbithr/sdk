@@ -1,7 +1,17 @@
 // The key rules moved from the Mac app's shortcuts.ts (its tests' cases kept), and the frame's own shortcut.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { accelOfEvent, canon, FRAME_SHORTCUTS, isMac, keysOf, matches, shortcutOf, show, symbols } from "../src/frame/shortcuts.ts";
+import {
+  accelOfEvent,
+  canon,
+  FRAME_SHORTCUTS,
+  isMac,
+  keysOf,
+  matches,
+  shortcutOf,
+  show,
+  symbols,
+} from "../src/frame/shortcuts.ts";
 
 const key = (
   k: string,

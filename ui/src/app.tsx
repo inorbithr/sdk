@@ -31,9 +31,6 @@ import { extensionsMenu } from "./frame/extensions-menu.ts";
 import { ARRANGE_MIN_WIDTH, Frame, useViewportWidth } from "./frame/frame.tsx";
 import { GridPicker } from "./frame/grid-picker.tsx";
 import { PanelFrame } from "./frame/panel-frame.tsx";
-import { useShortcuts } from "./lib/use-shortcuts.ts";
-import { HelpOverlay, Palette, type PaletteItem, keysShown } from "./shortcuts-view.tsx";
-import { BINDINGS } from "./lib/shortcut-tables.ts";
 import { toggleHidden } from "./frame/sidebar-frame.ts";
 import { Home } from "./home.tsx";
 import { updateArrangement as updateArr, useArrangement } from "./lib/arrange-store.ts";
@@ -47,10 +44,13 @@ import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
 import { useSession } from "./lib/session-store.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
+import { BINDINGS } from "./lib/shortcut-tables.ts";
 import { useSidebar } from "./lib/sidebar-store.ts";
+import { useShortcuts } from "./lib/use-shortcuts.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
 import { Settings } from "./settings.tsx";
+import { HelpOverlay, keysShown, Palette, type PaletteItem } from "./shortcuts-view.tsx";
 
 // The page `iohr ui serve` serves, drawn in the shell frame from the Mac app (frame/frame.tsx, RFC 0217 C5): the
 // sidebar lists Home and the installed extensions that declare a panel, the page header holds the Extensions menu,
@@ -196,7 +196,12 @@ export function App() {
   const paletteItems: PaletteItem[] = [
     ...pages.map((p) => {
       const go = BINDINGS.find((b) => b.page === (p.key === HOME ? "home" : p.key));
-      return { id: `go:${p.key}`, label: `Go to ${p.title}`, hint: go ? keysShown(go) : undefined, run: () => goTo(p.key) };
+      return {
+        id: `go:${p.key}`,
+        label: `Go to ${p.title}`,
+        hint: go ? keysShown(go) : undefined,
+        run: () => goTo(p.key),
+      };
     }),
     { id: "help", label: "Keyboard shortcuts", hint: "?", run: () => setHelp(true) },
   ];
