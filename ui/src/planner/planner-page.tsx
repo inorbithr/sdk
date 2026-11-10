@@ -1,8 +1,8 @@
 import { openContextMenu } from "../frame/context-menu.tsx";
 import { plannerHandlers } from "../lib/planner-keys.ts";
 import { plannerMenu } from "../lib/planner-menus.ts";
-import { useShortcuts } from "../lib/use-shortcuts.ts";
 import { MODE_LABEL, MODES, plannerHref, plannerRoute } from "../lib/planner-route.ts";
+import { useShortcuts } from "../lib/use-shortcuts.ts";
 import { Overview } from "./overview.tsx";
 import { DecisionsView, ExploreView, PreviewView } from "./plan-extra.tsx";
 import { CanvasLink, PlanView, ProgressView } from "./plan-views.tsx";

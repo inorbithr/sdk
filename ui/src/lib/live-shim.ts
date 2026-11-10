@@ -108,10 +108,7 @@ export function apiStream<T = unknown>(
   const token = startToken();
   void (async () => {
     if (url === null || token === null) {
-      opts.onState?.(
-        "off",
-        url === null ? "That is not a path the page may read." : "This page has no start token.",
-      );
+      opts.onState?.("off", url === null ? "That is not a path the page may read." : "This page has no start token.");
       return;
     }
     let wait = 1000;
