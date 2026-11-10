@@ -33,6 +33,9 @@
 //! UI itself is never framed. When the serve stops, every panel it started is stopped
 //! (SIGTERM to its process group, SIGKILL after 5 s).
 
+mod forward;
+#[cfg(test)]
+mod forward_tests;
 mod session;
 #[cfg(test)]
 mod session_tests;
@@ -46,8 +49,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use iohr_auth::loopback::{MAX_HEAD, READ_WINDOW, bind_loopback, read_head};
-use tokio::io::AsyncWriteExt as _;
+use iohr_auth::loopback::{MAX_HEAD, READ_WINDOW, bind_loopback};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
@@ -68,6 +71,11 @@ const MAX_CONNECTIONS: usize = 16;
 const WRITE_WINDOW: Duration = Duration::from_secs(30);
 /// The largest file served; a built UI's biggest chunk is far smaller.
 const MAX_FILE: u64 = 32 * 1024 * 1024;
+/// The headers every answer carries besides its policy and its caching.
+const SECURITY_HEADERS: &str = "Referrer-Policy: no-referrer\r\n\
+     X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n\
+     Cross-Origin-Opener-Policy: same-origin\r\n\
+     Cross-Origin-Resource-Policy: same-origin\r\n";
 /// Every answer's policy: the page's own scripts, styles and images, nothing framed
 /// around it, no plugins, no forms posting elsewhere.
 const CSP: &str = "default-src 'self'; img-src 'self' data:; object-src 'none'; \
@@ -348,10 +356,26 @@ impl Server {
         store: Store,
         panels: Panels,
     ) -> io::Result<Self> {
+        Self::bind_with(root, port, store, panels, forward::Limits::default()).await
+    }
+
+    /// [`bind`](Self::bind) with the proxy's bounds set (tests make them small).
+    async fn bind_with(
+        root: &Path,
+        port: u16,
+        store: Store,
+        panels: Panels,
+        limits: forward::Limits,
+    ) -> io::Result<Self> {
         let root = std::fs::canonicalize(root)?;
         let listener = bind_loopback(port).await?;
         let addr = listener.local_addr()?;
-        let access = session::Access::new(panels.global.clone(), panels.env.clone(), addr.port())?;
+        let access = session::Access::new(
+            panels.global.clone(),
+            panels.env.clone(),
+            addr.port(),
+            limits,
+        )?;
         let site = Arc::new(Site {
             root,
             store: Arc::new(store),
@@ -403,6 +427,7 @@ impl Server {
                 }
             }
         }
+        self.site.access.close();
         self.site.panels.stop_all().await;
     }
 }
@@ -416,11 +441,47 @@ fn host_of(addr: SocketAddr) -> String {
 }
 
 async fn answer(mut stream: TcpStream, site: &Site) {
-    let Ok(Ok(head)) = timeout(READ_WINDOW, read_head(&mut stream)).await else {
+    let Ok(Ok((head, rest))) = timeout(READ_WINDOW, read_request_head(&mut stream)).await else {
         return;
     };
-    let reply = reply_to(&head, site).await;
-    let _ = timeout(WRITE_WINDOW, reply.write(&mut stream)).await;
+    match reply_to(&head, site).await {
+        Next::Reply(reply) => {
+            let _ = timeout(WRITE_WINDOW, reply.write(&mut stream)).await;
+        }
+        Next::Proxy(request) => {
+            forward::forward(&mut stream, &request, rest, site.access.as_ref()).await;
+        }
+    }
+}
+
+/// A request head, read up to the blank line that ends it (or [`MAX_HEAD`] bytes), and the
+/// bytes of the body that came with it. The head is capped on its own, so body bytes in the
+/// same read are never cut off with it.
+async fn read_request_head(stream: &mut TcpStream) -> io::Result<(Vec<u8>, Vec<u8>)> {
+    let mut all = Vec::with_capacity(1024);
+    let mut buf = [0_u8; 1024];
+    loop {
+        if let Some(end) = all.windows(4).position(|w| w == b"\r\n\r\n") {
+            let rest = all.split_off(end + 4);
+            return Ok((all, rest));
+        }
+        if all.len() >= MAX_HEAD {
+            all.truncate(MAX_HEAD);
+            return Ok((all, Vec::new()));
+        }
+        let n = stream.read(&mut buf).await?;
+        if n == 0 {
+            return Ok((all, Vec::new()));
+        }
+        all.extend_from_slice(&buf[..n]);
+    }
+}
+
+/// What the gates decided for one request head: an answer to write, or a call of the API
+/// for the page, which reads its body and may stream its answer (`session::forward`).
+enum Next {
+    Reply(Reply),
+    Proxy(Request),
 }
 
 /// One answer, written whole.
@@ -501,12 +562,8 @@ impl Reply {
         });
         let head = format!(
             "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{allow}{extra}\
-             Content-Security-Policy: {csp}\r\n\
-             Referrer-Policy: no-referrer\r\nCache-Control: {cache}\r\n\
-             X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n\
-             Cross-Origin-Opener-Policy: same-origin\r\n\
-             Cross-Origin-Resource-Policy: same-origin\r\n\
-             Connection: close\r\n\r\n",
+             Content-Security-Policy: {csp}\r\nCache-Control: {cache}\r\n\
+             {SECURITY_HEADERS}Connection: close\r\n\r\n",
             self.status,
             self.content_type,
             self.body.len()
@@ -519,28 +576,80 @@ impl Reply {
     }
 }
 
-/// The answer to one request head.
-async fn reply_to(head: &[u8], site: &Site) -> Reply {
+/// The answer to one request head, or the call of the API it asks for.
+async fn reply_to(head: &[u8], site: &Site) -> Next {
     let host = site.host.as_str();
     let request = match parse(head) {
         Ok(r) => r,
-        Err(status) => return Reply::error(status),
+        Err(status) => return Next::Reply(Reply::error(status)),
     };
     if !host_allowed(request.host.as_deref(), host) {
-        return Reply::error("403 Forbidden");
+        return Next::Reply(Reply::error("403 Forbidden"));
     }
     // The session cookie, or the launch secret that is exchanged for it (`session`).
     match site.access.entry(&request) {
         session::Entry::Open => {}
         session::Entry::Exchange if matches!(request.method.as_str(), "GET" | "HEAD") => {
-            return site.access.exchange();
+            return Next::Reply(site.access.exchange());
         }
-        _ => return unsigned(&request),
+        _ => return Next::Reply(unsigned(&request)),
     }
+    // A call of the API for the page: a read, a write or a stream, `/api/proxy/v1/...`.
+    // Reads need the page's own origin and the token; a write needs the stricter
+    // `post_caller_allowed` (a same-origin fetch, the exact `Origin`, the token).
+    if let Some(next) = proxied(&request, site) {
+        return next;
+    }
+    Next::Reply(reply_to_page(&request, site).await)
+}
+
+/// A call of `/api/proxy/...`: through the gates, or the refusal.
+fn proxied(request: &Request, site: &Site) -> Option<Next> {
+    let path = decoded_path(&request.target)?;
+    if !path.starts_with("/api/proxy/") {
+        return None;
+    }
+    let write = matches!(request.method.as_str(), "POST" | "PUT" | "PATCH" | "DELETE");
+    let read = matches!(request.method.as_str(), "GET" | "HEAD");
+    if !write && !read {
+        return Some(Next::Reply(Reply {
+            allow: true,
+            ..Reply::error("405 Method Not Allowed")
+        }));
+    }
+    let allowed = if write {
+        post_caller_allowed(request, &site.host, &site.panels)
+    } else {
+        api_caller_allowed(request, &site.host)
+            && site.panels.token_matches(request.token.as_deref())
+    };
+    Some(if allowed {
+        Next::Proxy(Request {
+            target: request.target.clone(),
+            method: request.method.clone(),
+            host: request.host.clone(),
+            origin: request.origin.clone(),
+            fetch_site: request.fetch_site.clone(),
+            token: None,
+            cookie: None,
+            content_length: request.content_length.clone(),
+            transfer_encoding: request.transfer_encoding.clone(),
+            content_type: request.content_type.clone(),
+            accept: request.accept.clone(),
+        })
+    } else {
+        Next::Reply(Reply::error("403 Forbidden"))
+    })
+}
+
+/// The answer to a request that is not a call of the API: the page, `/api/session`,
+/// `/api/extensions`, a start or a stop.
+async fn reply_to_page(request: &Request, site: &Site) -> Reply {
+    let host = site.host.as_str();
     let head_only = match request.method.as_str() {
         "GET" => false,
         "HEAD" => true,
-        "POST" if is_api(&request.target) => return post(&request, site).await,
+        "POST" if is_api(&request.target) => return post(request, site).await,
         _ => {
             return Reply {
                 allow: true,
@@ -549,7 +658,7 @@ async fn reply_to(head: &[u8], site: &Site) -> Reply {
         }
     };
     if is_api(&request.target) {
-        if !api_caller_allowed(&request, host) {
+        if !api_caller_allowed(request, host) {
             return Reply::error("403 Forbidden");
         }
         // Any other `/api` path is 404, never the app page.
@@ -559,11 +668,7 @@ async fn reply_to(head: &[u8], site: &Site) -> Reply {
         let mut reply = match path {
             Some("/api/extensions") => extensions(Arc::clone(&site.store), &site.panels).await,
             Some("/api/session") if own_script => site.access.state().await,
-            Some(p) if own_script && p.starts_with("/api/proxy/") => {
-                site.access.proxy(&request).await
-            }
             Some("/api/session") => Reply::error("403 Forbidden"),
-            Some(p) if p.starts_with("/api/proxy/") => Reply::error("403 Forbidden"),
             _ => Reply::error("404 Not Found"),
         };
         reply.head_only = head_only;
@@ -933,10 +1038,12 @@ struct Request {
     cookie: Option<String>,
     content_length: Option<String>,
     transfer_encoding: Option<String>,
+    content_type: Option<String>,
+    accept: Option<String>,
 }
 
 /// The request line and the `Host`, `Origin`, `Sec-Fetch-Site`, `x-iohr-token`,
-/// `Cookie`, `Content-Length` and `Transfer-Encoding` headers of a head; an error is the status to
+/// `Cookie`, `Content-Length`, `Transfer-Encoding`, `Content-Type` and `Accept` headers of a head; an error is the status to
 /// answer. Any of them sent twice is refused.
 fn parse(head: &[u8]) -> Result<Request, &'static str> {
     if head.len() >= MAX_HEAD && !head.windows(4).any(|w| w == b"\r\n\r\n") {
@@ -977,6 +1084,10 @@ fn parse(head: &[u8]) -> Result<Request, &'static str> {
             &mut request.content_length
         } else if name.eq_ignore_ascii_case("transfer-encoding") {
             &mut request.transfer_encoding
+        } else if name.eq_ignore_ascii_case("content-type") {
+            &mut request.content_type
+        } else if name.eq_ignore_ascii_case("accept") {
+            &mut request.accept
         } else {
             continue;
         };
@@ -1258,6 +1369,34 @@ mod tests {
         start_panels(root, store, panels()).await
     }
 
+    /// A server with these stream and body limits, on a free port.
+    pub(super) async fn start_limited(
+        root: &Path,
+        panels: super::Panels,
+        limits: super::forward::Limits,
+    ) -> (std::net::SocketAddr, tokio::sync::oneshot::Sender<()>) {
+        let server = Server::bind_with(
+            root,
+            0,
+            Store::new(root.join("no-extensions")),
+            panels,
+            limits,
+        )
+        .await
+        .expect("bind");
+        let addr = server.addr;
+        COOKIES
+            .lock()
+            .expect("cookies")
+            .get_or_insert_with(HashMap::new)
+            .insert(addr, server.site.access.cookie_line());
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(server.serve(async {
+            let _ = rx.await;
+        }));
+        (addr, tx)
+    }
+
     pub(super) async fn start_panels(
         root: &Path,
         store: Store,
@@ -1299,6 +1438,17 @@ mod tests {
             .expect("a started server");
         let raw = raw.replacen("\r\n", &format!("\r\nCookie: {cookie}\r\n"), 1);
         send_bare(addr, &raw).await
+    }
+
+    /// The session cookie of the test server at `addr`, as `name=value`.
+    pub(super) fn cookie_of(addr: std::net::SocketAddr) -> String {
+        COOKIES
+            .lock()
+            .expect("cookies")
+            .as_ref()
+            .and_then(|m| m.get(&addr))
+            .and_then(|c| c.split_once('|').map(|(c, _)| c.to_owned()))
+            .expect("a started server")
     }
 
     /// `raw` exactly as given.

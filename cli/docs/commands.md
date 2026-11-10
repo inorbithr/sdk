@@ -237,7 +237,7 @@ never another address. `--dir` (or `IOHR_UI_DIR`) names a built `dist/`; without
 nearest `ui/dist` above the working folder is used. With no verb it serves and opens the
 browser (`IOHR_NO_BROWSER` prints the address instead).
 
-- GET and HEAD only. The `Host` must be this listener's own address or `localhost` on its
+- Pages are GET and HEAD only. The `Host` must be this listener's own address or `localhost` on its
   port. Paths cannot leave the folder or follow a link.
 - `/api/*` answers only this listener's own pages (`Sec-Fetch-Site`, `Origin`).
   `GET /api/extensions` lists the installed extensions that declare a `[panel]` (name,
@@ -258,9 +258,23 @@ browser (`IOHR_NO_BROWSER` prints the address instead).
   same profile, the same credential store; `--profile`, `--env` and `IOHR_TOKEN` apply) and
   calls the API for the page: `GET /api/session` says who (never a token),
   `POST /api/session/login` starts `iohr login --web` (the system browser, PKCE) and
-  `POST /api/session/logout` is `iohr logout`, and `GET /api/proxy/v1/...` forwards one
-  read to the API with that credential. Each needs the page's own `x-iohr-token` header.
-  The proxy is GET only, under `/v1/`, with plain path segments.
+  `POST /api/session/logout` is `iohr logout`, and `/api/proxy/v1/...` forwards one call
+  to the API with that credential. Each needs the page's own `x-iohr-token` header.
+  The proxy is under `/v1/`, with plain path segments, and never takes the WebSocket path.
+- Reads (`GET`, `HEAD`) need the token and this page's origin. Writes (`POST`, `PUT`,
+  `PATCH`, `DELETE`) need the same plus `Sec-Fetch-Site: same-origin` and an `Origin`
+  equal to the serve's own address; the token travels in the header only, never a cookie
+  or an address. A write goes only to the areas a view manages (accounts, approvals, atlas,
+  coordinator, decisions, sensors, planner, canvas), takes a JSON body of at most 1 MiB
+  that arrives within 10 s (`Content-Type: application/json`, no chunked bodies; `DELETE`
+  and reads take none) and is answered within 125 s. Bodies and tokens are never logged.
+- A `GET` with `Accept: text/event-stream` passes the API's server-sent events through
+  as they arrive: each event is flushed at once, the API's resume cursor (`sse_id`)
+  becomes the event `id`, a `: keepalive` comment goes out every 15 s, and a stream with no
+  event for 5 minutes is closed (the page reconnects). At most 4 streams run per serve
+  (the 5th gets `429`; a browser keeps six connections per origin); a stream ends when the
+  page goes away or the serve stops. The page's client is `apiStream` in `ui/src/lib/api.ts`
+  (reconnect with backoff, one shared connection per identical stream) and `useLive`.
 - A taken `--port` is an error. A running `serve` records its address in the data folder
   (`ui/serving.json`, private) and removes it when it stops.
 
