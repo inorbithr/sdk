@@ -35,11 +35,15 @@ import { PanelFrame } from "./frame/panel-frame.tsx";
 import { useFrameShortcuts } from "./frame/shortcuts.ts";
 import { toggleHidden } from "./frame/sidebar-frame.ts";
 import { Home } from "./home.tsx";
+import { accountMenu, accountName } from "./lib/accounts-core.ts";
+import { useAccounts } from "./lib/accounts-store.ts";
 import { updateArrangement as updateArr, useArrangement } from "./lib/arrange-store.ts";
 import { useDock } from "./lib/dock-store.ts";
 import { type Listing, loadExtensions, type Panel } from "./lib/extensions.ts";
 import { entryOf, isDown, whyClosed } from "./lib/features-core.ts";
 import { allOnline, backOnline, putDown, undoLast, useFeatures, useUndo } from "./lib/features-store.ts";
+import type { Space } from "./lib/home-core.ts";
+import { homeReads } from "./lib/home-data.ts";
 import { add as addOrbit, HOME, remove as removeOrbit } from "./lib/orbits-core.ts";
 import { updateOrbits, useOrbits } from "./lib/orbits-store.ts";
 import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
@@ -47,6 +51,7 @@ import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts"
 import { PLANNER, plannerRoute } from "./lib/planner-route.ts";
 import { useSession } from "./lib/session-store.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
+import { useRead } from "./lib/settings-data.ts";
 import { useSidebar } from "./lib/sidebar-store.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
 import { PlannerPage } from "./planner/planner-page.tsx";
@@ -66,7 +71,14 @@ import { Settings } from "./settings.tsx";
 export function App() {
   const [sidebar, update] = useSidebar();
   const [dock, updateDock] = useDock();
-  const account = useSession();
+  const raw = useSession();
+  const accounts = useAccounts(raw.session);
+  const account = { ...raw, session: accounts.session };
+  const spaces = useRead<{ spaces?: Space[] }, Space[]>(
+    accounts.active === null ? null : homeReads(accounts.active).spaces,
+    (w) => w.spaces ?? [],
+  );
+  const accountLabel = accountName(accounts.rows, accounts.active);
   const [listing, setListing] = useState<Listing | null>(null);
   const [open, setOpen] = useState(false);
   const menu = useRef<number | null>(null);
@@ -167,6 +179,24 @@ export function App() {
     const r = button.getBoundingClientRect();
     openContextMenu({ x: align === "right" ? r.right : r.left, y: r.bottom + 4 }, entries, { label, trigger: button });
   };
+
+  // The account switcher (RFC 0217.1): accounts, projects and the environment, as the Mac app's popover.
+  const openSwitcher = (button: HTMLElement) =>
+    menuAt(
+      button,
+      accountMenu({
+        rows: accounts.rows,
+        active: accounts.active,
+        projects: spaces.state === "ok" ? spaces.data.map((x) => ({ id: x.space_id, name: x.name })) : [],
+        profile: account.session?.state === "signed-in" ? account.session.profile : "",
+        signedIn: account.session?.state === "signed-in",
+        switchTo: accounts.switchTo,
+        signIn: account.signIn,
+        signOut: account.signOut,
+      }),
+      accountLabel,
+      "left",
+    );
 
   const pages = [
     { key: HOME, title: "Home" },
@@ -310,9 +340,10 @@ export function App() {
       )}
       <SessionControl
         session={account.session}
+        name={accountLabel}
         busy={account.busy}
         onSignIn={account.signIn}
-        onSignOut={account.signOut}
+        onOpen={openSwitcher}
       />
       <button
         type="button"
@@ -396,7 +427,7 @@ export function App() {
                 onClick={() => goTo("settings")}
               />
             </ul>
-            <RailAccount session={account.session} rail={rail} />
+            <RailAccount session={account.session} name={accountLabel} rail={rail} onOpen={openSwitcher} />
           </div>
         )}
         arrangement={arr}
@@ -445,6 +476,7 @@ export function App() {
           ) : inSettings ? (
             <Settings
               session={account.session}
+              accounts={accounts}
               busy={account.busy}
               onSignIn={account.signIn}
               onSignOut={account.signOut}
