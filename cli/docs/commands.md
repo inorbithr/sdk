@@ -265,7 +265,7 @@ browser (`IOHR_NO_BROWSER` prints the address instead).
   `PATCH`, `DELETE`) need the same plus `Sec-Fetch-Site: same-origin` and an `Origin`
   equal to the serve's own address; the token travels in the header only, never a cookie
   or an address. A write goes only to the areas a view manages (accounts, approvals, atlas,
-  coordinator, decisions, sensors, planner, canvas), takes a JSON body of at most 1 MiB
+  coordinator, decisions), takes a JSON body of at most 1 MiB
   that arrives within 10 s (`Content-Type: application/json`, no chunked bodies; `DELETE`
   and reads take none) and is answered within 125 s. Bodies and tokens are never logged.
 - A `GET` with `Accept: text/event-stream` passes the API's server-sent events through

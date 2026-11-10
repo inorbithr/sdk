@@ -89,15 +89,12 @@ async fn write(stream: &mut TcpStream, reply: &Reply) {
 /// One read or write: the API's status and JSON body pass on, nothing else does.
 /// The API areas the page may write to (RFC 0217): the ones a view of it manages. A write elsewhere is refused
 /// before it is read, so a new area is a deliberate change here.
-const WRITE_PREFIXES: [&str; 8] = [
+const WRITE_PREFIXES: [&str; 5] = [
     "/v1/accounts/",
     "/v1/approvals/",
     "/v1/atlas/",
     "/v1/coordinator/",
     "/v1/decisions/",
-    "/v1/sensors/",
-    "/v1/planner/",
-    "/v1/canvas/",
 ];
 
 async fn call(
