@@ -480,7 +480,7 @@ pub(crate) async fn auto_revoke(g: &Global, env: &Env) -> Result<(), Error> {
     Ok(())
 }
 
-fn service<'a>(
+pub(super) fn service<'a>(
     s: &'a Session,
     id: Option<&str>,
     account_flag: Option<String>,
@@ -497,7 +497,7 @@ fn service<'a>(
 }
 
 /// A failed call as the command's error: a refused sign-in says what to do.
-fn scoped(e: ServiceError) -> Error {
+pub(super) fn scoped(e: ServiceError) -> Error {
     match e {
         ServiceError::Api(a) if matches!(a.status(), Some(401 | 403)) => {
             Error::with_hint(a, SIGN_IN_HINT)
