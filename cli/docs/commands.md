@@ -71,6 +71,7 @@ ends its `--help` with real examples.
 | Command | What it does | More |
 |---|---|---|
 | `iohr` with no command | On a terminal: your shell inside the project's session, with the floating panel | [The panel](session-and-panel.md#bare-iohr-and-the-panel) |
+| `iohr ui [serve] \| build \| dev \| check \| open` | Serve the built web UI on loopback, or run its package's own scripts | [below](#iohr-ui) |
 | `iohr tunnel` | A loopback SSH pipe into an environment's edge | [below](#iohr-tunnel) |
 | `iohr browser install [--print]` | Install InOrbit Trails, the browser extension | [below](#iohr-browser-install) |
 | `iohr upgrade [--check]` | Update `iohr` the way it was installed | [Upgrade](install.md#upgrade) |
@@ -222,6 +223,36 @@ Io. `--account ID` acts on a team you belong to; the default is your own account
     failure and puts it back. An item that is already `done` is skipped, so a build
     resumes. The command's exit code is this command's (1 when it could not start). The
     note names the program, never its arguments.
+
+## `iohr ui`
+
+```sh
+iohr ui [serve [--port P] [--dir D] [--open]]
+iohr ui build|dev|check [--package DIR]
+iohr ui open
+```
+
+`serve` serves the built web UI (`sdk/ui`, RFC 0217) on loopback: `127.0.0.1`, else `[::1]`,
+never another address. `--dir` (or `IOHR_UI_DIR`) names a built `dist/`; without it the
+nearest `ui/dist` above the working folder is used. With no verb it serves and opens the
+browser (`IOHR_NO_BROWSER` prints the address instead).
+
+- GET and HEAD only. The `Host` must be this listener's own address or `localhost` on its
+  port. Paths cannot leave the folder or follow a link.
+- `/api/*` answers only this listener's own pages (`Sec-Fetch-Site`, `Origin`).
+  `GET /api/extensions` lists the installed extensions that declare a `[panel]` (name,
+  version, title, entry) from the same store `iohr ext install` writes, and starts none of
+  them.
+- A taken `--port` is an error. A running `serve` records its address in the data folder
+  (`ui/serving.json`, private) and removes it when it stops.
+
+`build`, `dev` and `check` run the UI package's own `pnpm run build`, `dev` or `check` in
+the nearest `ui/` holding a `package.json` (or `--package`), without a shell, and pass its
+exit code on. The mise tasks `ui:build`, `ui:dev`, `ui:check` and `ui:serve` call these
+verbs.
+
+`open` opens the UI the running `serve` recorded, only when it is a loopback address that
+still answers; a stale record is removed. `IOHR_NO_BROWSER` prints the address instead.
 
 ## `iohr tunnel`
 

@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _};
 
 use crate::permissions::Mode;
 use crate::permissions::broker::Session;
@@ -815,6 +815,92 @@ pub(crate) fn read(stdout: &str, exited_ok: bool) -> Reading {
     }
 }
 
+/// Makes the run print its events as they happen (`--output-format stream-json`, which needs
+/// `--verbose`; <https://code.claude.com/docs/en/cli-reference>), so the panel's chat box can
+/// count the files read and the commands run. The last line is the same result the `json`
+/// format prints.
+fn stream_flags(args: &mut Vec<String>) {
+    if let Some(at) = args.iter().position(|a| a == "--output-format") {
+        if let Some(format) = args.get_mut(at + 1) {
+            "stream-json".clone_into(format);
+        }
+        args.push("--verbose".to_owned());
+    }
+}
+
+/// What the run has done so far, as the chat box shows it: steps of no known total.
+#[derive(Debug, Default)]
+struct Progress {
+    files: u32,
+    commands: u32,
+    other: u32,
+}
+
+impl Progress {
+    /// The report (`step;N;-;label`) a tool call makes, none for any other event.
+    fn see(&mut self, event: &crate::ask::stream::Event) -> Option<String> {
+        let crate::ask::stream::Event::Tool { name, .. } = event else {
+            return None;
+        };
+        let label = match name.as_str() {
+            "Read" | "Grep" | "Glob" => {
+                self.files += 1;
+                format!(
+                    "reading {} file{}",
+                    self.files,
+                    if self.files == 1 { "" } else { "s" }
+                )
+            }
+            "Bash" => {
+                self.commands += 1;
+                format!(
+                    "running {} command{}",
+                    self.commands,
+                    if self.commands == 1 { "" } else { "s" }
+                )
+            }
+            _ => {
+                self.other += 1;
+                "working".to_owned()
+            }
+        };
+        Some(format!(
+            "step;{};-;{label}",
+            self.files + self.commands + self.other
+        ))
+    }
+}
+
+/// Reads the run's stream line by line, telling the chat box about each tool call, and keeps
+/// only the closing `result` line (the answer, in `json`'s shape).
+async fn watch(
+    out: &mut (impl tokio::io::AsyncRead + Unpin),
+    result: &mut Vec<u8>,
+) -> std::io::Result<()> {
+    let mut lines = tokio::io::BufReader::new(out);
+    let mut progress = Progress::default();
+    let mut line = String::new();
+    loop {
+        line.clear();
+        if lines.read_line(&mut line).await? == 0 {
+            return Ok(());
+        }
+        let text = line.trim();
+        if serde_json::from_str::<Value>(text)
+            .is_ok_and(|v| v.get("type").and_then(Value::as_str) == Some("result"))
+        {
+            result.clear();
+            result.extend_from_slice(text.as_bytes());
+            continue;
+        }
+        for event in crate::ask::stream::parse(crate::ask::Agent::Claude, text) {
+            if let Some(report) = progress.see(&event) {
+                crate::panel::chat_report(&report);
+            }
+        }
+    }
+}
+
 /// Runs `bin` once with `message` on stdin. The environment is the allowlisted part of
 /// this one (no `ANTHROPIC_*`, no token), in the temp folder so a project's own settings
 /// and memory files are not read. A run that passes the time limit is killed.
@@ -827,7 +913,12 @@ pub(crate) async fn run(
     reads: (bool, &[std::path::PathBuf]),
     (session, plan): (Option<&Session>, bool),
 ) -> Result<(String, u64), String> {
-    let args = args(model, reads, session, plan)?;
+    let mut args = args(model, reads, session, plan)?;
+    // Inside a panel whose chat box shows, the run streams so the box can show its progress.
+    let streamed = crate::panel::chat_shown();
+    if streamed {
+        stream_flags(&mut args);
+    }
     // The file tools are confined to the working directory, so the run starts in the
     // folder it may read or run commands in; with no tools it starts in the temp folder.
     let dir = folder.map_or_else(std::env::temp_dir, std::path::Path::to_path_buf);
@@ -851,7 +942,11 @@ pub(crate) async fn run(
         let _ = stdin.write_all(input.as_bytes()).await;
         drop(stdin);
         let mut buf = Vec::new();
-        let read = stdout.read_to_end(&mut buf).await;
+        let read = if streamed {
+            watch(&mut stdout, &mut buf).await
+        } else {
+            stdout.read_to_end(&mut buf).await.map(|_| ())
+        };
         let status = child.wait().await;
         (read, status, buf)
     };
@@ -1495,5 +1590,54 @@ mod tests {
             assert_eq!((sent.output, sent.output_bytes), (how.name(), 4));
             assert!(!sent.can_attach, "already attached");
         }
+    }
+
+    #[test]
+    fn a_streamed_run_asks_for_stream_json_with_verbose_and_nothing_forbidden() {
+        let mut a = args("haiku", (true, &[]), None, false).unwrap();
+        stream_flags(&mut a);
+        let at = a.iter().position(|f| f == "--output-format").unwrap();
+        assert_eq!(a[at + 1], "stream-json", "{a:?}");
+        assert!(a.contains(&"--verbose".to_owned()), "{a:?}");
+        assert!(claude::assert_honest(&a).is_ok(), "{a:?}");
+    }
+
+    #[test]
+    fn tool_calls_become_counted_steps_with_no_total() {
+        use crate::ask::stream::Event;
+        let tool = |name: &str| Event::Tool {
+            id: None,
+            name: name.to_owned(),
+            detail: String::new(),
+        };
+        let mut p = Progress::default();
+        assert_eq!(p.see(&Event::Text("hi".into())), None);
+        assert_eq!(p.see(&tool("Read")).unwrap(), "step;1;-;reading 1 file");
+        assert_eq!(p.see(&tool("Grep")).unwrap(), "step;2;-;reading 2 files");
+        assert_eq!(p.see(&tool("Bash")).unwrap(), "step;3;-;running 1 command");
+        assert_eq!(p.see(&tool("Other")).unwrap(), "step;4;-;working");
+    }
+
+    #[tokio::test]
+    async fn the_watched_stream_keeps_only_the_result_and_reads_like_json() {
+        let stream = concat!(
+            r#"{"type":"system","subtype":"init"}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"a"}}]}}"#,
+            "\n",
+            r#"{"type":"result","subtype":"success","is_error":false,"result":"the answer","duration_ms":12}"#,
+            "\n"
+        );
+        let mut input = stream.as_bytes();
+        let mut result = Vec::new();
+        watch(&mut input, &mut result).await.unwrap();
+        let text = String::from_utf8(result).unwrap();
+        assert_eq!(
+            read(&text, true),
+            Reading::Answer {
+                text: "the answer".to_owned(),
+                duration_ms: Some(12)
+            }
+        );
     }
 }

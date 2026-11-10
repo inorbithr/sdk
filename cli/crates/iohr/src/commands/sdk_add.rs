@@ -89,29 +89,7 @@ pub(crate) fn add(args: &SdkAdd, out: Out) -> Result<(), Error> {
         plan.command_line(),
         plan.dir.display()
     ));
-    let mut child = Command::new(&program);
-    child.args(&plan.args).current_dir(&plan.dir);
-    if out.json {
-        // stdout carries the JSON answer alone; the package manager talks on stderr.
-        child.stdout(Stdio::from(std::io::stderr()));
-    }
-    let status = child
-        .status()
-        .map_err(|e| Error::Failed(format!("cannot run {}: {e}", program.display())))?;
-    if !status.success() {
-        return match status.code() {
-            Some(code) => {
-                Out::note(&format!("{} exited with {code}", plan.manager));
-                Err(Error::Child(
-                    u8::try_from(code).ok().filter(|c| *c != 0).unwrap_or(1),
-                ))
-            }
-            None => Err(Error::Failed(format!(
-                "{} was stopped by a signal",
-                plan.manager
-            ))),
-        };
-    }
+    run_program(&program, &plan.args, &plan.dir, plan.manager, out.json)?;
     let example = example(plan.lang);
     if out.json {
         Out::print_json(&serde_json::json!({
@@ -409,10 +387,42 @@ fn check_version(v: &str) -> Result<String, Error> {
     }
 }
 
+/// Runs `program` with `args` in `dir`, as one argument vector (no shell), and waits.
+/// Under `--json` the program's stdout goes to stderr, so stdout carries the JSON answer
+/// alone. A non-zero exit is the program's exit code (`Error::Child`); `label` names it.
+pub(crate) fn run_program(
+    program: &Path,
+    args: &[String],
+    dir: &Path,
+    label: &str,
+    json: bool,
+) -> Result<(), Error> {
+    let mut child = Command::new(program);
+    child.args(args).current_dir(dir);
+    if json {
+        child.stdout(Stdio::from(std::io::stderr()));
+    }
+    let status = child
+        .status()
+        .map_err(|e| Error::Failed(format!("cannot run {}: {e}", program.display())))?;
+    if status.success() {
+        return Ok(());
+    }
+    match status.code() {
+        Some(code) => {
+            Out::note(&format!("{label} exited with {code}"));
+            Err(Error::Child(
+                u8::try_from(code).ok().filter(|c| *c != 0).unwrap_or(1),
+            ))
+        }
+        None => Err(Error::Failed(format!("{label} was stopped by a signal"))),
+    }
+}
+
 /// The program's full path: itself when it is a path, otherwise the first match in an
 /// absolute `PATH` entry. A relative entry (`.`, an empty one) is skipped, so a program
 /// of that name in the project directory is never run.
-fn resolve(program: &Path) -> Option<PathBuf> {
+pub(crate) fn resolve(program: &Path) -> Option<PathBuf> {
     if program.components().count() > 1 {
         return program.is_file().then(|| program.to_path_buf());
     }

@@ -30,6 +30,15 @@
 # network. When that file is more than 30 seconds old a background `asks count --cache`
 # refreshes it (at most once in 30 seconds), and the next prompt shows the new number. An
 # RPROMPT you set yourself is left alone; INORBIT_ASKS_PROMPT=0 turns the segment off.
+#
+# Inside `iohr panel` (RFC 0212) the terminal has a chat box at the bottom. This hook tells it,
+# with private terminal commands (OSC 7771, written to the terminal and taken out by the
+# panel, so no other terminal ever sees them), when the prompt is ready, when a command runs
+# and which answer mode is set. A bare `?` at an empty prompt hands the keys to the box (a
+# second `?` there means `??`); the box hands a question back as the private key
+# `ESC [ 27771 ~`, which reads it from a private file the panel named in IOHR_PANEL_CHAT_FILE
+# and asks it at once, so one Enter sends it. Outside the panel, or with `[panel] chat = "off"`,
+# none of this is bound or sent and `?` is typed as before.
 if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
   typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa _iohr_ask_cmd _iohr_ask_link _iohr_ask_undo _iohr_ask_access _iohr_ask_steps _iohr_ask_live
   # The command that failed under the last ask, its exit status, and the output attached to it
@@ -135,7 +144,55 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
       [[ ${_iohr_ask_ring[i]} == $_iohr_ask_mode ]] && next=$(( i % ${#_iohr_ask_ring} + 1 ))
     done
     _iohr_ask_mode=${_iohr_ask_ring[next]}
+    _iohr_chat_osc "mode;$_iohr_ask_mode"
     zle -M "ask mode: $_iohr_ask_mode (shift+tab for the next)"
+  }
+
+  # One report to the panel's chat box (RFC 0212), only inside a live panel that has a box:
+  # the panel names its private question file in IOHR_PANEL_CHAT_FILE (not set when
+  # `[panel] chat = "off"`) and IOHR_PANEL is its process id. Written to the terminal, where
+  # the panel takes it out of the output; the shell prints nothing.
+  _iohr_chat_osc() {
+    [[ -n ${IOHR_PANEL_CHAT_FILE-} && -n ${IOHR_PANEL-} ]] && kill -0 $IOHR_PANEL 2>/dev/null || return 0
+    printf '\e]7771;chat;%s\a' "$1" >/dev/tty 2>/dev/null
+    return 0
+  }
+  # The prompt is ready: the answer mode now and the modes Shift+Tab goes through, so the box
+  # never works them out itself.
+  _iohr_chat_idle() { _iohr_chat_osc "idle;$_iohr_ask_mode;${(j:,:)_iohr_ask_ring}"; }
+  # A command is about to run: the box gives the keys back.
+  _iohr_chat_busy() { _iohr_chat_osc busy; }
+
+  # `?` on an empty line, in a panel with a chat box: the box takes the keys (the panel sees
+  # the report; a second one means `??`). Anything typed ahead of it, text on the line, or no
+  # box leaves `?` as it was: the key's previous widget, or a plain `?`.
+  typeset -gA _iohr_qm_prev
+  _iohr_chat_qm() {
+    if [[ -z $BUFFER && ${INORBIT_ASK-} != 0 && -n ${IOHR_PANEL_CHAT_FILE-} &&
+          -n ${IOHR_PANEL-} && $PENDING == 0 ]] && kill -0 $IOHR_PANEL 2>/dev/null; then
+      _iohr_chat_osc focus
+      return 0
+    fi
+    zle ${_iohr_qm_prev[$KEYMAP]:-self-insert}
+  }
+  # What the panel types instead of `?` when the box is folded (or too small to show): the
+  # question mark goes into the line, with no second report to the box.
+  _iohr_chat_qm_inline() { LBUFFER+='?'; }
+
+  # The box's question, as the panel hands it over: the answer mode on the first line and the
+  # `?` or `??` line on the second, in the private file; one Enter, no second one. A line on
+  # the prompt is kept and comes back after the answer.
+  _iohr_chat_send() {
+    [[ ${INORBIT_ASK-} != 0 && -n ${IOHR_PANEL_CHAT_FILE-} && -r $IOHR_PANEL_CHAT_FILE ]] || return 0
+    local mode line
+    { IFS= read -r mode; IFS= read -r line } < $IOHR_PANEL_CHAT_FILE
+    : >| $IOHR_PANEL_CHAT_FILE
+    [[ $line == \?* ]] || return 0
+    (( ${_iohr_ask_ring[(Ie)$mode]} )) && _iohr_ask_mode=$mode
+    [[ -n $BUFFER ]] && zle push-line
+    BUFFER=$line
+    CURSOR=${#BUFFER}
+    zle accept-line
   }
 
   _iohr_ask_precmd() {
@@ -180,6 +237,10 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     # `??`), the command it suggests, the link it names and the permission rules this run saved
     # (what Undo takes back), separated by a 0x1e character, then the folder Io needs a yes for and
     # the next steps.
+    # Ctrl-C or Esc in the chat box stops the ask, and the same signal reaches this shell too:
+    # a trap that does nothing lets the hooks after this one (the box's "ready") still run.
+    setopt localtraps
+    trap ':' INT
     rec=$("${a[@]}" -- "$q"); local ok=$?
     [[ -n $outfile ]] && command rm -f -- "$outfile"
     if (( ok == 0 )); then
@@ -241,6 +302,10 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
   # First, so the exit status it reads is the last command's.
   add-zsh-hook precmd _iohr_ask_precmd
   precmd_functions=(_iohr_ask_precmd ${precmd_functions:#_iohr_ask_precmd})
+  # Last, so the box hears "ready" after the answer has been printed.
+  add-zsh-hook precmd _iohr_chat_idle
+  precmd_functions=(${precmd_functions:#_iohr_chat_idle} _iohr_chat_idle)
+  add-zsh-hook preexec _iohr_chat_busy
   # Sourcing this again (a second `source ~/.zshrc`, an upgrade in a running shell, or a plugin
   # such as zsh-autosuggestions that re-wraps widgets) must not copy our own widget into
   # _iohr_ask_prev_accept, or accept-line would call itself until FUNCNEST. So the functions
@@ -282,6 +347,24 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
         _iohr_mode_prev[$_iohr_km]=$_iohr_cur
     fi
     bindkey -M $_iohr_km -- '^[[Z' _iohr_ask_cycle
+  done
+  unset _iohr_km _iohr_cur
+  # `?` (focus the box) and the private key the panel delivers a question with, in each keymap,
+  # the same way. Both do nothing outside a panel with a box.
+  zle -N _iohr_chat_qm
+  zle -N _iohr_chat_send
+  zle -N _iohr_chat_qm_inline
+  local _iohr_km _iohr_cur
+  for _iohr_km in emacs viins; do
+    if [[ -z ${_iohr_qm_prev[$_iohr_km]-} ]]; then
+      _iohr_cur=$(bindkey -M $_iohr_km -- '?' 2>/dev/null)
+      _iohr_cur=${_iohr_cur##* }
+      [[ -n $_iohr_cur && $_iohr_cur != undefined-key && $_iohr_cur != _iohr_chat_qm ]] &&
+        _iohr_qm_prev[$_iohr_km]=$_iohr_cur
+    fi
+    bindkey -M $_iohr_km -- '?' _iohr_chat_qm
+    bindkey -M $_iohr_km -- '^[[27771~' _iohr_chat_send
+    bindkey -M $_iohr_km -- '^[[27772~' _iohr_chat_qm_inline
   done
   unset _iohr_km _iohr_cur
 fi

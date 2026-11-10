@@ -315,13 +315,18 @@ pub struct PanelConfig {
     /// `IOHR_PANEL_MOUSE` overrides it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mouse: Option<String>,
+    /// The chat box at the bottom of the panel's terminal (RFC 0212): `on` (shown, the
+    /// default), `hidden` (loaded, but a corner chip until `Ctrl-]` brings it back) or `off`
+    /// (never drawn, `?` stays the shell's). `IOHR_PANEL_CHAT` overrides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat: Option<String>,
 }
 
 impl PanelConfig {
     /// Whether nothing is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.mouse.is_none()
+        self.mouse.is_none() && self.chat.is_none()
     }
 }
 
@@ -843,7 +848,10 @@ fn storage_str(s: Storage) -> &'static str {
 
 /// Writes `bytes` to `dir/name` through a temporary file and a rename, with the
 /// directory mode 0700 and the file mode 0600 on Unix.
-pub(crate) fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
+///
+/// # Errors
+/// The directory or the file could not be written.
+pub fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
     create_private_dir(dir)?;
     let tmp = dir.join(format!(".{name}.tmp"));
     {
