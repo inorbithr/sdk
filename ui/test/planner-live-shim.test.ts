@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sseFrames } from "../src/planner/live-shim.ts";
+import { sseFrames } from "../src/lib/live-shim.ts";
 
 test("sseFrames splits frames, joins data lines, skips comments and keeps the unfinished tail", () => {
   const r = sseFrames(': hi\n\nevent: delta\nid: 7\ndata: {"a":\ndata: 1}\n\ndata: {"b":2}\r\n\r\ndata: {"c"');

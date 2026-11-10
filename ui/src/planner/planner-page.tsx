@@ -1,5 +1,7 @@
 import { openContextMenu } from "../frame/context-menu.tsx";
+import { plannerHandlers } from "../lib/planner-keys.ts";
 import { plannerMenu } from "../lib/planner-menus.ts";
+import { useShortcuts } from "../lib/use-shortcuts.ts";
 import { MODE_LABEL, MODES, plannerHref, plannerRoute } from "../lib/planner-route.ts";
 import { Overview } from "./overview.tsx";
 import { DecisionsView, ExploreView, PreviewView } from "./plan-extra.tsx";
@@ -15,6 +17,15 @@ export function PlannerPage() {
   const planId = route?.planId ?? null;
   const { plan, listed, read, reload } = usePlan(planId, live.plans.get(planId ?? "")?.seq ?? 0);
   const st = useStages({ plan, listed });
+  useShortcuts(
+    "planner",
+    route
+      ? plannerHandlers(route, {
+          go: (h) => window.location.assign(h),
+          focusSearch: () => document.querySelector<HTMLInputElement>('input[aria-label="Search plans"]')?.focus(),
+        })
+      : {},
+  );
   if (!route) return null;
   const mode = route.mode;
   const raw = read?.state === "ok" ? read.data : null;

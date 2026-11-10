@@ -8,7 +8,14 @@ const api = process.env.IOHR_UI_API;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  build: { assetsInlineLimit: 0, sourcemap: false },
+  build: {
+    assetsInlineLimit: 0,
+    sourcemap: false,
+    rollupOptions: {
+      // three and its React renderer are the 3D pages' own chunk: the shell and every other page never load them.
+      output: { manualChunks: (id) => (/node_modules\/(three|@react-three)\//.test(id) ? "three" : undefined) },
+    },
+  },
   server: {
     host: "127.0.0.1",
     strictPort: true,

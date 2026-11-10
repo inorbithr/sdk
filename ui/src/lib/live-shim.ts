@@ -1,29 +1,30 @@
-// A stand-in for the live agent's client (feat/ui-live: `apiSend`, `apiStream`, `useLive` in lib/api.ts), with the
-// signatures the port board confirmed. It exists only until that PR merges; then this file is deleted and the
-// planner imports from lib/api.ts. It goes through the same local proxy as `apiGet` (`/api/proxy/v1/...` with the
-// per-serve token) and never reaches the API itself.
-
+// The page's live layer, one copy: reads over SSE through the local server's proxy (`apiStream`, `useLive`) and writes
+// (`apiSend` for an ok or a reason, `apiWrite` for the answer's data). Every call carries the per-serve token and the
+// page never holds a credential of its own. A stand-in for the live agent's client until it publishes one in lib/api.ts.
 import { useEffect, useRef, useState } from "react";
-import type { Read } from "../lib/api.ts";
-import { startToken } from "../lib/panels.ts";
+import { proxyPath, type Read } from "./api.ts";
+import { startToken } from "./panels.ts";
 
-export type LiveState = "connecting" | "live" | "reconnecting" | "offline";
+export type LiveState = "connecting" | "live" | "reconnecting" | "off";
 export type StreamMeta = { event: string; id: string };
 
-const path = (p: string, query: Record<string, string> = {}): string | null => {
-  if (!p.startsWith("/v1/") || p.includes("..") || p.includes("//") || /[?#\\]/.test(p)) return null;
-  const q = Object.entries(query).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
-  return `/api/proxy${p}${q.length === 0 ? "" : `?${q.join("&")}`}`;
-};
+/** The data lines of one SSE block, joined, or null for a comment or heartbeat block. */
+export function sseData(block: string): string | null {
+  const lines = block
+    .split("\n")
+    .filter((l) => l.startsWith("data:"))
+    .map((l) => l.slice(5).replace(/^ /, ""));
+  return lines.length ? lines.join("\n") : null;
+}
 
-/** One write through the local server. Never throws. */
-export async function apiSend<T = unknown>(
+/** One write through the local server, with the API's answer as a `Read`. Never throws. */
+export async function apiWrite<T = unknown>(
   method: "POST" | "PATCH" | "PUT" | "DELETE",
   p: string,
   body?: unknown,
   opts: { query?: Record<string, string>; idempotencyKey?: string; signal?: AbortSignal } = {},
 ): Promise<Read<T>> {
-  const url = path(p, opts.query);
+  const url = proxyPath(p, opts.query);
   const token = startToken();
   if (url === null) return { state: "error", status: 400, reason: "That is not a path the page may write." };
   if (token === null)
@@ -103,12 +104,12 @@ export function apiStream<T = unknown>(
   const ctl = new AbortController();
   const stop = () => ctl.abort();
   opts.signal?.addEventListener("abort", stop, { once: true });
-  const url = path(p, opts.query);
+  const url = proxyPath(p, opts.query);
   const token = startToken();
   void (async () => {
     if (url === null || token === null) {
       opts.onState?.(
-        "offline",
+        "off",
         url === null ? "That is not a path the page may read." : "This page has no start token.",
       );
       return;
@@ -130,7 +131,7 @@ export function apiStream<T = unknown>(
           signal: ctl.signal,
         });
         if (res.status === 401) {
-          opts.onState?.("offline", "Signed out.");
+          opts.onState?.("off", "Signed out.");
           return;
         }
         if (!res.ok || !res.body) {
@@ -147,7 +148,7 @@ export function apiStream<T = unknown>(
             buf = s.rest;
             for (const f of s.frames) {
               try {
-                onEventSafe(onEvent, JSON.parse(f.data) as T, { event: f.event, id: f.id });
+                onEvent(JSON.parse(f.data) as T, { event: f.event, id: f.id });
               } catch {
                 // a frame that is not JSON is skipped
               }
@@ -167,33 +168,43 @@ export function apiStream<T = unknown>(
   return stop;
 }
 
-const onEventSafe = <T>(fn: (d: T, m: StreamMeta) => void, d: T, m: StreamMeta) => fn(d, m);
-
 /** A stream's folded value and its state, for a component. */
 export function useLive<T, V>(
   p: string | null,
   opts: { query?: Record<string, string>; reduce: (prev: V, data: T, meta: StreamMeta) => V; initial: V },
-): { value: V; state: LiveState; reason: string } {
+): { value: V; state: LiveState; reason: string | null } {
   const [value, setValue] = useState<V>(opts.initial);
-  const [state, setState] = useState<LiveState>(p === null ? "offline" : "connecting");
-  const [reason, setReason] = useState("");
+  const [state, setState] = useState<LiveState>(p === null ? "off" : "connecting");
+  const [reason, setReason] = useState<string | null>(null);
   const reduce = useRef(opts.reduce);
   reduce.current = opts.reduce;
+  const initial = useRef(opts.initial);
   const q = JSON.stringify(opts.query ?? {});
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the initial value is read once per stream
   useEffect(() => {
     if (p === null) {
-      setState("offline");
+      setState("off");
       return;
     }
-    setValue(opts.initial);
+    setValue(initial.current);
     return apiStream<T>(p, (d, m) => setValue((v) => reduce.current(v, d, m)), {
       query: JSON.parse(q) as Record<string, string>,
       onState: (s, r) => {
         setState(s);
-        setReason(r);
+        setReason(r === "" ? null : r);
       },
     });
   }, [p, q]);
   return { value, state, reason };
+}
+
+/** A write through the local server: ok, or the API's own reason in words. */
+export async function apiSend(
+  method: "POST" | "PATCH" | "PUT" | "DELETE",
+  path: string,
+  body?: unknown,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const r = await apiWrite(method, path, body);
+  if (r.state === "ok") return { ok: true };
+  if (r.state === "signed-out") return { ok: false, reason: "Signed out." };
+  return { ok: false, reason: r.status === 403 ? "Your role may not do that." : r.reason };
 }

@@ -2,7 +2,6 @@ import { type ReactNode, useState } from "react";
 import { resetAll } from "./frame/arrange.ts";
 import { cn } from "./frame/cn.ts";
 import { closeDock, openDock } from "./frame/dock-frame.ts";
-import { FRAME_SHORTCUTS, LAYOUT_SHORTCUTS, symbols } from "./frame/shortcuts.ts";
 import { type SidebarMode, setMode } from "./frame/sidebar-frame.ts";
 import { type AccountRow, planLabel, roleLabel } from "./lib/accounts-core.ts";
 import type { AccountsState } from "./lib/accounts-store.ts";
@@ -38,6 +37,7 @@ import {
 } from "./lib/team-core.ts";
 import { setThemeChoice, useThemeChoice } from "./lib/theme.ts";
 import { CHOICES } from "./lib/theme-core.ts";
+import { ShortcutList } from "./shortcuts-view.tsx";
 
 // The bodies of Settings' panes (RFC 0217, slice 4). Each shows what this page really has: a control that changes the
 // real state, or a read of the signed-in account, or a plain line that says it is empty or not built here. Nothing is
@@ -610,20 +610,7 @@ export function Projects({ session, onSignIn }: PaneProps) {
 }
 
 export function Keyboard() {
-  const table = (rows: { id: string; label: string; accel: string }[]) =>
-    rows.map((s) => (
-      <Row key={s.id} label={s.label}>
-        <kbd className="bg-muted rounded px-1.5 py-0.5 font-mono text-[12px]">{symbols(s.accel)}</kbd>
-      </Row>
-    ));
-  return (
-    <>
-      <Section title="Frame">{table(FRAME_SHORTCUTS)}</Section>
-      <Section title="Window layout" note="Only where the window is wide enough to arrange.">
-        {table(LAYOUT_SHORTCUTS)}
-      </Section>
-    </>
-  );
+  return <ShortcutList pages={["home", "settings"]} />;
 }
 
 export function Features({ onEdit }: PaneProps) {
