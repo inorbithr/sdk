@@ -103,11 +103,9 @@ fn lint(path: &Path, preview: bool, out: Out) -> Result<(), Error> {
     }
 }
 
+/// The extension store below the iohr data folder (`--data-dir`, else the platform's).
 pub(crate) fn store(g: &Global) -> Result<Store, Error> {
-    Ok(Store::new(match &g.data_dir {
-        Some(d) => d.join("extensions"),
-        None => Store::default_root()?,
-    }))
+    Ok(Store::in_data_dir(&super::session::data_dir(g)?))
 }
 
 /// The registry and trust policy from the config (and `IOHR_EXT_REGISTRY`).

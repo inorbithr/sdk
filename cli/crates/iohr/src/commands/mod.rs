@@ -41,6 +41,7 @@ mod theme;
 mod token;
 mod tunnel;
 pub(crate) mod upgrade;
+mod web_ui;
 mod whoami;
 
 use clap::CommandFactory as _;
@@ -53,14 +54,15 @@ use crate::cli::{
 use crate::error::Error;
 use crate::output::Out;
 
-/// Commands that call no API, so an environment with a placeholder address is no bar to
-/// them (`check_environment`): a tunnel reaches an environment over ssh, the permission
-/// commands answer on this machine, and `sign-binary` signs a file on this Mac.
+/// Commands that never call the API, so a placeholder address is no bar: a tunnel reaches
+/// an environment over ssh, the UI serves files on loopback, the permission commands
+/// answer on this machine, and `sign-binary` signs a file on this Mac.
 fn calls_no_api(command: Option<&Command>) -> bool {
     matches!(
         command,
         Some(
             Command::Tunnel(_)
+                | Command::Ui(_)
                 | Command::Permissions(_)
                 | Command::PermissionServer { .. }
                 | Command::SignBinary { .. }
@@ -164,6 +166,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
             Ok(())
         }
         Command::Tunnel(args) => tunnel::run(g, &args, out),
+        Command::Ui(args) => web_ui::run(g, &env, args, out).await,
         Command::External(argv) => ext::external(g, &env, argv).await,
         Command::Completion { shell } => {
             let mut buf = Vec::new();

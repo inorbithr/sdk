@@ -2821,6 +2821,139 @@ fn sdk_add_runs_the_program_and_passes_its_exit_code_on() {
     assert_eq!(v["manager"], "pip");
 }
 
+// `iohr ui` (RFC 0217): the UI package's scripts through pnpm, and `open` from the record
+// a running `serve` leaves in the data folder.
+
+fn iohr_ui(dir: &Path, data: &Path, args: &[&str], extra: &[(&str, &std::ffi::OsStr)]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .arg("ui")
+        .args(args)
+        .current_dir(dir)
+        .env_clear()
+        .envs(kept_env())
+        .env("IOHR_CONFIG_DIR", data.join("config"))
+        .env("IOHR_DATA_DIR", data)
+        .envs(extra.iter().map(|(k, v)| (*k, *v)))
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+/// A stand-in `pnpm` first on PATH: the arguments arrive as given, the script runs in the
+/// nearest `ui/` package, and its exit code is iohr's.
+#[cfg(unix)]
+#[test]
+fn ui_build_dev_and_check_run_pnpm_in_the_ui_package() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let p = project(&[]);
+    let ui = p.path().join("ui");
+    std::fs::create_dir_all(&ui).unwrap();
+    std::fs::write(ui.join("package.json"), "{}").unwrap();
+    let deep = p.path().join("cli/crates");
+    std::fs::create_dir_all(&deep).unwrap();
+    let bin = p.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let pnpm = bin.join("pnpm");
+    std::fs::write(
+        &pnpm,
+        "#!/bin/sh\nprintf '%s|' \"$@\" > args.txt\nexit \"${FAKE_EXIT:-0}\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&pnpm, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let env = [("PATH", path.as_os_str())];
+    for verb in ["build", "dev", "check"] {
+        let o = iohr_ui(&deep, p.path(), &[verb], &env);
+        assert_eq!(code(&o), 0, "{verb}: {}", text(&o));
+        assert_eq!(
+            std::fs::read_to_string(ui.join("args.txt")).unwrap(),
+            format!("run|{verb}|")
+        );
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(err.contains(&format!("Running `pnpm run {verb}`")), "{err}");
+    }
+    let o = iohr_ui(
+        &deep,
+        p.path(),
+        &["build"],
+        &[env[0], ("FAKE_EXIT", std::ffi::OsStr::new("3"))],
+    );
+    assert_eq!(code(&o), 3, "{}", text(&o));
+    // --json: stdout is the answer alone; --package names the folder.
+    let o = iohr_ui(
+        Path::new("/"),
+        p.path(),
+        &["build", "--json", "--package", ui.to_str().unwrap()],
+        &env,
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["script"], "build");
+}
+
+#[test]
+fn ui_build_without_a_package_or_open_without_a_server_is_a_usage_error() {
+    let p = project(&[]);
+    let o = iohr_ui(p.path(), p.path(), &["build"], &[]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(text(&o).contains("no UI package here"), "{}", text(&o));
+    let o = iohr_ui(p.path(), p.path(), &["build", "--package", "."], &[]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    let o = iohr_ui(p.path(), p.path(), &["open"], &[]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(
+        text(&o).contains("run `iohr ui serve` first"),
+        "{}",
+        text(&o)
+    );
+}
+
+/// `serve` records its address; `open` (no browser here) prints it while the server
+/// answers, and once it is gone says so and drops the stale record.
+#[cfg(unix)]
+#[test]
+fn ui_open_finds_the_running_serve_and_forgets_a_dead_one() {
+    let p = project(&[]);
+    let dist = p.path().join("ui/dist");
+    std::fs::create_dir_all(&dist).unwrap();
+    std::fs::write(dist.join("index.html"), "<!doctype html>").unwrap();
+    let data = p.path().join("data");
+    let mut serve = Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .args(["ui", "serve"])
+        .current_dir(p.path())
+        .env_clear()
+        .envs(kept_env())
+        .env("IOHR_CONFIG_DIR", data.join("config"))
+        .env("IOHR_DATA_DIR", &data)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let record = data.join("ui/serving.json");
+    let start = std::time::Instant::now();
+    while !record.exists() && start.elapsed() < std::time::Duration::from_secs(20) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let o = iohr_ui(p.path(), &data, &["open"], &[]);
+    let _ = serve.kill();
+    let _ = serve.wait();
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let url = String::from_utf8_lossy(&o.stdout).trim().to_owned();
+    assert!(
+        url.starts_with("http://127.0.0.1:") || url.starts_with("http://[::1]:"),
+        "{url}"
+    );
+    assert!(url.ends_with('/'), "{url}");
+    let o = iohr_ui(p.path(), &data, &["open"], &[]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(text(&o).contains("no longer running"), "{}", text(&o));
+    assert!(!record.exists(), "the stale record is removed");
+}
+
 // `iohr decisions` (platform RFC 0065, core ADR 0056): the Decisions API through the
 // SDK's Decisions operations.
 
