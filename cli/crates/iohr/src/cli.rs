@@ -2417,6 +2417,30 @@ pub struct InitArgs {
     /// Reading a public site on this machine (the agent extension's crawler).
     #[command(flatten)]
     pub crawl: InitCrawlArgs,
+    /// Where the project keeps what iohr learns about it, and what shape it has.
+    #[command(flatten)]
+    pub place_args: InitPlaceArgs,
+}
+
+/// Where the project's notes, crawl and state live, and the project's shape (light PRD 0210).
+#[derive(Debug, Args)]
+pub struct InitPlaceArgs {
+    /// Keep the project's notes (ADRs, memory), the crawl and the state in the project
+    /// folder (`project`: `.inorbit/`, travels with the repository) or in your home folder
+    /// (`home`: `~/.inorbit/projects/NAME/`, stays on this machine). The answer is written to
+    /// `[project] data` in inorbit.toml and every later command follows it. At a terminal it
+    /// is asked once; without a choice the layout older versions made stays as it is.
+    #[arg(long = "keep-in", value_name = "WHERE", env = "IOHR_INIT_KEEP_IN", value_parser = ["project", "home"])]
+    pub keep_in: Option<String>,
+    /// When the place changes, copy what the old place holds into the new one (nothing is
+    /// ever deleted, nothing already there is overwritten). At a terminal it is offered.
+    #[arg(long = "copy-data")]
+    pub copy_data: bool,
+    /// The project's shape: `monolith`, `microservices` or `combined`. Without it, a terminal
+    /// is asked once and anywhere else the question stays an open item in the project's
+    /// Planner plan for the Mac app or the phone to answer.
+    #[arg(long, value_name = "SHAPE", env = "IOHR_INIT_SHAPE", value_parser = ["monolith", "microservices", "combined"])]
+    pub shape: Option<String>,
 }
 
 /// The slowest, the fastest and the usual `--crawl-rate`, requests a second to one host

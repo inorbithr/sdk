@@ -54,7 +54,7 @@ pub fn files(lang: Option<&str>, slug: &str) -> Vec<(String, String)> {
 /// README. A person who forgot a seed keeps it forgotten.
 #[must_use]
 pub fn has_entries(root: &Path) -> bool {
-    std::fs::read_dir(root.join(PROJECT_DIR)).is_ok_and(|rd| {
+    std::fs::read_dir(crate::project::place::Layout::of(root).memory()).is_ok_and(|rd| {
         rd.filter_map(Result::ok).any(|e| {
             let n = e.file_name();
             let n = n.to_string_lossy();
