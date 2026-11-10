@@ -132,6 +132,13 @@ fn commit_all(dir: &Path, message: &str) -> bool {
                 "user.email=iohr@inorbit.hr",
                 "-c",
                 "commit.gpgsign=false",
+                // A commit may start `git maintenance` in the background; a new folder has
+                // nothing to tidy, and a process left behind can write into `.git` after
+                // iohr has returned.
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
                 "commit",
                 "-q",
                 "-m",
