@@ -18,7 +18,6 @@ export type Member = {
 /** The reads the panes make for an account (an org id). */
 export const settingsReads = (account: string) => ({
   members: { path: `/v1/accounts/orgs/${enc(account)}/members`, query: {} as Record<string, string> },
-  projects: { path: "/v1/decisions/tree", query: { account_id: account } },
 });
 
 /** One read, again on `again`. `null` means nothing to ask yet (not signed in), so nothing is asked. */

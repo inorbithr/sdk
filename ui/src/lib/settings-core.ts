@@ -21,7 +21,7 @@ export type PaneId =
   | "notifications"
   | "features"
   | "coherence"
-  | "personalities"
+  | "roles"
   | "privacy"
   | "operations"
   | "developer"
@@ -66,7 +66,7 @@ export const PANES: Pane[] = [
   pane("notifications", "Notifications", "What tells you, and when it stays quiet.", MAC),
   pane("features", "Features & maintenance", "Put pages in maintenance."),
   pane("coherence", "Coherence", "Checks that the app and the platform agree.", MAC),
-  pane("personalities", "Roles", "How agents sound and behave.", MAC),
+  pane("roles", "Roles", "How agents sound and behave.", MAC),
   pane("privacy", "Privacy & data", "What this page keeps in this browser."),
   pane("operations", "Operations", "Cloud and this machine: what lives where, and what may leave.", MAC),
   pane("developer", "Developer", "Technical details of this page."),
@@ -79,6 +79,17 @@ export const DEFAULT_PANE: PaneId = "general";
 export const paneById = (id: string): Pane | undefined => PANES.find((p) => p.id === id);
 export const paneHref = (id: PaneId): string => `${SETTINGS}/${id}`;
 
+/** Panes that were named differently before: the old address still opens the pane (the address is then made current). */
+const RENAMED: Record<string, PaneId> = { personalities: "roles" };
+
+/** The address a pane has now, when `pathname` is an old name of it; null when it is already current or no pane. */
+export function currentAddress(pathname: string): string | null {
+  const route = settingsRoute(pathname);
+  if (route === null || !("pane" in route)) return null;
+  const to = paneHref(route.pane.id);
+  return pathname.replace(/\/$/, "") === to || pathname === SETTINGS || pathname === `${SETTINGS}/` ? null : to;
+}
+
 /** Where the page's path points in Settings: not Settings (null), a pane, or a name that is no pane. */
 export type SettingsRoute = { pane: Pane } | { unknown: string };
 
@@ -87,7 +98,7 @@ export function settingsRoute(pathname: string): SettingsRoute | null {
   if (!m) return null;
   const name = m[1] ?? "";
   if (name === "") return { pane: paneById(DEFAULT_PANE) as Pane };
-  const found = paneById(name);
+  const found = paneById(RENAMED[name] ?? name);
   return found ? { pane: found } : { unknown: name };
 }
 

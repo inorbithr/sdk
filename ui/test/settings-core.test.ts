@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  currentAddress,
   DEFAULT_PANE,
   HELD,
   heldNow,
@@ -65,4 +66,27 @@ test("what is held lists the six keys, and heldNow keeps the ones that are store
     ["iohr-ui.theme"],
   );
   assert.equal(heldNow(() => true).length, 6);
+});
+
+test("the old address of a renamed pane opens it and is made current; current ones are left alone", () => {
+  assert.deepEqual(settingsRoute("/settings/personalities"), { pane: paneById("roles") });
+  assert.equal(currentAddress("/settings/personalities"), "/settings/roles");
+  assert.equal(currentAddress("/settings/personalities/"), "/settings/roles");
+  assert.equal(currentAddress("/settings/roles"), null);
+  assert.equal(currentAddress("/settings"), null);
+  assert.equal(currentAddress("/settings/nope"), null);
+  assert.equal(currentAddress("/other"), null);
+  assert.equal(paneById("personalities"), undefined);
+});
+
+test("/settings/<pane> resolves every pane id, built or not, and nothing else", () => {
+  for (const p of PANES) {
+    const route = settingsRoute(`/settings/${p.id}`);
+    assert.ok(route !== null && "pane" in route && route.pane.id === p.id, p.id);
+  }
+  for (const stranger of ["", "General", "settings", "../team"]) {
+    const route = settingsRoute(`/settings/${stranger}`);
+    if (stranger === "") assert.ok(route !== null && "pane" in route);
+    else assert.ok(route === null || "unknown" in route, stranger);
+  }
 });

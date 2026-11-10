@@ -1,7 +1,16 @@
 import { Search } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { cn } from "./frame/cn.ts";
-import { DEFAULT_PANE, matchPanes, type Pane, type PaneId, paneById, paneHref, SETTINGS } from "./lib/settings-core.ts";
+import {
+  currentAddress,
+  DEFAULT_PANE,
+  matchPanes,
+  type Pane,
+  type PaneId,
+  paneHref,
+  SETTINGS,
+  settingsRoute,
+} from "./lib/settings-core.ts";
 import {
   About,
   Accounts,
@@ -37,13 +46,17 @@ const BODY: Partial<Record<PaneId, (p: PaneProps) => ReactNode>> = {
 
 /** The pane the address names: a pane, or null for a name that is no pane. */
 const paneAt = (pathname: string): Pane | null => {
-  const m = pathname.match(/^\/settings(?:\/([^/]*))?\/?$/);
-  if (!m) return null;
-  return paneById(m[1] || DEFAULT_PANE) ?? null;
+  const route = settingsRoute(pathname);
+  return route !== null && "pane" in route ? route.pane : null;
 };
 
 export function Settings(props: PaneProps) {
-  const [at, setAt] = useState(window.location.pathname);
+  const [at, setAt] = useState(() => {
+    // An old address (`/settings/personalities`) opens its pane and is replaced by the current one.
+    const now = currentAddress(window.location.pathname);
+    if (now !== null) window.history.replaceState(null, "", now);
+    return now ?? window.location.pathname;
+  });
   const [query, setQuery] = useState("");
   useEffect(() => {
     const on = () => setAt(window.location.pathname);
