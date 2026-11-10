@@ -40,6 +40,7 @@ ends its `--help` with real examples.
 | `iohr atlas roles list \| import [--dry-run]` | The built-in roles and whether each is in your account | [Roles](roles-and-memory.md#built-in-roles) |
 | `iohr atlas search QUERY [--site S] [--limit N]` | The best chunks of the text of the sites you crawled, each with its page, heading path and offsets (local) | [Projects](projects.md#the-site-knowledge-base) |
 | `iohr atlas facts [--site S] [--predicate P] [--grep TEXT]` | The facts of the site model, each with the chunk it came from | [Projects](projects.md#the-site-knowledge-base) |
+| `iohr atlas claims [--site S] [--prove ID] [--limit N]` | The claims behind the facts, each with its support; `--prove` prints the proof tree down to the page and checks the page still matches its hash | [Projects](projects.md#the-site-knowledge-base) |
 | `iohr atlas index [--pages] [--site S]` | The crawled sites with pages, chunks, words, entities, facts and links; `--pages` lists the pages | [Projects](projects.md#the-site-knowledge-base) |
 | `iohr sync` | Send the project's atlas to your account | [Projects](projects.md#the-atlas-and-iohr-sync) |
 | `iohr ext ...` | Find, install, verify, pin and build extensions; `iohr <name> ...` runs one | [Extensions](extensions.md) |

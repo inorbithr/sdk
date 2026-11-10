@@ -46,6 +46,8 @@ mod planner;
 mod prompt;
 mod runner;
 #[cfg(unix)]
+mod safe_open;
+#[cfg(unix)]
 mod session;
 mod steps;
 mod toolchain;

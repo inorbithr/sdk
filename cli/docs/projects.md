@@ -446,6 +446,24 @@ pages are not fetched a second time.
   facts (`kind`, `site`, `url`, `crawled`, plus the chunk each came from). The sections,
   with their extractive summary, are a "Site model" part of the one "Site crawl" study.
 
+- **Claims and evidence.** Every page the build read is an evidence record in the same
+  file, keyed by the SHA-256 of its bytes, with the URL it was read at and where the kept
+  copy is. Every fact becomes a claim whose proof tree ends at that page. Running the
+  crawl again adds no rows; a page that changed makes the old claim stale (kept, never
+  deleted) and adds a new one. `iohr atlas claims [--site S]` lists them and
+  `iohr atlas claims --prove ID` prints the proof tree, the evidence digest and whether
+  the kept page still hashes to it. "Verified" means the page bytes contain the fact, not
+  that the fact is true.
+- **The file is private.** `.inorbit/crawl` is created owner-only (`0700`). A folder an
+  older build made open to others is closed to `0700` in place, once, and says so on
+  stderr (the folder path only); a symlink, a folder owned by someone else, or a chmod
+  that fails is refused with the `chmod 700` to run.
+  One process writes at a time (a second says so and exits), a
+  write is a transaction, a store over 2 GiB refuses more writes, and the database opens
+  with no network listener and no outside file access. The tables are migrated by number
+  (version 2 adds `evidence`, `claims` and `claim_evidence`); a store written by an older
+  build opens untouched, and one written by a newer build is refused rather than damaged.
+
 `iohr atlas search QUERY`, `iohr atlas facts` and `iohr atlas index` read all of this
 (`--site` picks a crawled site, `--json` gives data), and `?` and `??` add the best five
 chunks for the question to what the model is given, as `<sources>` with each page URL and
