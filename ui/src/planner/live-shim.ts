@@ -26,12 +26,17 @@ export async function apiSend<T = unknown>(
   const url = path(p, opts.query);
   const token = startToken();
   if (url === null) return { state: "error", status: 400, reason: "That is not a path the page may write." };
-  if (token === null) return { state: "error", status: 0, reason: "This page has no start token: open it with `iohr ui open`." };
+  if (token === null)
+    return { state: "error", status: 0, reason: "This page has no start token: open it with `iohr ui open`." };
   let res: Response;
   try {
     res = await fetch(url, {
       method,
-      headers: { "x-iohr-token": token, "content-type": "application/json", ...(opts.idempotencyKey ? { "idempotency-key": opts.idempotencyKey } : {}) },
+      headers: {
+        "x-iohr-token": token,
+        "content-type": "application/json",
+        ...(opts.idempotencyKey ? { "idempotency-key": opts.idempotencyKey } : {}),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store",
       ...(opts.signal ? { signal: opts.signal } : {}),
@@ -50,9 +55,15 @@ export async function apiSend<T = unknown>(
   if (!res.ok) {
     const e = (json as { error?: unknown } | null)?.error;
     const m = typeof e === "string" ? e : (e as { message?: unknown } | undefined)?.message;
-    return { state: "error", status: res.status, reason: typeof m === "string" && m !== "" ? m : `The API answered HTTP ${res.status}.` };
+    return {
+      state: "error",
+      status: res.status,
+      reason: typeof m === "string" && m !== "" ? m : `The API answered HTTP ${res.status}.`,
+    };
   }
-  return json === null ? { state: "error", status: res.status, reason: "The API answer was not JSON." } : { state: "ok", data: json as T };
+  return json === null
+    ? { state: "error", status: res.status, reason: "The API answer was not JSON." }
+    : { state: "ok", data: json as T };
 }
 
 /** Splits an SSE byte text into frames: `[event, id, data]`; the rest is the unfinished tail. Pure. */
@@ -81,7 +92,13 @@ export function sseFrames(buffer: string): { frames: { event: string; id: string
 export function apiStream<T = unknown>(
   p: string,
   onEvent: (data: T, meta: StreamMeta) => void,
-  opts: { query?: Record<string, string>; method?: string; body?: unknown; signal?: AbortSignal; onState?: (s: LiveState, reason: string) => void } = {},
+  opts: {
+    query?: Record<string, string>;
+    method?: string;
+    body?: unknown;
+    signal?: AbortSignal;
+    onState?: (s: LiveState, reason: string) => void;
+  } = {},
 ): () => void {
   const ctl = new AbortController();
   const stop = () => ctl.abort();
@@ -90,7 +107,10 @@ export function apiStream<T = unknown>(
   const token = startToken();
   void (async () => {
     if (url === null || token === null) {
-      opts.onState?.("offline", url === null ? "That is not a path the page may read." : "This page has no start token.");
+      opts.onState?.(
+        "offline",
+        url === null ? "That is not a path the page may read." : "This page has no start token.",
+      );
       return;
     }
     let wait = 1000;
@@ -100,7 +120,11 @@ export function apiStream<T = unknown>(
       try {
         const res = await fetch(url, {
           method: opts.method ?? "GET",
-          headers: { "x-iohr-token": token, accept: "text/event-stream", ...(opts.body !== undefined ? { "content-type": "application/json" } : {}) },
+          headers: {
+            "x-iohr-token": token,
+            accept: "text/event-stream",
+            ...(opts.body !== undefined ? { "content-type": "application/json" } : {}),
+          },
           body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
           cache: "no-store",
           signal: ctl.signal,
@@ -143,7 +167,7 @@ export function apiStream<T = unknown>(
   return stop;
 }
 
-const onEventSafe = <T,>(fn: (d: T, m: StreamMeta) => void, d: T, m: StreamMeta) => fn(d, m);
+const onEventSafe = <T>(fn: (d: T, m: StreamMeta) => void, d: T, m: StreamMeta) => fn(d, m);
 
 /** A stream's folded value and its state, for a component. */
 export function useLive<T, V>(
@@ -156,6 +180,7 @@ export function useLive<T, V>(
   const reduce = useRef(opts.reduce);
   reduce.current = opts.reduce;
   const q = JSON.stringify(opts.query ?? {});
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the initial value is read once per stream
   useEffect(() => {
     if (p === null) {
       setState("offline");
@@ -169,7 +194,6 @@ export function useLive<T, V>(
         setReason(r);
       },
     });
-    // biome-ignore lint/correctness/useExhaustiveDependencies: the initial value is read once per stream
   }, [p, q]);
   return { value, state, reason };
 }

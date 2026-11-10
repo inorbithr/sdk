@@ -15,21 +15,34 @@ export function JobPanel({ jobId, onMoved }: { jobId: string; onMoved: () => voi
   const [why, setWhy] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `tick` re-reads after a move
   useEffect(() => {
     let live = true;
     const id = encodeURIComponent(jobId);
-    void Promise.all([apiGet<unknown>(`/v1/coordinator/jobs/${id}`), apiGet<unknown>(`/v1/coordinator/jobs/${id}/transitions`)]).then(([j, t]) => {
+    void Promise.all([
+      apiGet<unknown>(`/v1/coordinator/jobs/${id}`),
+      apiGet<unknown>(`/v1/coordinator/jobs/${id}/transitions`),
+    ]).then(([j, t]) => {
       if (!live) return;
       const raw = j.state === "ok" ? ((j.data as { job?: unknown }).job ?? j.data) : null;
       const tr = t.state === "ok" ? (t.data as { transitions?: unknown }).transitions : [];
-      setD({ job: parseJob(raw), moves: parseTransitions(tr), reason: j.state === "ok" ? "" : j.state === "signed-out" ? "Signed out." : j.reason });
+      setD({
+        job: parseJob(raw),
+        moves: parseTransitions(tr),
+        reason: j.state === "ok" ? "" : j.state === "signed-out" ? "Signed out." : j.reason,
+      });
     });
     return () => {
       live = false;
     };
   }, [jobId, tick]);
   if (d === null) return <p className="text-muted-foreground text-[12px]">Reading {jobId}…</p>;
-  if (d.job === null) return <p className="text-[12px]">{jobId}: {d.reason || "not found"}</p>;
+  if (d.job === null)
+    return (
+      <p className="text-[12px]">
+        {jobId}: {d.reason || "not found"}
+      </p>
+    );
   const job = d.job;
   const run = async (action: JobAction) => {
     const path = actionPath(action, job.jobId);
@@ -57,14 +70,32 @@ export function JobPanel({ jobId, onMoved }: { jobId: string; onMoved: () => voi
         <code>{job.jobId}</code>
         <Chip>{job.stage || "no stage"}</Chip>
         <Chip>{job.mode || job.state || "no mode"}</Chip>
-        {job.pullRequest ? <span>{job.pullRequest}{job.prState ? ` (${job.prState})` : ""}</span> : null}
+        {job.pullRequest ? (
+          <span>
+            {job.pullRequest}
+            {job.prState ? ` (${job.prState})` : ""}
+          </span>
+        ) : null}
       </p>
       {cause ? <p className="text-amber-700 dark:text-amber-400">{cause}</p> : null}
       {moves.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
-          <input aria-label="Reason" placeholder="Why" className={`${field} w-56`} value={why} onChange={(e) => setWhy(e.target.value)} />
+          <input
+            aria-label="Reason"
+            placeholder="Why"
+            className={`${field} w-56`}
+            value={why}
+            onChange={(e) => setWhy(e.target.value)}
+          />
           {moves.map((c) => (
-            <button key={c.action} type="button" title={c.hint} disabled={busy} className={button} onClick={() => void run(c.action)}>
+            <button
+              key={c.action}
+              type="button"
+              title={c.hint}
+              disabled={busy}
+              className={button}
+              onClick={() => void run(c.action)}
+            >
               {c.label}
             </button>
           ))}

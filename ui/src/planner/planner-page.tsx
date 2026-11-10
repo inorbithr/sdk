@@ -1,10 +1,10 @@
 import { openContextMenu } from "../frame/context-menu.tsx";
 import { plannerMenu } from "../lib/planner-menus.ts";
-import { plannerRoute, plannerHref, MODES, MODE_LABEL } from "../lib/planner-route.ts";
-import { PreviewView, DecisionsView, ExploreView } from "./plan-extra.tsx";
-import { CanvasLink, PlanView, ProgressView } from "./plan-views.tsx";
+import { MODE_LABEL, MODES, plannerHref, plannerRoute } from "../lib/planner-route.ts";
 import { Overview } from "./overview.tsx";
-import { usePlan, useOverview, useStages } from "./planner-data.ts";
+import { DecisionsView, ExploreView, PreviewView } from "./plan-extra.tsx";
+import { CanvasLink, PlanView, ProgressView } from "./plan-views.tsx";
+import { useOverview, usePlan, useStages } from "./planner-data.ts";
 import { LiveBadge, Notice } from "./ui.tsx";
 import { WriteView } from "./write-view.tsx";
 
@@ -20,11 +20,19 @@ export function PlannerPage() {
   const raw = read?.state === "ok" ? read.data : null;
   return (
     <section aria-label="Planner" className="flex flex-col gap-3">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the context menu is an extra, the modes are links below */}
       <header
         className="flex flex-wrap items-center gap-3"
         onContextMenu={(e) => {
           e.preventDefault();
-          openContextMenu({ x: e.clientX, y: e.clientY }, plannerMenu(route, { go: (h) => window.location.assign(h), copy: (t) => void navigator.clipboard?.writeText(`${window.location.origin}${t}`) }), { label: "Planner" });
+          openContextMenu(
+            { x: e.clientX, y: e.clientY },
+            plannerMenu(route, {
+              go: (h) => window.location.assign(h),
+              copy: (t) => void navigator.clipboard?.writeText(`${window.location.origin}${t}`),
+            }),
+            { label: "Planner" },
+          );
         }}
       >
         <h1 className="text-lg font-semibold">
@@ -43,7 +51,11 @@ export function PlannerPage() {
                 key={m}
                 href={plannerHref({ planId, itemId: route.itemId, mode: m })}
                 aria-current={m === mode ? "page" : undefined}
-                className={m === mode ? "bg-accent rounded-md px-2 py-1 font-medium" : "text-muted-foreground rounded-md px-2 py-1"}
+                className={
+                  m === mode
+                    ? "bg-accent rounded-md px-2 py-1 font-medium"
+                    : "text-muted-foreground rounded-md px-2 py-1"
+                }
               >
                 {MODE_LABEL[m]}
               </a>
@@ -54,9 +66,11 @@ export function PlannerPage() {
           {st.reason ? <Notice>{st.reason}</Notice> : null}
           {mode === "plan" && <PlanView planId={planId} plan={plan} st={st} itemId={route.itemId} reload={reload} />}
           {mode === "progress" && <ProgressView plan={plan} st={st} />}
-          {mode === "canvas" && <CanvasLink planId={planId} />}
+          {mode === "canvas" && <CanvasLink planId={planId} plan={plan} st={st} />}
           {mode === "preview" && <PreviewView planId={planId} plan={plan} st={st} />}
-          {mode === "write" && <WriteView planId={planId} plan={plan} raw={raw} itemId={route.itemId} reload={reload} />}
+          {mode === "write" && (
+            <WriteView planId={planId} plan={plan} raw={raw} itemId={route.itemId} reload={reload} />
+          )}
           {mode === "decisions" && <DecisionsView plan={plan} />}
           {mode === "explore" && <ExploreView planId={planId} plan={plan} st={st} />}
         </>

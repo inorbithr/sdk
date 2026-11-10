@@ -4,10 +4,10 @@
 // time of the line that set them) or from the pull request state the page already reads
 // (plan_state, through the app's one PR cache). Nothing is estimated: what has no source is left out, not guessed.
 
-import { needsYou, outline, type Item, type Plan } from "./planner.ts";
-import { prLabel } from "./planner-shared.ts";
-import type { PrLive } from "./planner-shared.ts";
 import type { StageInfo, StageMap } from "./plan-stage-core.ts";
+import { type Item, needsYou, outline, type Plan } from "./planner.ts";
+import type { PrLive } from "./planner-shared.ts";
+import { prLabel } from "./planner-shared.ts";
 
 export const STAGES = ["not-started", "running", "owner", "pr", "done", "failed"] as const;
 export type Stage = (typeof STAGES)[number];
@@ -22,7 +22,15 @@ export const STAGE_LABEL: Record<Stage, string> = {
 };
 
 /** The machine's stage (plan_machine.rs) onto the groups this view colours and counts. The one table. */
-const GROUP: Record<string, Stage> = { proposed: "not-started", ready: "not-started", building: "running", on_preview: "pr", merged: "done", rolled: "done", verified: "done" };
+const GROUP: Record<string, Stage> = {
+  proposed: "not-started",
+  ready: "not-started",
+  building: "running",
+  on_preview: "pr",
+  merged: "done",
+  rolled: "done",
+  verified: "done",
+};
 
 /** Kinds that are containers or scratch, not work: the goal holds the steps; a note is yours to jot. */
 const NOT_A_STEP = new Set(["goal", "note"]);
@@ -76,20 +84,31 @@ export function stageOf(item: Item, prs: StepPr[], info?: StageInfo): { stage: S
   if (info && GROUP[info.stage]) {
     // Stuck is the machine's one rule (plan_state.rs); an older machine without the field gets the same rule here.
     const closed = prs.find((p) => p.live?.state === "CLOSED");
-    if (info.stuck ?? (!!closed && GROUP[info.stage] !== "done")) return { stage: "failed", why: closed ? `#${closed.number} was closed without merging` : "A pull request was closed without merging" };
-    if (info.wait && GROUP[info.stage] !== "done") return { stage: "owner", why: `Waiting on ${info.wait.who}${info.wait.what ? `: ${info.wait.what}` : ""}` };
+    if (info.stuck ?? (!!closed && GROUP[info.stage] !== "done"))
+      return {
+        stage: "failed",
+        why: closed ? `#${closed.number} was closed without merging` : "A pull request was closed without merging",
+      };
+    if (info.wait && GROUP[info.stage] !== "done")
+      return { stage: "owner", why: `Waiting on ${info.wait.who}${info.wait.what ? `: ${info.wait.what}` : ""}` };
     const open = prs.find((p) => p.live?.state === "OPEN");
     return { stage: GROUP[info.stage], why: open?.live ? `#${open.number}: ${prLabel(open.live).text}` : info.label };
   }
   // Before the machine answers there are no pull requests to read (they come with its stages): the file's status decides.
   if (item.status === "done") return { stage: "done", why: "Marked done" };
-  if (needsYou(item)) return { stage: "owner", why: item.needs === "You" ? "Waiting on you" : (item.needs ?? "Waiting on you") };
+  if (needsYou(item))
+    return { stage: "owner", why: item.needs === "You" ? "Waiting on you" : (item.needs ?? "Waiting on you") };
   if (item.status === "ready") return { stage: "owner", why: "Ready for your review" };
   if (item.status === "building") return { stage: "running", why: "Being built" };
   return { stage: "not-started", why: "Proposed" };
 }
 
-export function progressOf(plan: Plan, prNow: Map<string, PrLive> = new Map(), now = Date.now(), stages?: StageMap): Progress {
+export function progressOf(
+  plan: Plan,
+  prNow: Map<string, PrLive> = new Map(),
+  now = Date.now(),
+  stages?: StageMap,
+): Progress {
   const byStage = Object.fromEntries(STAGES.map((s) => [s, 0])) as Record<Stage, number>;
   let dropped = 0;
   const steps: Step[] = [];
@@ -113,7 +132,9 @@ export function progressOf(plan: Plan, prNow: Map<string, PrLive> = new Map(), n
   const complete = total > 0 && done === total;
   const current = steps.find((s) => s.stage === "running") ?? steps.find((s) => s.stage !== "done") ?? null;
   const waiting = steps.filter((s) => s.stage === "owner" || s.stage === "pr" || s.stage === "failed");
-  const doneTimes = steps.flatMap((s) => (s.since && Number.isFinite(Date.parse(s.since)) ? [Date.parse(s.since)] : []));
+  const doneTimes = steps.flatMap((s) =>
+    s.since && Number.isFinite(Date.parse(s.since)) ? [Date.parse(s.since)] : [],
+  );
   const finished = complete && doneTimes.length === total ? new Date(Math.max(...doneTimes)).toISOString() : undefined;
   const t0 = plan.started ? Date.parse(plan.started) : NaN;
   const end = finished ? Date.parse(finished) : now;

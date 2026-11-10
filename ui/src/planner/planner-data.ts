@@ -10,8 +10,8 @@ import { type ApiItem, type ApiPlanResponse, foldServer } from "../lib/plan-api.
 import { prMap, type StageMap } from "../lib/plan-stage-core.ts";
 import { prLives, type RefStatus, readStatuses, webStages } from "../lib/plan-stage-web.ts";
 import { emptyPlan, type Plan } from "../lib/planner.ts";
-import { emptyLive, foldFrame, type Live } from "../lib/plans-overview.ts";
 import type { PrLive } from "../lib/planner-shared.ts";
+import { emptyLive, foldFrame, type Live } from "../lib/plans-overview.ts";
 import { apiSend, type LiveState, useLive } from "./live-shim.ts";
 
 /** The overview as the plan stream folds it, and the stream's state for the badge. */
@@ -35,6 +35,7 @@ export type PlanData = {
 export function usePlan(planId: string | null, seq: number): PlanData {
   const [read, setRead] = useState<Read<ApiPlanResponse> | null>(null);
   const [tick, setTick] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `seq` and `tick` are the triggers
   useEffect(() => {
     if (planId === null) return;
     let live = true;
@@ -44,16 +45,27 @@ export function usePlan(planId: string | null, seq: number): PlanData {
     return () => {
       live = false;
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: `seq` and `tick` are the triggers
   }, [planId, seq, tick]);
   const data = read?.state === "ok" ? read.data : null;
-  const plan = useMemo(() => (data ? foldServer(emptyPlan(data.plan?.title ?? planId ?? ""), data) : emptyPlan(planId ?? "")), [data, planId]);
-  const listed = useMemo(() => new Map((data?.items ?? []).map((i: ApiItem) => [i.item_id, i.prs ?? []] as [string, readonly string[]])), [data]);
+  const plan = useMemo(
+    () => (data ? foldServer(emptyPlan(data.plan?.title ?? planId ?? ""), data) : emptyPlan(planId ?? "")),
+    [data, planId],
+  );
+  const listed = useMemo(
+    () => new Map((data?.items ?? []).map((i: ApiItem) => [i.item_id, i.prs ?? []] as [string, readonly string[]])),
+    [data],
+  );
   const reload = useCallback(() => setTick((t) => t + 1), []);
   return { plan, listed, read, reload };
 }
 
-export type StageData = { stages: StageMap; statuses: RefStatus[]; prs: Map<string, PrLive>; jobsOf: (itemId: string) => string[]; reason: string };
+export type StageData = {
+  stages: StageMap;
+  statuses: RefStatus[];
+  prs: Map<string, PrLive>;
+  jobsOf: (itemId: string) => string[];
+  reason: string;
+};
 
 const NONE: StageData = { stages: new Map(), statuses: [], prs: new Map(), jobsOf: () => [], reason: "" };
 
@@ -77,7 +89,11 @@ export function useStages({ plan, listed }: Pick<PlanData, "plan" | "listed">): 
     void apiSend<unknown>("POST", "/v1/coordinator/plan/status", { refs }).then((r) => {
       if (!live) return;
       if (r.state !== "ok") {
-        setOut({ ...NONE, stages: first, reason: r.state === "signed-out" ? "Signed out: the stages are not read." : r.reason });
+        setOut({
+          ...NONE,
+          stages: first,
+          reason: r.state === "signed-out" ? "Signed out: the stages are not read." : r.reason,
+        });
         return;
       }
       const statuses = readStatuses(r.data);
@@ -108,5 +124,11 @@ export async function send(method: "POST" | "PUT", path: string, body: unknown):
   const r = await apiSend<unknown>(method, path, body);
   if (r.state === "ok") return { ok: true };
   if (r.state === "signed-out") return { ok: false, reason: "Signed out: sign in from Settings, then try again." };
-  return { ok: false, reason: r.status === 409 || r.status === 412 ? "Someone saved a newer version first. Reloaded; apply your change again." : r.reason };
+  return {
+    ok: false,
+    reason:
+      r.status === 409 || r.status === 412
+        ? "Someone saved a newer version first. Reloaded; apply your change again."
+        : r.reason,
+  };
 }

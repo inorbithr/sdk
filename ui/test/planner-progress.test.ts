@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parsePlan, applyLines } from "../src/lib/planner.ts";
+import { prMap, type StageInfo } from "../src/lib/plan-stage-core.ts";
+import { applyLines, parsePlan } from "../src/lib/planner.ts";
 import { decidablePrs, duration, progressOf, stageOf } from "../src/lib/planner-progress.ts";
 import type { PrLive } from "../src/lib/planner-shared.ts";
-import { prMap, type StageInfo } from "../src/lib/plan-stage-core.ts";
 import { prLabel } from "../src/lib/planner-shared.ts";
 
-const L = (...o: Record<string, unknown>[]) => o.map((x) => JSON.stringify(x)).join("\n") + "\n";
+const L = (...o: Record<string, unknown>[]) => `${o.map((x) => JSON.stringify(x)).join("\n")}\n`;
 const T = (m: number) => new Date(Date.UTC(2026, 9, 14, 10, m)).toISOString();
 const NOW = Date.parse(T(60));
 const pr = (o: Partial<PrLive> = {}): PrLive => ({
@@ -109,11 +109,23 @@ test("needs puts a step in waiting-on-you from the needs line, and clears", () =
   assert.equal(p.steps[1].stage, "running");
 });
 
-const building = (wait: StageInfo["wait"] = null): StageInfo => ({ id: "b", stage: "building", label: "Building", file_status: "building", since: T(25), wait, wait_since: "", evidence: [], children: [], prs: [{ repo: "o/r", number: 7 }] });
+const building = (wait: StageInfo["wait"] = null): StageInfo => ({
+  id: "b",
+  stage: "building",
+  label: "Building",
+  file_status: "building",
+  since: T(25),
+  wait,
+  wait_since: "",
+  evidence: [],
+  children: [],
+  prs: [{ repo: "o/r", number: 7 }],
+});
 
 test("pull request state: an open PR names its checks, closed fails, unread and merged change nothing", () => {
   const pl = applyLines(parsePlan(base), L({ t: "item", id: "b", status: "building", pr: "o/r#7", at: T(25) }));
-  const step = (live?: PrLive, info = building()) => progressOf(pl, live ? new Map([["o/r#7", live]]) : new Map(), NOW, new Map([["b", info]])).steps[1];
+  const step = (live?: PrLive, info = building()) =>
+    progressOf(pl, live ? new Map([["o/r#7", live]]) : new Map(), NOW, new Map([["b", info]])).steps[1];
   assert.equal(step().stage, "running");
   assert.equal(step().why, "Building");
   assert.equal(step(pr({ pending: 2 })).stage, "running");
@@ -130,11 +142,18 @@ test("ready with no PR waits on the owner; a merged step stays done whatever its
   const ready = applyLines(parsePlan(base), L({ t: "item", id: "b", status: "ready", at: T(30) }));
   assert.equal(progressOf(ready, new Map(), NOW).steps[1].stage, "owner");
   const merged = { ...building(), stage: "merged" as const };
-  assert.equal(stageOf(parsePlan(base).items[1], [{ repo: "o/r", number: 7, live: pr({ state: "CLOSED", failed: 3 }) }], merged).stage, "done");
+  assert.equal(
+    stageOf(parsePlan(base).items[1], [{ repo: "o/r", number: 7, live: pr({ state: "CLOSED", failed: 3 }) }], merged)
+      .stage,
+    "done",
+  );
 });
 
 test("complete: 100, elapsed stops at the last done, no current", () => {
-  const pl = applyLines(parsePlan(base), L({ t: "item", id: "b", status: "done", at: T(35) }, { t: "item", id: "c", status: "done", at: T(50) }));
+  const pl = applyLines(
+    parsePlan(base),
+    L({ t: "item", id: "b", status: "done", at: T(35) }, { t: "item", id: "c", status: "done", at: T(50) }),
+  );
   const p = progressOf(pl, new Map(), NOW);
   assert.equal(p.complete, true);
   assert.equal(p.percent, 100);
@@ -152,7 +171,11 @@ test("dropped steps leave the total; an empty plan has no percent; undated files
   const empty = progressOf(parsePlan(""), new Map(), NOW);
   assert.equal(empty.percent, null);
   assert.equal(empty.elapsedMs, null);
-  const undated = progressOf(parsePlan(L({ t: "item", id: "x", kind: "step", title: "X", status: "building" })), new Map(), NOW);
+  const undated = progressOf(
+    parsePlan(L({ t: "item", id: "x", kind: "step", title: "X", status: "building" })),
+    new Map(),
+    NOW,
+  );
   assert.equal(undated.elapsedMs, null);
   assert.equal(undated.stepMs, null);
   assert.equal(undated.current?.item.id, "x");
@@ -196,9 +219,25 @@ test("only an open pull request offers Approve: merged, closed and unread ones d
 });
 
 test("a pull request only Rust read shows merged on its row, the same as its stage", () => {
-  const plan = parsePlan(L({ t: "plan", title: "dpcaas", at: T(0) }, { t: "item", id: "pr1021", kind: "task", status: "ready", pr: "inorbithr/core#1021", at: T(1) }));
+  const plan = parsePlan(
+    L(
+      { t: "plan", title: "dpcaas", at: T(0) },
+      { t: "item", id: "pr1021", kind: "task", status: "ready", pr: "inorbithr/core#1021", at: T(1) },
+    ),
+  );
   // plan_state names the item's pull requests (Rust's parser) and hands back what it read.
-  const stage: StageInfo = { id: "pr1021", stage: "merged", label: "Merged, not rolled", file_status: "ready", since: "2026-10-16T20:10:45Z", wait: null, wait_since: "", evidence: [], children: [], prs: [{ repo: "inorbithr/core", number: 1021 }] };
+  const stage: StageInfo = {
+    id: "pr1021",
+    stage: "merged",
+    label: "Merged, not rolled",
+    file_status: "ready",
+    since: "2026-10-16T20:10:45Z",
+    wait: null,
+    wait_since: "",
+    evidence: [],
+    children: [],
+    prs: [{ repo: "inorbithr/core", number: 1021 }],
+  };
   const merged = pr({ repo: "inorbithr/core", number: 1021, state: "MERGED", merged_at: "2026-10-16T20:10:45Z" });
   const stages = new Map([["pr1021", stage]]);
   const before = progressOf(plan, new Map(), NOW, stages).steps[0];
@@ -206,6 +245,6 @@ test("a pull request only Rust read shows merged on its row, the same as its sta
   const step = progressOf(plan, prMap([merged]), NOW, stages).steps[0];
   assert.equal(step.stage, "done");
   assert.equal(step.prs[0].live?.state, "MERGED");
-  assert.equal(prLabel(step.prs[0].live!).text, "merged");
+  assert.equal(prLabel(step.prs[0]?.live as never).text, "merged");
   assert.deepEqual(decidablePrs(step.prs), []);
 });

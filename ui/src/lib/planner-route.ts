@@ -41,9 +41,12 @@ export function plannerRoute(pathname: string, search = ""): PlannerRoute | null
 
 /** The address of a route: the default mode leaves the query out. */
 export function plannerHref(r: Partial<PlannerRoute>): string {
-  const base = r.planId ? `${PLANNER}/${encodeURIComponent(r.planId)}${r.itemId ? `/${encodeURIComponent(r.itemId)}` : ""}` : PLANNER;
+  const base = r.planId
+    ? `${PLANNER}/${encodeURIComponent(r.planId)}${r.itemId ? `/${encodeURIComponent(r.itemId)}` : ""}`
+    : PLANNER;
   return r.planId && r.mode && r.mode !== DEFAULT_MODE ? `${base}?mode=${r.mode}` : base;
 }
 
 /** The mode a digit key picks (1 is Plan ... 7 is Explore); null for any other key. */
-export const modeOfDigit = (key: string): PlannerMode | null => (/^[1-7]$/.test(key) ? (MODES[Number(key) - 1] as PlannerMode) : null);
+export const modeOfDigit = (key: string): PlannerMode | null =>
+  /^[1-7]$/.test(key) ? (MODES[Number(key) - 1] as PlannerMode) : null;

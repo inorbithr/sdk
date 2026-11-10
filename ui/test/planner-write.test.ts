@@ -1,12 +1,43 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { claimBody, editProblem, itemPath, newItemId, noteBody, reasonBody, upsertBody } from "../src/lib/planner-write.ts";
+import {
+  claimBody,
+  editProblem,
+  itemPath,
+  newItemId,
+  noteBody,
+  reasonBody,
+  upsertBody,
+} from "../src/lib/planner-write.ts";
 
 test("an edit is sent as the whole item with its version", () => {
-  const had = { item_id: "a", kind: "step", title: "Old", status: "building", body: "text", doc: "d", diagram: "g", preview: "p", prs: ["o/r#1"], position: 3, version: 7 };
+  const had = {
+    item_id: "a",
+    kind: "step",
+    title: "Old",
+    status: "building",
+    body: "text",
+    doc: "d",
+    diagram: "g",
+    preview: "p",
+    prs: ["o/r#1"],
+    position: 3,
+    version: 7,
+  };
   const b = upsertBody(had, { title: " New ", status: "done" }, "me");
   assert.deepEqual(b, {
-    item: { kind: "step", parent: "", title: "New", status: "done", body: "text", doc: "d", diagram: "g", preview: "p", prs: ["o/r#1"], position: 3 },
+    item: {
+      kind: "step",
+      parent: "",
+      title: "New",
+      status: "done",
+      body: "text",
+      doc: "d",
+      diagram: "g",
+      preview: "p",
+      prs: ["o/r#1"],
+      position: 3,
+    },
     expected_version: 7,
     holder: "me",
   });

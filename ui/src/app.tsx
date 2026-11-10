@@ -44,12 +44,12 @@ import { add as addOrbit, HOME, remove as removeOrbit } from "./lib/orbits-core.
 import { updateOrbits, useOrbits } from "./lib/orbits-store.ts";
 import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
+import { PLANNER, plannerRoute } from "./lib/planner-route.ts";
 import { useSession } from "./lib/session-store.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
-import { PLANNER, plannerRoute } from "./lib/planner-route.ts";
-import { PlannerPage } from "./planner/planner-page.tsx";
 import { useSidebar } from "./lib/sidebar-store.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
+import { PlannerPage } from "./planner/planner-page.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
 import { Settings } from "./settings.tsx";
 

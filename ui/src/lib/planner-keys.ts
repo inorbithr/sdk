@@ -3,7 +3,7 @@
 // and hands the result to `useShortcuts("planner", ...)`. The terminal's `p` opens Approvals; the web's Planner key is
 // the frame's `g p`, not set here.
 
-import { MODES, plannerHref, type PlannerRoute } from "./planner-route.ts";
+import { MODES, type PlannerRoute, plannerHref } from "./planner-route.ts";
 
 export type PlannerKeyActions = { go: (href: string) => void; focusSearch: () => void };
 

@@ -4,8 +4,29 @@
 // planner.ts, plan-api.ts, job-controls.ts and the rest read as they do on the Mac. If the decisions agent lands the
 // same `prLabel` and `PrLive`, this file re-exports theirs and the copies go.
 
-export type PrLive = { repo: string; number: number; title: string; url: string; state: string; draft: boolean; review: string; passed: number; failed: number; pending: number; created_at?: string; merged_at?: string; merge_commit?: string };
-export type PrState = { state: string; draft: boolean; review: string; passed: number; failed: number; pending: number };
+export type PrLive = {
+  repo: string;
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  draft: boolean;
+  review: string;
+  passed: number;
+  failed: number;
+  pending: number;
+  created_at?: string;
+  merged_at?: string;
+  merge_commit?: string;
+};
+export type PrState = {
+  state: string;
+  draft: boolean;
+  review: string;
+  passed: number;
+  failed: number;
+  pending: number;
+};
 
 export function prLabel(p: PrState): { text: string; tone: "good" | "warn" | "bad" | "idle" } {
   if (p.state === "MERGED") return { text: "merged", tone: "good" };
@@ -49,7 +70,15 @@ export type JobLike = {
   pullRequest?: string;
   prState?: string;
 };
-export type TransitionLike = { seq: number; fromStage: string; toStage: string; kind: string; actor: string; detail: string; createdAt: string | null };
+export type TransitionLike = {
+  seq: number;
+  fromStage: string;
+  toStage: string;
+  kind: string;
+  actor: string;
+  detail: string;
+  createdAt: string | null;
+};
 
 export function parseJob(v: unknown): JobLike | null {
   const o = obj(v);
@@ -79,6 +108,14 @@ export function parseTransitions(v: unknown): TransitionLike[] {
   return list
     .map(obj)
     .filter((o): o is Record<string, unknown> => !!o)
-    .map((o) => ({ seq: Number(field(o, "seq")) || 0, fromStage: str(field(o, "from_stage")), toStage: str(field(o, "to_stage")), kind: str(field(o, "kind")), actor: str(field(o, "actor")), detail: str(field(o, "detail")), createdAt: iso(field(o, "created_at")) }))
+    .map((o) => ({
+      seq: Number(field(o, "seq")) || 0,
+      fromStage: str(field(o, "from_stage")),
+      toStage: str(field(o, "to_stage")),
+      kind: str(field(o, "kind")),
+      actor: str(field(o, "actor")),
+      detail: str(field(o, "detail")),
+      createdAt: iso(field(o, "created_at")),
+    }))
     .sort((a, b) => a.seq - b.seq);
 }

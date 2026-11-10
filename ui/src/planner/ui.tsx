@@ -15,7 +15,15 @@ const LIVE_WORD: Record<LiveState, string> = {
 };
 
 /** The stream's state in a word, with why when it is not live (RFC 0217: SSE, a reconnect with a growing pause). */
-export function LiveBadge({ state, reason, what = "plan stream" }: { state: LiveState; reason?: string; what?: string }) {
+export function LiveBadge({
+  state,
+  reason,
+  what = "plan stream",
+}: {
+  state: LiveState;
+  reason?: string;
+  what?: string;
+}) {
   return (
     <span
       role="status"
@@ -26,7 +34,12 @@ export function LiveBadge({ state, reason, what = "plan stream" }: { state: Live
         state === "live" ? "text-foreground" : "text-muted-foreground",
       )}
     >
-      <span className={cn("size-1.5 rounded-full", state === "live" ? "bg-green-500" : state === "offline" ? "bg-red-500" : "bg-amber-500")} />
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          state === "live" ? "bg-green-500" : state === "offline" ? "bg-red-500" : "bg-amber-500",
+        )}
+      />
       {LIVE_WORD[state]}
     </span>
   );
@@ -38,7 +51,15 @@ export const Notice = ({ children }: { children: ReactNode }) => (
   </p>
 );
 
-export const Chip = ({ children, tone = "idle", title }: { children: ReactNode; tone?: "good" | "warn" | "bad" | "idle"; title?: string }) => (
+export const Chip = ({
+  children,
+  tone = "idle",
+  title,
+}: {
+  children: ReactNode;
+  tone?: "good" | "warn" | "bad" | "idle";
+  title?: string;
+}) => (
   <span
     title={title}
     className={cn(

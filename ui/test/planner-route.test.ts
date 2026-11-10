@@ -6,7 +6,11 @@ test("the overview, a plan and an item", () => {
   assert.deepEqual(plannerRoute("/planner"), { planId: null, itemId: null, mode: "plan" });
   assert.deepEqual(plannerRoute("/planner/"), { planId: null, itemId: null, mode: "plan" });
   assert.deepEqual(plannerRoute("/planner/ask-1"), { planId: "ask-1", itemId: null, mode: "plan" });
-  assert.deepEqual(plannerRoute("/planner/ask-1/ui-planner", "?mode=write"), { planId: "ask-1", itemId: "ui-planner", mode: "write" });
+  assert.deepEqual(plannerRoute("/planner/ask-1/ui-planner", "?mode=write"), {
+    planId: "ask-1",
+    itemId: "ui-planner",
+    mode: "write",
+  });
 });
 
 test("not the Planner's, or not an id", () => {

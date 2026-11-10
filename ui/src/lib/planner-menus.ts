@@ -3,7 +3,7 @@
 // they are off.
 
 import { group, type MenuEntry } from "../frame/context-menu-core.ts";
-import { MODE_LABEL, MODES, type PlannerMode, plannerHref, type PlannerRoute } from "./planner-route.ts";
+import { MODE_LABEL, MODES, type PlannerMode, type PlannerRoute, plannerHref } from "./planner-route.ts";
 
 export type PlannerActions = {
   go: (href: string) => void;
