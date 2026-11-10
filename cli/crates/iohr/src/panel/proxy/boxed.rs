@@ -381,6 +381,28 @@ impl Session {
             self.redraw();
             return true;
         }
+        // The box has the keys only while it is on the screen: with its rows given back (a
+        // small terminal, a resize) nothing shows that it holds them.
+        if p.chat.focus && !p.reserved {
+            self.proxy.chat.focus = false;
+            return false;
+        }
+        let p = &self.proxy;
+        if !p.chat.focus
+            && p.reserved
+            && !p.model.open()
+            && !self.reader.pending()
+            && !input::is_mouse_report(bytes)
+            && !p.model.open_key().is(bytes)
+            && let Some(dos) = self.proxy.chat.open_with(bytes, now)
+        {
+            for d in dos {
+                self.apply_do(d);
+            }
+            self.redraw();
+            return true;
+        }
+        let p = &self.proxy;
         if !p.chat.focus
             || p.model.open()
             || self.reader.pending()

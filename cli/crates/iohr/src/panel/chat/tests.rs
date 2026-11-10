@@ -513,3 +513,85 @@ fn keys_parse_the_way_a_terminal_sends_them() {
         vec![ChatKey::Char('é'), ChatKey::Char('€')]
     );
 }
+
+#[test]
+fn a_key_cut_between_two_reads_is_held_not_eaten_or_typed() {
+    let mut chat = Chat::new(true, false);
+    idle(&mut chat);
+    chat.focus_input();
+    let before = chat.mode.clone();
+    typed(&mut chat, "\x1b[");
+    assert_eq!(chat.text, Vec::<char>::new());
+    typed(&mut chat, "Z");
+    assert_eq!(
+        chat.text,
+        Vec::<char>::new(),
+        "the end of the key was typed"
+    );
+    assert_ne!(chat.mode, before, "Shift+Tab did not change the mode");
+    // A UTF-8 character cut in two.
+    chat.feed(&"é".as_bytes()[..1], now());
+    chat.feed(&"é".as_bytes()[1..], now());
+    assert_eq!(chat.text, vec!['é']);
+    // A lone Esc is the Esc key, not a key waiting for more.
+    chat.feed(b"\x1b", now());
+    assert_eq!(chat.text, Vec::<char>::new());
+}
+
+#[test]
+fn a_question_written_at_a_clean_prompt_opens_the_box_with_its_text() {
+    let mut chat = Chat::new(true, false);
+    idle(&mut chat);
+    assert!(chat.open_with(b"? hello", now()).is_some());
+    assert!(chat.focus);
+    assert_eq!(chat.text.iter().collect::<String>(), "hello");
+    assert!(!chat.deeper);
+
+    let mut chat = Chat::new(true, false);
+    idle(&mut chat);
+    assert!(
+        chat.open_with(b"\x1b[200~?? why not\nmore\x1b[201~", now())
+            .is_some()
+    );
+    assert!(chat.deeper);
+    assert_eq!(chat.text.iter().collect::<String>(), "why not more");
+    assert!(!chat.paste, "the paste was closed");
+}
+
+#[test]
+fn only_a_question_mark_and_a_space_at_a_clean_prompt_open_the_box() {
+    let mut chat = Chat::new(true, false);
+    idle(&mut chat);
+    for not in [&b"?"[..], b"?x", b"ls -la", b"- ", b" ? a", b"\x1b[Z"] {
+        assert!(chat.open_with(not, now()).is_none(), "{not:?}");
+    }
+    // Typed on the line already: the line's.
+    chat.forwarded();
+    assert!(chat.open_with(b"? hello", now()).is_none());
+    // The next prompt is clean again; type-ahead during a command is not.
+    chat.message(Msg::Busy, now());
+    chat.forwarded();
+    idle(&mut chat);
+    assert!(chat.open_with(b"? hello", now()).is_none());
+    idle(&mut chat);
+    assert!(chat.open_with(b"? hello", now()).is_some());
+    // A folded box, an answer running, a shell not at its prompt: not the box's.
+    let mut chat = Chat::new(true, true);
+    idle(&mut chat);
+    assert!(chat.open_with(b"? hi", now()).is_none());
+    let mut chat = Chat::new(true, false);
+    idle(&mut chat);
+    chat.message(Msg::Busy, now());
+    assert!(chat.open_with(b"? hi", now()).is_none());
+}
+
+#[test]
+fn ls_la_is_never_a_key_of_the_box() {
+    let mut chat = Chat::new(true, false);
+    idle(&mut chat);
+    assert!(chat.open_with(b"ls -la", now()).is_none());
+    assert!(!chat.focus);
+    chat.focus_input();
+    typed(&mut chat, "ls -la");
+    assert_eq!(chat.text.iter().collect::<String>(), "ls -la");
+}

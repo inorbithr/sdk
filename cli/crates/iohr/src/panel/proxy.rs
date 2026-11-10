@@ -821,6 +821,9 @@ impl Session {
             vec![Input::Key(Key::Menu)]
         } else {
             if !report || self.proxy.screen.uses_mouse() {
+                if !report {
+                    self.proxy.chat.forwarded();
+                }
                 let _ = self.master.write_all(bytes);
             }
             return;

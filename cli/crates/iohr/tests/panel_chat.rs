@@ -370,3 +370,130 @@ fn a_question_stays_the_persons_after_a_stop_and_the_box_asks_again() {
     s.send(b"\x1b[A");
     s.until("the last question in the line", |sc| any(sc, "first"));
 }
+
+/// One command run, so the next prompt is one nothing was typed ahead of.
+fn fresh(s: &mut Pty) {
+    line(s, "echo CLEAN\"\"ED");
+    s.until("the command done", |sc| any(sc, "CLEANED"));
+    settle(s, 300);
+}
+
+/// The row of the screen holding the shell's prompt, the last one.
+fn prompt_row(sc: &vt100::Screen) -> String {
+    (0..ROWS)
+        .rev()
+        .map(|r| row(sc, r))
+        .find(|l| l.contains("READY>"))
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_question_typed_as_one_write_opens_the_box_with_its_text_and_not_the_shell_line() {
+    let rig = Rig::new("qwrite", QUICK);
+    let mut s = rig.panel("");
+    s.until("the box at the prompt", |sc| boxed(sc) && ready(sc));
+    fresh(&mut s);
+    s.send(b"? hello there");
+    s.until("the text in the box", |sc| any(sc, "hello there"));
+    settle(&mut s, 300);
+    let prompt = prompt_row(s.screen.screen());
+    assert!(
+        !prompt.contains('?') && !prompt.contains("hello"),
+        "the question reached the shell's line: {prompt:?}"
+    );
+    s.send(b"\r");
+    s.until("the answer", |sc| any(sc, "ANSWER-ONE"));
+    assert!(rig.saw("claude.stdin").contains("hello there"));
+}
+
+#[test]
+fn a_pasted_question_opens_the_box_with_its_text_and_not_the_shell_line() {
+    let rig = Rig::new("qpaste", QUICK);
+    let mut s = rig.panel("");
+    s.until("the box at the prompt", |sc| boxed(sc) && ready(sc));
+    fresh(&mut s);
+    s.send(b"\x1b[200~?? hello deep\x1b[201~");
+    s.until("the text in the box", |sc| any(sc, "hello deep"));
+    settle(&mut s, 300);
+    let prompt = prompt_row(s.screen.screen());
+    assert!(
+        !prompt.contains('?') && !prompt.contains("hello"),
+        "the paste reached the shell's line: {prompt:?}"
+    );
+    s.send(b"\r");
+    s.until("the answer", |sc| any(sc, "ANSWER-ONE"));
+    assert!(rig.saw("claude.stdin").contains("hello deep"));
+}
+
+#[test]
+fn a_question_mark_after_typing_stays_in_the_shell_line() {
+    let rig = Rig::new("qdirty", QUICK);
+    let mut s = rig.panel("");
+    s.until("the box at the prompt", |sc| boxed(sc) && ready(sc));
+    s.send(b"echo a");
+    settle(&mut s, 200);
+    s.send(b"? b");
+    settle(&mut s, 300);
+    let prompt = prompt_row(s.screen.screen());
+    assert!(
+        prompt.contains("echo a? b"),
+        "text after other typing is the line's: {prompt:?}"
+    );
+    assert!(!any(s.screen.screen(), "ask anything about this shell"));
+}
+
+#[test]
+fn ls_la_typed_at_the_prompt_is_the_shells_and_runs() {
+    let rig = Rig::new("lsla", QUICK);
+    std::fs::write(rig.home.join("work").join("marker-file"), "x").unwrap();
+    let mut s = rig.panel("");
+    s.until("the box at the prompt", |sc| boxed(sc) && ready(sc));
+    for key in ["l", "s", " ", "-", "l", "a"] {
+        s.send(key.as_bytes());
+        settle(&mut s, 50);
+    }
+    let typed = prompt_row(s.screen.screen());
+    assert!(typed.contains("ls -la"), "the letters were lost: {typed:?}");
+    assert!(
+        !any(s.screen.screen(), "ask anything about this shell"),
+        "the box took the keys"
+    );
+    s.send(b"\r");
+    s.until("the listing", |sc| any(sc, "marker-file"));
+    // And in one write, as a paste or a fast typist sends it.
+    line(&mut s, "ls -la work");
+    s.until("the second listing", |sc| any(sc, "total"));
+}
+
+#[test]
+fn shift_tab_reaches_a_running_command_whole() {
+    let rig = Rig::new("btab", QUICK);
+    let mut s = rig.panel("");
+    s.until("the box at the prompt", |sc| boxed(sc) && ready(sc));
+    line(&mut s, "cat -v");
+    settle(&mut s, 400);
+    s.send(b"\x1b[Z\r");
+    s.until("the key as the command saw it", |sc| any(sc, "^[[Z"));
+}
+
+#[test]
+fn a_key_cut_between_two_reads_is_not_eaten_in_the_box() {
+    let rig = Rig::new("cut", QUICK);
+    let mut s = rig.panel("");
+    s.until("the box", |sc| boxed(sc) && ready(sc));
+    s.send(b"?");
+    s.until("focus", |sc| any(sc, "ask anything about this shell"));
+    let before = row(s.screen.screen(), ROWS - 4);
+    s.send(b"\x1b[");
+    settle(&mut s, 300);
+    s.send(b"Z");
+    s.until("another mode on the title", |sc| {
+        row(sc, ROWS - 4) != before
+    });
+    settle(&mut s, 200);
+    assert!(
+        !row(s.screen.screen(), ROWS - 3).contains('Z'),
+        "the end of the key was typed: {:?}",
+        row(s.screen.screen(), ROWS - 3)
+    );
+}
