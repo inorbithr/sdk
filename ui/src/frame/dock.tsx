@@ -21,35 +21,63 @@ export type DockProps = {
   /** A width the pointer or the arrow keys ask for; the app keeps it (clamped with clampPanel). */
   onWidth: (w: number) => void;
   onClose: () => void;
+  /** Which side of the page the dock is on (default the right); its resize edge is on the side that faces the page. */
+  side?: "left" | "right";
+  /** The dock fills the cells it was given (a layout put it beside the page) instead of keeping its own width. */
+  fill?: boolean;
+  /** Buttons in the header before Close (the Arrange button). */
+  headerActions?: ReactNode;
   children: ReactNode;
 };
 
-export function Dock({ title, width, onWidth, onClose, children }: DockProps) {
+export function Dock({
+  title,
+  width,
+  onWidth,
+  onClose,
+  side = "right",
+  fill = false,
+  headerActions,
+  children,
+}: DockProps) {
   const win = useViewportWidth();
   const [resizing, setResizing] = useState(false);
   const shown = clampPanel(width, win);
   return (
     <aside
       aria-label={title}
-      style={{ width: shown }}
-      className={cn("relative flex shrink-0 flex-col py-2 pr-2", resizing && "select-none")}
+      style={fill ? undefined : { width: shown }}
+      className={cn(
+        "relative flex flex-col py-2",
+        fill ? "min-w-0 flex-1" : "shrink-0",
+        side === "right" ? "pr-2" : "pl-0",
+        resizing && "select-none",
+      )}
     >
-      <ResizeHandle
-        label={`Resize ${title}`}
-        width={shown}
-        min={MIN_PANEL}
-        max={maxPanel(win)}
-        edge="left"
-        step={24}
-        onWidth={onWidth}
-        onReset={() => onWidth(FIRST_PANEL)}
-        onStart={() => setResizing(true)}
-        onEnd={() => setResizing(false)}
-        className="inset-y-2 hover:bg-ring/30 focus-visible:bg-ring/50"
-      />
-      <section className="bg-background text-foreground ml-1.5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border shadow-sm">
+      {!fill && (
+        <ResizeHandle
+          label={`Resize ${title}`}
+          width={shown}
+          min={MIN_PANEL}
+          max={maxPanel(win)}
+          edge={side === "right" ? "left" : "right"}
+          step={24}
+          onWidth={onWidth}
+          onReset={() => onWidth(FIRST_PANEL)}
+          onStart={() => setResizing(true)}
+          onEnd={() => setResizing(false)}
+          className="inset-y-2 hover:bg-ring/30 focus-visible:bg-ring/50"
+        />
+      )}
+      <section
+        className={cn(
+          "bg-background text-foreground flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border shadow-sm",
+          side === "right" ? "ml-1.5" : "mr-2",
+        )}
+      >
         <header className="flex h-11 shrink-0 items-center gap-2 border-b px-4 text-sm">
           <h2 className="min-w-0 flex-1 truncate font-medium">{title}</h2>
+          {headerActions}
           <button
             type="button"
             title={`Close ${title}`}

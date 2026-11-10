@@ -2947,7 +2947,11 @@ fn ui_open_finds_the_running_serve_and_forgets_a_dead_one() {
         url.starts_with("http://127.0.0.1:") || url.starts_with("http://[::1]:"),
         "{url}"
     );
-    assert!(url.ends_with('/'), "{url}");
+    // The address a browser is signed in by: the root, then the per-launch secret.
+    let (root, launch) = url.split_once("/?launch=").expect("the launch address");
+    assert!(root.starts_with("http://"), "{url}");
+    assert_eq!(launch.len(), 64, "{url}");
+    assert!(launch.bytes().all(|b| b.is_ascii_hexdigit()), "{url}");
     let o = iohr_ui(p.path(), &data, &["open"], &[]);
     assert_eq!(code(&o), 2, "{}", text(&o));
     assert!(text(&o).contains("no longer running"), "{}", text(&o));
