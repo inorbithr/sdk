@@ -5,28 +5,65 @@
 
 import { useMemo, useState } from "react";
 import { EventStream } from "../components/event-stream.tsx";
-import { TileShell } from "../components/tile.tsx";
 import { Button } from "../components/kit.tsx";
-import { changeSensor } from "./actions.ts";
+import { TileShell } from "../components/tile.tsx";
+import {
+  agoText,
+  HEALTH_WORD,
+  HEALTHS,
+  rateText,
+  type Sensor,
+  type SignalEvent,
+  type Source,
+  streamEvent,
+  tileOrder,
+  togglePin,
+  valueText,
+} from "../lib/sensors-core.ts";
 import { stored } from "../lib/stored.ts";
-import { agoText, HEALTH_WORD, HEALTHS, rateText, streamEvent, tileOrder, togglePin, valueText, type Sensor, type SignalEvent, type Source } from "../lib/sensors-core.ts";
+import { changeSensor } from "./actions.ts";
 import { HealthDot, HealthWord, Spark } from "./bits.tsx";
 
 /** The pinned sensors, kept in this browser. */
-export const pinsStore = stored<string[]>("inorbit.sensors.pins", (o) => (Array.isArray(o) ? o.filter((x): x is string => typeof x === "string") : []));
+export const pinsStore = stored<string[]>("inorbit.sensors.pins", (o) =>
+  Array.isArray(o) ? o.filter((x): x is string => typeof x === "string") : [],
+);
 
-function Tile({ s, source, pinned, onPin, now, onChanged }: { s: Sensor; source: Source; pinned: boolean; onPin: () => void; now: number; onChanged?: () => void }) {
+function Tile({
+  s,
+  source,
+  pinned,
+  onPin,
+  now,
+  onChanged,
+}: {
+  s: Sensor;
+  source: Source;
+  pinned: boolean;
+  onPin: () => void;
+  now: number;
+  onChanged?: () => void;
+}) {
   const [said, setSaid] = useState<string | null>(null);
   const [sure, setSure] = useState(false);
   return (
     <TileShell name={s.name} sub={source.name} pinned={pinned} onPin={onPin}>
-      <p className="mt-2 truncate text-[20px] leading-tight font-semibold tracking-[-0.02em] tabular-nums" title={valueText(s)}>
-        {s.value == null && !s.text ? <span className="text-muted-foreground text-[15px] font-medium">No reading</span> : valueText(s)}
+      <p
+        className="mt-2 truncate text-[20px] leading-tight font-semibold tracking-[-0.02em] tabular-nums"
+        title={valueText(s)}
+      >
+        {s.value == null && !s.text ? (
+          <span className="text-muted-foreground text-[15px] font-medium">No reading</span>
+        ) : (
+          valueText(s)
+        )}
       </p>
       <Spark readings={s.readings} health={s.health} className="mt-2" />
       <div className="mt-2 flex items-center justify-between gap-2">
         <HealthWord health={s.health} />
-        <span className="text-muted-foreground truncate text-[11px]">{s.last_seen ? agoText(s.last_seen, now) : rateText(s.rate_per_min)}</span>
+        <span className="text-muted-foreground truncate text-[11px]">
+          {s.last_seen ? agoText(s.last_seen, now) : rateText(s.rate_per_min)}
+        </span>
       </div>
       {s.revocable && (
         <div className="mt-2 flex gap-1.5">
@@ -64,7 +101,17 @@ function Tile({ s, source, pinned, onPin, now, onChanged }: { s: Sensor; source:
   );
 }
 
-export function ControlRoom({ sources, events, now, onChanged }: { sources: readonly Source[]; events: readonly SignalEvent[]; now: number; onChanged?: () => void }) {
+export function ControlRoom({
+  sources,
+  events,
+  now,
+  onChanged,
+}: {
+  sources: readonly Source[];
+  events: readonly SignalEvent[];
+  now: number;
+  onChanged?: () => void;
+}) {
   const pins = pinsStore.use();
   const pin = (id: string) => pinsStore.update((p) => togglePin(p, id));
   const all = useMemo(() => sources.flatMap((s) => s.sensors), [sources]);
@@ -75,12 +122,26 @@ export function ControlRoom({ sources, events, now, onChanged }: { sources: read
     <div className="grid grid-cols-1 gap-4 @3xl/page:grid-cols-[minmax(0,1fr)_300px]">
       <section aria-label="Sensors">
         {tiles.length === 0 ? (
-          <p className="text-muted-foreground rounded-xl border px-4 py-6 text-center text-[13px]">No sensors to show yet.</p>
+          <p className="text-muted-foreground rounded-xl border px-4 py-6 text-center text-[13px]">
+            No sensors to show yet.
+          </p>
         ) : (
           <ul className="grid grid-cols-1 gap-3 @md/page:grid-cols-2 @2xl/page:grid-cols-3 @5xl/page:grid-cols-4">
-            {tiles.map((s) => (
-              <Tile key={s.id} s={s} source={bySource.get(s.source_id)!} pinned={pins.includes(s.id)} onPin={() => pin(s.id)} now={now} onChanged={onChanged} />
-            ))}
+            {tiles.map((s) => {
+              const source = bySource.get(s.source_id);
+              if (!source) return null;
+              return (
+                <Tile
+                  key={s.id}
+                  s={s}
+                  source={source}
+                  pinned={pins.includes(s.id)}
+                  onPin={() => pin(s.id)}
+                  now={now}
+                  onChanged={onChanged}
+                />
+              );
+            })}
           </ul>
         )}
       </section>

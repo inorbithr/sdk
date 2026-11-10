@@ -63,7 +63,10 @@ export const Loading = ({ what }: { what: string }) => (
 );
 
 export const Problems = ({ errors }: { errors: readonly string[] }) => (
-  <ul role="alert" className="border-destructive/40 text-destructive space-y-1 rounded-xl border px-4 py-3 text-[12.5px]">
+  <ul
+    role="alert"
+    className="border-destructive/40 text-destructive space-y-1 rounded-xl border px-4 py-3 text-[12.5px]"
+  >
     {errors.map((e) => (
       <li key={e}>{e}</li>
     ))}

@@ -7,30 +7,24 @@
 //   sessions GET /v1/coordinator/{jobs,threads,asks}, again (debounced) on each event of /v1/coordinator/picture/events;
 //   clock    a tick every TICK_MS so "2 minutes ago" and staleness move between looks.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type Read, apiGet } from "../lib/api.ts";
+import { apiGet, type Read } from "../lib/api.ts";
+import type { Reading } from "../lib/sensors-core.ts";
+import { diffEvents, mergeEvents, type SessionPreview, type SignalEvent, type Snapshot } from "../lib/sensors-core.ts";
 import {
-  type SessionPreview,
-  type SignalEvent,
-  type Snapshot,
-  diffEvents,
-  mergeEvents,
-} from "../lib/sensors-core.ts";
-import {
+  fromApi,
   type Job,
+  pushReading,
   type QueuedAsk,
+  readingsOf,
+  sessionsOf,
+  streamReading,
   type Thread,
   type WireReading,
   type WireSensors,
   type WireSignalEvent,
-  fromApi,
-  pushReading,
-  readingsOf,
-  sessionsOf,
-  streamReading,
   withReadings,
 } from "../lib/sensors-wire.ts";
-import type { Reading } from "../lib/sensors-core.ts";
-import { type LiveState, apiStream } from "./live-shim.ts";
+import { apiStream, type LiveState } from "./live-shim.ts";
 
 export const TICK_MS = 10_000;
 export const SAFETY_POLL_MS = 60_000;
@@ -178,14 +172,16 @@ export function useSensorsData(account: string, subject: string): SensorsData {
     for (const id of ids) {
       if (asked.current.has(id)) continue;
       asked.current.add(id);
-      void apiGet<{ readings?: WireReading[] }>(`/v1/atlas/sensors/${encodeURIComponent(id)}/readings`, {}).then((r) => {
-        if (r.state !== "ok") {
-          asked.current.delete(id);
-          return;
-        }
-        const rows = readingsOf(r.data.readings);
-        setBy((b) => rows.reduce((acc, x) => pushReading(acc, id, x), b));
-      });
+      void apiGet<{ readings?: WireReading[] }>(`/v1/atlas/sensors/${encodeURIComponent(id)}/readings`, {}).then(
+        (r) => {
+          if (r.state !== "ok") {
+            asked.current.delete(id);
+            return;
+          }
+          const rows = readingsOf(r.data.readings);
+          setBy((b) => rows.reduce((acc, x) => pushReading(acc, id, x), b));
+        },
+      );
     }
   }, []);
 

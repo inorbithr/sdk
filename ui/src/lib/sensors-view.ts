@@ -11,7 +11,8 @@ export const asView = (v: unknown): View | null => (v === "orbit" || v === "cont
 export const sensorsRoute = (pathname: string): boolean => pathname.replace(/\/$/, "") === SENSORS;
 
 /** The view from the address's query, the kept one, then the orbit. */
-export const viewFrom = (search: string, kept: unknown): View => asView(new URLSearchParams(search).get("view")) ?? asView(kept) ?? "orbit";
+export const viewFrom = (search: string, kept: unknown): View =>
+  asView(new URLSearchParams(search).get("view")) ?? asView(kept) ?? "orbit";
 
 export const viewStore = stored<View>("inorbit.sensors.view", (o) => asView(o) ?? "orbit");
 

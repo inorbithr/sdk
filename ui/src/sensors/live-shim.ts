@@ -2,7 +2,7 @@
 // sensors page is built against the shape that will land. Delete this file and import from `lib/api.ts` when the
 // live PR merges. Writes and streams go through the same local proxy as reads: `/api/proxy/v1/...` with the
 // per-serve token in a header.
-import { type Read, proxyPath } from "../lib/api.ts";
+import { proxyPath, type Read } from "../lib/api.ts";
 import { startToken } from "../lib/panels.ts";
 
 export type LiveState = "connecting" | "live" | "reconnecting" | "offline";
@@ -47,7 +47,11 @@ export async function apiSend<T = unknown>(
   if (!res.ok) {
     const e = (json as { error?: unknown } | null)?.error;
     const m = typeof e === "string" ? e : (e as { message?: unknown } | undefined)?.message;
-    return { state: "error", status: res.status, reason: typeof m === "string" && m !== "" ? m : `The API answered HTTP ${res.status}.` };
+    return {
+      state: "error",
+      status: res.status,
+      reason: typeof m === "string" && m !== "" ? m : `The API answered HTTP ${res.status}.`,
+    };
   }
   return { state: "ok", data: json as T };
 }
@@ -62,7 +66,10 @@ type StreamOpts<T> = {
 };
 
 /** Parses server-sent frames out of text chunks; keeps the unfinished tail. */
-export function parseFrames(buf: string): { frames: { event: string; id: string | null; data: string }[]; rest: string } {
+export function parseFrames(buf: string): {
+  frames: { event: string; id: string | null; data: string }[];
+  rest: string;
+} {
   const parts = buf.replace(/\r\n/g, "\n").split("\n\n");
   const rest = parts.pop() ?? "";
   const frames: { event: string; id: string | null; data: string }[] = [];

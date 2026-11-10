@@ -44,13 +44,13 @@ import { add as addOrbit, HOME, remove as removeOrbit } from "./lib/orbits-core.
 import { updateOrbits, useOrbits } from "./lib/orbits-store.ts";
 import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
+import { SENSORS, sensorsRoute } from "./lib/sensors-view.ts";
 import { useSession } from "./lib/session-store.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
 import { useSidebar } from "./lib/sidebar-store.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
 import { Settings } from "./settings.tsx";
-import { SENSORS, sensorsRoute } from "./lib/sensors-view.ts";
 
 const SensorsPage = lazy(() => import("./sensors/sensors-page.tsx"));
 

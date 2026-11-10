@@ -28,10 +28,18 @@ export function switchAction(s: Pick<Sensor, "state">, on: boolean): "pause" | "
 /** What "Pause all of mine" would pause: every owned sensor that is on. */
 export const pauseAllTargets = (mine: readonly Sensor[]): Sensor[] => mine.filter(isOn);
 
-export const stateWord = (s: Pick<Sensor, "state">): string => (s.state === "active" ? "On" : s.state === "paused" ? "Paused" : "Revoked");
+export const stateWord = (s: Pick<Sensor, "state">): string =>
+  s.state === "active" ? "On" : s.state === "paused" ? "Paused" : "Revoked";
 
 /** What was sent: GET /v1/atlas/sensors/{id}/sent. */
-export type WireSent = { sensor_id?: string; days?: { day?: string; readings?: number | string; digests?: number | string }[]; readings?: number | string; rollups?: number | string; first_at?: string; last_at?: string };
+export type WireSent = {
+  sensor_id?: string;
+  days?: { day?: string; readings?: number | string; digests?: number | string }[];
+  readings?: number | string;
+  rollups?: number | string;
+  first_at?: string;
+  last_at?: string;
+};
 
 const num = (v: number | string | undefined): number => {
   const n = typeof v === "string" ? Number(v) : (v ?? 0);
@@ -45,6 +53,7 @@ export function sentText(sent: WireSent | null | undefined): string {
   const rollups = num(sent.rollups);
   if (readings === 0 && rollups === 0) return "Nothing sent yet.";
   const part = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-  const since = sent.first_at && Number.isFinite(Date.parse(sent.first_at)) ? ` since ${sent.first_at.slice(0, 10)}` : "";
+  const since =
+    sent.first_at && Number.isFinite(Date.parse(sent.first_at)) ? ` since ${sent.first_at.slice(0, 10)}` : "";
   return `${[readings ? part(readings, "reading") : "", rollups ? part(rollups, "rollup") : ""].filter(Boolean).join(" and ")}${since}.`;
 }

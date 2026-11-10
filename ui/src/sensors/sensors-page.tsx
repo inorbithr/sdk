@@ -4,10 +4,10 @@
 // on the page: readings and changes arrive on the signal stream, sessions on the coordinator's picture stream.
 import { LayoutGrid, Orbit, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Button, Loading, Problems, Tag, cn } from "../components/kit.tsx";
+import { Button, cn, Loading, Problems, Tag } from "../components/kit.tsx";
 import type { SessionState } from "../lib/api.ts";
-import { HEALTH_WORD, HEALTHS, type Health, type Source } from "../lib/sensors-core.ts";
 import { mineOf } from "../lib/sensors-consent.ts";
+import { HEALTH_WORD, HEALTHS, type Health, type Source } from "../lib/sensors-core.ts";
 import { type View, viewFrom, viewHref, viewStore } from "../lib/sensors-view.ts";
 import { HealthDot } from "./bits.tsx";
 import { ControlRoom } from "./control-room.tsx";
@@ -34,10 +34,11 @@ function ViewSwitch({ view, onView }: { view: View; onView: (v: View) => void })
     </button>
   );
   return (
-    <div role="group" aria-label="View" className="bg-muted inline-flex rounded-md p-0.5">
+    <fieldset className="bg-muted m-0 inline-flex rounded-md border-0 p-0.5">
+      <legend className="sr-only">View</legend>
       {opt("orbit", "Orbit", Orbit)}
       {opt("control", "Control room", LayoutGrid)}
-    </div>
+    </fieldset>
   );
 }
 
@@ -67,7 +68,13 @@ export function SensorsPage({ session, onSignIn }: { session: SessionState | nul
   }, [focus, data.snap, sources]);
 
   // The control room draws a sparkline per tile: read the first few dozen sensors' readings.
-  const tileIds = view === "control" ? sources.flatMap((s) => s.sensors.map((x) => x.id)).slice(0, 40).join("\n") : "";
+  const tileIds =
+    view === "control"
+      ? sources
+          .flatMap((s) => s.sensors.map((x) => x.id))
+          .slice(0, 40)
+          .join("\n")
+      : "";
   // biome-ignore lint/correctness/useExhaustiveDependencies: the ids are the trigger
   useEffect(() => {
     if (tileIds) data.open(tileIds.split("\n"));
@@ -98,7 +105,8 @@ export function SensorsPage({ session, onSignIn }: { session: SessionState | nul
           <p className="text-muted-foreground text-[11.5px] font-medium">Mission Control</p>
           <h1 className="text-xl font-semibold tracking-tight">Sensors</h1>
           <p className="text-muted-foreground mt-1 max-w-prose text-[13.5px] text-pretty">
-            Every source and what it reports, live. Colour is health, and in the orbit view a faster orbit means more signals.
+            Every source and what it reports, live. Colour is health, and in the orbit view a faster orbit means more
+            signals.
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={data.reload} disabled={data.loading}>
@@ -112,7 +120,8 @@ export function SensorsPage({ session, onSignIn }: { session: SessionState | nul
           <ShieldCheck /> Your sensors{mine.length ? ` · ${mine.length}` : ""}
         </Button>
         {total > 0 && (
-          <p className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]" aria-label="Sensors by health">
+          <p className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]">
+            <span className="sr-only">Sensors by health:</span>
             {cs
               .filter((c) => c.n > 0)
               .map((c) => (
@@ -125,8 +134,13 @@ export function SensorsPage({ session, onSignIn }: { session: SessionState | nul
         )}
       </div>
 
-      <p className="text-muted-foreground mt-3 flex flex-wrap items-center gap-2 text-[12.5px]" data-testid="sensors-conn">
-        <Tag className={cn(data.conn === "live" ? "border-success/40 text-success" : "border-warning/40 text-warning")}>{CONN_WORD[data.conn]}</Tag>
+      <p
+        className="text-muted-foreground mt-3 flex flex-wrap items-center gap-2 text-[12.5px]"
+        data-testid="sensors-conn"
+      >
+        <Tag className={cn(data.conn === "live" ? "border-success/40 text-success" : "border-warning/40 text-warning")}>
+          {CONN_WORD[data.conn]}
+        </Tag>
         <span>
           {data.conn === "live"
             ? "Readings arrive as they are sent. Sessions follow the coordinator's stream."
@@ -141,19 +155,44 @@ export function SensorsPage({ session, onSignIn }: { session: SessionState | nul
 
       <div className="mt-4">
         {!data.snap ? (
-          <Loading what={account ? "Looking for sources and their sensors…" : "This sign-in names no account, so there are no sensors to read."} />
+          <Loading
+            what={
+              account
+                ? "Looking for sources and their sensors…"
+                : "This sign-in names no account, so there are no sensors to read."
+            }
+          />
         ) : sources.length === 0 ? (
-          <div className="text-muted-foreground rounded-xl border px-6 py-10 text-center text-[13.5px] text-pretty" data-testid="sensors-empty">
-            No sources yet. Sensors appear here when an agent on this account reports, and the built-in ones from monitors, incidents and the coordinator show as they have something to say.
+          <div
+            className="text-muted-foreground rounded-xl border px-6 py-10 text-center text-[13.5px] text-pretty"
+            data-testid="sensors-empty"
+          >
+            No sources yet. Sensors appear here when an agent on this account reports, and the built-in ones from
+            monitors, incidents and the coordinator show as they have something to say.
           </div>
         ) : view === "orbit" ? (
-          <OrbitView sources={sources} sessions={data.sessions} fresh={data.fresh} focus={focus} onFocus={setFocus} now={now} onOpen={data.open} />
+          <OrbitView
+            sources={sources}
+            sessions={data.sessions}
+            fresh={data.fresh}
+            focus={focus}
+            onFocus={setFocus}
+            now={now}
+            onOpen={data.open}
+          />
         ) : (
           <ControlRoom sources={sources} events={data.events} now={now} onChanged={data.reload} />
         )}
       </div>
 
-      {sheet && <YourSensors sensors={sources.flatMap((s) => s.sensors)} subject={subject} onChanged={data.reload} onClose={() => setSheet(false)} />}
+      {sheet && (
+        <YourSensors
+          sensors={sources.flatMap((s) => s.sensors)}
+          subject={subject}
+          onChanged={data.reload}
+          onClose={() => setSheet(false)}
+        />
+      )}
     </div>
   );
 }

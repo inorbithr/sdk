@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Reading } from "../src/lib/sensors-core.ts";
+import type { Reading } from "../src/lib/sensors-core.ts";
 import {
   askBucket,
   fromApi,
@@ -13,8 +13,8 @@ import {
   readingsOf,
   sessionsOf,
   streamReading,
-  withReadings,
   wireCount,
+  withReadings,
 } from "../src/lib/sensors-wire.ts";
 
 const NOW = Date.parse("2026-10-14T12:00:00Z");
@@ -25,12 +25,46 @@ const wire = {
     {
       source: "server",
       sensors: [
-        { sensor_id: "x1", name: "Temp", source: "server", health: "ok", state: "active", interval_seconds: 10, last_seen_at: iso(5_000), unit: "count", producer_kind: "agent", producer_ref: "box", owner: "u1", schema_version: 2 },
-        { sensor_id: "x2", source: "server", health: "ok", state: "active", interval_seconds: 10, last_seen_at: iso(120_000) },
+        {
+          sensor_id: "x1",
+          name: "Temp",
+          source: "server",
+          health: "ok",
+          state: "active",
+          interval_seconds: 10,
+          last_seen_at: iso(5_000),
+          unit: "count",
+          producer_kind: "agent",
+          producer_ref: "box",
+          owner: "u1",
+          schema_version: 2,
+        },
+        {
+          sensor_id: "x2",
+          source: "server",
+          health: "ok",
+          state: "active",
+          interval_seconds: 10,
+          last_seen_at: iso(120_000),
+        },
         { sensor_id: "", source: "server" },
       ],
     },
-    { source: "monitors", sensors: [{ sensor_id: "mon_01ABC", name: "API", source: "monitors", health: "down", state: "active", interval_seconds: 60, last_seen_at: iso(5_000), builtin: true }] },
+    {
+      source: "monitors",
+      sensors: [
+        {
+          sensor_id: "mon_01ABC",
+          name: "API",
+          source: "monitors",
+          health: "down",
+          state: "active",
+          interval_seconds: 60,
+          last_seen_at: iso(5_000),
+          builtin: true,
+        },
+      ],
+    },
     { source: "asks", sensors: [] },
   ],
 };
@@ -38,8 +72,20 @@ const wire = {
 test("the list (groups by source) maps onto planets; stale sensors are silent; built-ins are read only", () => {
   assert.equal(wireCount(wire), 4);
   const s = fromApi(wire, NOW);
-  assert.deepEqual(s.map((x) => [x.id, x.kind]), [["server", "machine"], ["monitors", "service"]]);
-  assert.deepEqual(s[0].sensors.map((x) => [x.id, x.health]), [["x1", "fine"], ["x2", "silent"]]);
+  assert.deepEqual(
+    s.map((x) => [x.id, x.kind]),
+    [
+      ["server", "machine"],
+      ["monitors", "service"],
+    ],
+  );
+  assert.deepEqual(
+    s[0].sensors.map((x) => [x.id, x.health]),
+    [
+      ["x1", "fine"],
+      ["x2", "silent"],
+    ],
+  );
   assert.equal(s[0].sensors[0].producer, "agent · box");
   assert.equal(s[0].sensors[0].unit, "", "count is not a unit");
   assert.equal(s[0].sensors[0].owner, "u1");
@@ -52,12 +98,25 @@ test("the list (groups by source) maps onto planets; stale sensors are silent; b
 });
 
 test("readings come as produced_at, value and state, oldest first", () => {
-  const r = readingsOf([{ produced_at: iso(1_000), value: 2, state: "ok" }, { produced_at: iso(3_000), value: 1, state: "failed" }, { produced_at: "" }]);
-  assert.deepEqual(r.map((x) => [x.value, x.ok]), [[1, false], [2, true]]);
+  const r = readingsOf([
+    { produced_at: iso(1_000), value: 2, state: "ok" },
+    { produced_at: iso(3_000), value: 1, state: "failed" },
+    { produced_at: "" },
+  ]);
+  assert.deepEqual(
+    r.map((x) => [x.value, x.ok]),
+    [
+      [1, false],
+      [2, true],
+    ],
+  );
 });
 
 test("a live reading is a reading event only; a summary and junk are not", () => {
-  const ev = { type: "reading", reading: { sensor_id: "x1", produced_at: iso(1000), received_at: iso(900), value: 7, state: "ok" } };
+  const ev = {
+    type: "reading",
+    reading: { sensor_id: "x1", produced_at: iso(1000), received_at: iso(900), value: 7, state: "ok" },
+  };
   const r = streamReading(ev);
   assert.equal(r?.sensor_id, "x1");
   assert.equal(r?.reading.value, 7);
@@ -75,10 +134,16 @@ test("readings are kept oldest first, without repeats, newest N", () => {
   by = pushReading(by, "a", { at: 1, value: 1, ok: true });
   const same = pushReading(by, "a", { at: 3, value: 3, ok: true });
   assert.equal(same, by, "an identical reading changes nothing");
-  assert.deepEqual(by.a.map((r) => r.at), [1, 3]);
+  assert.deepEqual(
+    by.a.map((r) => r.at),
+    [1, 3],
+  );
   let big: Record<string, readonly Reading[]> = {};
   for (let i = 0; i < 10; i++) big = pushReading(big, "a", { at: i, value: i, ok: true }, 4);
-  assert.deepEqual(big.a.map((r) => r.at), [6, 7, 8, 9]);
+  assert.deepEqual(
+    big.a.map((r) => r.at),
+    [6, 7, 8, 9],
+  );
 });
 
 test("a live reading gives the value, moves last seen and wakes a stale sensor; a failed one turns it red", () => {
@@ -109,20 +174,37 @@ test("asks fall into five buckets and unknown words stay visible as queued", () 
 test("sessions: live jobs, open threads without a job, open asks; whose they are; newest first", () => {
   const out = sessionsOf(
     [
-      { job_id: "j1", thread_id: "t1", state: "running", created_by: "u1", brief: "Mine\nmore", updated_at: iso(1_000) },
+      {
+        job_id: "j1",
+        thread_id: "t1",
+        state: "running",
+        created_by: "u1",
+        brief: "Mine\nmore",
+        updated_at: iso(1_000),
+      },
       { job_id: "j2", state: "running", created_by: "u2", brief: "Theirs", updated_at: iso(2_000) },
       { job_id: "j3", state: "done" },
     ],
-    [{ thread_id: "t1", title: "covered by j1" }, { thread_id: "t2", title: "Open thread", created_by: "u2", updated_at: iso(3_000) }, { thread_id: "t3", status: "closed" }],
-    [{ id: "a1", state: "queued", title: "Ask", created_by: "u1", updated_at: iso(4_000) }, { id: "a2", state: "verified" }],
+    [
+      { thread_id: "t1", title: "covered by j1" },
+      { thread_id: "t2", title: "Open thread", created_by: "u2", updated_at: iso(3_000) },
+      { thread_id: "t3", status: "closed" },
+    ],
+    [
+      { id: "a1", state: "queued", title: "Ask", created_by: "u1", updated_at: iso(4_000) },
+      { id: "a2", state: "verified" },
+    ],
     { subject: "u1" },
   );
-  assert.deepEqual(out.map((x) => [x.id, x.mine, x.title, x.kind]), [
-    ["j1", true, "Mine", "session"],
-    ["j2", false, "Theirs", "session"],
-    ["t2", false, "Open thread", "session"],
-    ["a1", true, "Ask", "ask"],
-  ]);
+  assert.deepEqual(
+    out.map((x) => [x.id, x.mine, x.title, x.kind]),
+    [
+      ["j1", true, "Mine", "session"],
+      ["j2", false, "Theirs", "session"],
+      ["t2", false, "Open thread", "session"],
+      ["a1", true, "Ask", "ask"],
+    ],
+  );
   assert.equal(out[0].thread_id, "t1");
   assert.equal(out[3].thread_id, null, "an ask has no thread to ask about");
 });

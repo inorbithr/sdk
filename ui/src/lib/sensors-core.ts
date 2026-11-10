@@ -10,9 +10,19 @@ import type { StreamEvent } from "./event-stream-core.ts";
 
 export type Health = "fine" | "degraded" | "failing" | "silent";
 export const HEALTHS: Health[] = ["failing", "degraded", "fine", "silent"];
-export const HEALTH_WORD: Record<Health, string> = { fine: "Fine", degraded: "Degraded", failing: "Failing", silent: "Silent" };
+export const HEALTH_WORD: Record<Health, string> = {
+  fine: "Fine",
+  degraded: "Degraded",
+  failing: "Failing",
+  silent: "Silent",
+};
 /** The CSS colour token each health is drawn with (frame/tokens.css). */
-export const HEALTH_TOKEN: Record<Health, string> = { fine: "--success", degraded: "--warning", failing: "--destructive", silent: "--muted-foreground" };
+export const HEALTH_TOKEN: Record<Health, string> = {
+  fine: "--success",
+  degraded: "--warning",
+  failing: "--destructive",
+  silent: "--muted-foreground",
+};
 
 export type SensorState = "active" | "paused" | "revoked";
 export type SourceKind = "machine" | "service" | "connection" | "coordinator" | "asks" | "mac";
@@ -76,7 +86,10 @@ export function isStale(lastSeen: number | null, intervalSecs: number | null, no
 }
 
 /** A sensor's colour: paused, revoked and stale are silent whatever they last said. */
-export function healthOf(s: { raw: string | null | undefined; state: SensorState; last_seen: number | null; interval_secs: number | null }, now: number): Health {
+export function healthOf(
+  s: { raw: string | null | undefined; state: SensorState; last_seen: number | null; interval_secs: number | null },
+  now: number,
+): Health {
   if (s.state !== "active") return "silent";
   if (isStale(s.last_seen, s.interval_secs, now)) return "silent";
   return healthWord(s.raw);
@@ -170,7 +183,11 @@ export function moonSlot(index: number, count: number): { ring: number; phase: n
  * Planets on concentric tracks around the centre (the account), the worst first and nearest, each
  * track holding as many as fit without touching. Everything is scaled down to fit `w × h`.
  */
-export function systemLayout(sources: readonly { id: string; count: number }[], w: number, h: number): { placed: Placed[]; scale: number; tracks: number[] } {
+export function systemLayout(
+  sources: readonly { id: string; count: number }[],
+  w: number,
+  h: number,
+): { placed: Placed[]; scale: number; tracks: number[] } {
   const sizes = sources.map((s) => ({ id: s.id, ...planetSize(s.count) }));
   if (!sizes.length || w <= 0 || h <= 0) return { placed: [], scale: 1, tracks: [] };
   const cell = Math.max(...sizes.map((s) => s.orbit)) * 2 + 34;
@@ -192,7 +209,13 @@ export function systemLayout(sources: readonly { id: string; count: number }[], 
   const outer = tracks[tracks.length - 1] + cell / 2;
   const scale = Math.min(1.6, (Math.min(w, h) / 2 - 8) / outer);
   return {
-    placed: placed.map((p) => ({ id: p.id, x: w / 2 + p.x * scale, y: h / 2 + p.y * scale, r: p.r * scale, orbit: p.orbit * scale })),
+    placed: placed.map((p) => ({
+      id: p.id,
+      x: w / 2 + p.x * scale,
+      y: h / 2 + p.y * scale,
+      r: p.r * scale,
+      orbit: p.orbit * scale,
+    })),
     scale,
     tracks: tracks.map((t) => t * scale),
   };
@@ -223,7 +246,8 @@ export function hitPlanet(placed: readonly Placed[], x: number, y: number): stri
 // ---------------------------------------------------------------- order, pins, events
 
 const RANK: Record<Health, number> = { failing: 0, degraded: 1, fine: 2, silent: 3 };
-export const byHealth = <T extends { health: Health; name: string }>(a: T, b: T) => RANK[a.health] - RANK[b.health] || a.name.localeCompare(b.name);
+export const byHealth = <T extends { health: Health; name: string }>(a: T, b: T) =>
+  RANK[a.health] - RANK[b.health] || a.name.localeCompare(b.name);
 
 /** Control room order: pinned first in pin order, then worst first, then by name. */
 export function tileOrder(sensors: readonly Sensor[], pins: readonly string[]): Sensor[] {
@@ -236,7 +260,15 @@ export function togglePin(pins: readonly string[], id: string): string[] {
   return pins.includes(id) ? pins.filter((p) => p !== id) : [id, ...pins];
 }
 
-export type SignalEvent = { id: string; at: number; sensor_id: string; source_id: string; health: Health; text: string; kind: "signal" | "change" };
+export type SignalEvent = {
+  id: string;
+  at: number;
+  sensor_id: string;
+  source_id: string;
+  health: Health;
+  text: string;
+  kind: "signal" | "change";
+};
 
 /**
  * What happened between two snapshots: a new reading (a signal, drawn as a streak) and a change of
@@ -250,13 +282,37 @@ export function diffEvents(prev: Snapshot | null, next: Snapshot): SignalEvent[]
     for (const s of src.sensors) {
       const b = before.get(s.id);
       if (!b) {
-        out.push({ id: `${s.id}@new@${next.at}`, at: next.at, sensor_id: s.id, source_id: src.id, health: s.health, text: `${s.name} appeared on ${src.name}`, kind: "change" });
+        out.push({
+          id: `${s.id}@new@${next.at}`,
+          at: next.at,
+          sensor_id: s.id,
+          source_id: src.id,
+          health: s.health,
+          text: `${s.name} appeared on ${src.name}`,
+          kind: "change",
+        });
         continue;
       }
       if (b.health !== s.health)
-        out.push({ id: `${s.id}@${s.health}@${next.at}`, at: next.at, sensor_id: s.id, source_id: src.id, health: s.health, text: `${s.name} on ${src.name}: ${HEALTH_WORD[b.health].toLowerCase()} → ${HEALTH_WORD[s.health].toLowerCase()}`, kind: "change" });
+        out.push({
+          id: `${s.id}@${s.health}@${next.at}`,
+          at: next.at,
+          sensor_id: s.id,
+          source_id: src.id,
+          health: s.health,
+          text: `${s.name} on ${src.name}: ${HEALTH_WORD[b.health].toLowerCase()} → ${HEALTH_WORD[s.health].toLowerCase()}`,
+          kind: "change",
+        });
       if (s.last_seen != null && (b.last_seen == null || s.last_seen > b.last_seen))
-        out.push({ id: `${s.id}@sig@${s.last_seen}`, at: s.last_seen, sensor_id: s.id, source_id: src.id, health: s.health, text: `${s.name}: ${valueText(s)}`, kind: "signal" });
+        out.push({
+          id: `${s.id}@sig@${s.last_seen}`,
+          at: s.last_seen,
+          sensor_id: s.id,
+          source_id: src.id,
+          health: s.health,
+          text: `${s.name}: ${valueText(s)}`,
+          kind: "signal",
+        });
     }
   }
   return out.sort((a, b) => b.at - a.at);
@@ -265,11 +321,23 @@ export function diffEvents(prev: Snapshot | null, next: Snapshot): SignalEvent[]
 /** The stream kept on screen: newest first, no repeats, at most `max`. */
 export function mergeEvents(old: readonly SignalEvent[], fresh: readonly SignalEvent[], max = 200): SignalEvent[] {
   const seen = new Set<string>();
-  return [...fresh, ...old].filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true))).sort((a, b) => b.at - a.at).slice(0, max);
+  const unique = [...fresh, ...old].filter((e) => {
+    if (seen.has(e.id)) return false;
+    seen.add(e.id);
+    return true;
+  });
+  return unique.sort((a, b) => b.at - a.at).slice(0, max);
 }
 
 /** A signal event as a line of the shared event stream (components/event-stream.tsx): its health is the tone, its source the group, a change is said in bold. */
-export const streamEvent = (e: SignalEvent): StreamEvent<Health> => ({ id: e.id, at: e.at, tone: e.health, text: e.text, group: e.source_id, strong: e.kind === "change" });
+export const streamEvent = (e: SignalEvent): StreamEvent<Health> => ({
+  id: e.id,
+  at: e.at,
+  tone: e.health,
+  text: e.text,
+  group: e.source_id,
+  strong: e.kind === "change",
+});
 
 // ---------------------------------------------------------------- sparkline
 
@@ -303,7 +371,10 @@ export type SessionPreview = {
 };
 
 /** Whose it is: the caller's own when they started it (subject, user id or email). */
-export function isMine(startedBy: readonly (string | null | undefined)[], me: { subject?: string; user_id?: string; email?: string }): boolean {
+export function isMine(
+  startedBy: readonly (string | null | undefined)[],
+  me: { subject?: string; user_id?: string; email?: string },
+): boolean {
   const ids = [me.subject, me.user_id, me.email].filter((x): x is string => !!x).map((x) => x.toLowerCase());
   return startedBy.some((s) => !!s && ids.includes(s.toLowerCase()));
 }
@@ -313,5 +384,18 @@ export function redact(s: SessionPreview): SessionPreview {
   return s.mine ? s : { ...s, title: "A session is running", last_step: "", starter: "" };
 }
 
-const LIVE_STATES = new Set(["queued", "running", "building", "waiting", "awaiting", "held", "stuck", "open", "started", "in_progress", "pending", "claimed"]);
+const LIVE_STATES = new Set([
+  "queued",
+  "running",
+  "building",
+  "waiting",
+  "awaiting",
+  "held",
+  "stuck",
+  "open",
+  "started",
+  "in_progress",
+  "pending",
+  "claimed",
+]);
 export const isLiveState = (s: string) => LIVE_STATES.has(s.toLowerCase());

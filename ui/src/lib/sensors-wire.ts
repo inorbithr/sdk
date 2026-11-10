@@ -7,17 +7,17 @@
 // strings (state active, paused, revoked; health ok, stale, silent, up, down), times are RFC 3339.
 
 import {
+  type Health,
   healthOf,
   isLiveState,
   isMine,
-  rollup,
-  sensorState,
-  type Health,
   type Reading,
+  rollup,
   type Sensor,
   type SessionPreview,
   type Source,
   type SourceKind,
+  sensorState,
 } from "./sensors-core.ts";
 
 const ms = (iso: string | null | undefined): number | null => {
@@ -85,7 +85,8 @@ export const SOURCE_KIND: Record<string, SourceKind> = {
 };
 
 /** How many sensors a list answer holds. */
-export const wireCount = (wire: WireSensors): number => (wire.groups ?? []).reduce((n, g) => n + (g.sensors?.length ?? 0), 0);
+export const wireCount = (wire: WireSensors): number =>
+  (wire.groups ?? []).reduce((n, g) => n + (g.sensors?.length ?? 0), 0);
 
 export function fromApi(wire: WireSensors, now: number): Source[] {
   const out: Source[] = [];
@@ -119,13 +120,27 @@ export function fromApi(wire: WireSensors, now: number): Source[] {
     }
     if (!sensors.length) continue;
     const id = grp.source || "other";
-    out.push(source(id, SOURCE_NAME[id] ?? id, SOURCE_KIND[id] ?? "service", sensors.length === 1 ? "1 sensor" : `${sensors.length} sensors`, sensors));
+    out.push(
+      source(
+        id,
+        SOURCE_NAME[id] ?? id,
+        SOURCE_KIND[id] ?? "service",
+        sensors.length === 1 ? "1 sensor" : `${sensors.length} sensors`,
+        sensors,
+      ),
+    );
   }
   return out;
 }
 
 /** A reading as the readings route and the signal stream carry it: producer time, server time, a number or a state. */
-export type WireReading = { sensor_id?: string; produced_at?: string; received_at?: string; value?: number | null; state?: string };
+export type WireReading = {
+  sensor_id?: string;
+  produced_at?: string;
+  received_at?: string;
+  value?: number | null;
+  state?: string;
+};
 
 const FAILED = /^(fail|failed|down|error|critical)/i;
 
@@ -147,7 +162,9 @@ export function readingsOf(rows: readonly WireReading[] | undefined): Reading[] 
 export type WireSignalEvent = { sse_id?: string; type?: string; reading?: WireReading; missed?: number | string };
 
 /** A live reading for one sensor, or null when the event is not one. */
-export function streamReading(e: WireSignalEvent): { sensor_id: string; reading: Reading; state: string | undefined } | null {
+export function streamReading(
+  e: WireSignalEvent,
+): { sensor_id: string; reading: Reading; state: string | undefined } | null {
   if (e.type !== "reading" || !e.reading?.sensor_id) return null;
   const reading = readingOf(e.reading);
   return reading ? { sensor_id: e.reading.sensor_id, reading, state: e.reading.state } : null;
@@ -156,7 +173,12 @@ export function streamReading(e: WireSignalEvent): { sensor_id: string; reading:
 export const READINGS_KEPT = 120;
 
 /** The newest readings per sensor, with one more appended: oldest first, no repeats by time, at most READINGS_KEPT. */
-export function pushReading(by: Readonly<Record<string, readonly Reading[]>>, id: string, r: Reading, max = READINGS_KEPT): Record<string, readonly Reading[]> {
+export function pushReading(
+  by: Readonly<Record<string, readonly Reading[]>>,
+  id: string,
+  r: Reading,
+  max = READINGS_KEPT,
+): Record<string, readonly Reading[]> {
   const cur = by[id] ?? [];
   if (cur.some((x) => x.at === r.at && x.value === r.value)) return by as Record<string, readonly Reading[]>;
   const next = [...cur, r].sort((a, b) => a.at - b.at).slice(-max);
@@ -167,7 +189,12 @@ export function pushReading(by: Readonly<Record<string, readonly Reading[]>>, id
  * The service's list laid over the readings the page holds: the newest reading is the value, and it
  * moves last_seen forward and the health with it (a stale sensor that speaks is no longer silent).
  */
-export function withReadings(sources: readonly Source[], by: Readonly<Record<string, readonly Reading[]>>, live: Readonly<Record<string, string>>, now: number): Source[] {
+export function withReadings(
+  sources: readonly Source[],
+  by: Readonly<Record<string, readonly Reading[]>>,
+  live: Readonly<Record<string, string>>,
+  now: number,
+): Source[] {
   return sources.map((src) => {
     const sensors = src.sensors.map((s) => {
       const readings = by[s.id] ?? s.readings;
@@ -218,9 +245,28 @@ export type Job = {
   updated_at?: string;
 };
 /** A thread (proto Thread): `state` is its handoff text. */
-export type Thread = { thread_id: string; title?: string; purpose?: string; created_by?: string; status?: string; state?: string; created_at?: string; updated_at?: string };
+export type Thread = {
+  thread_id: string;
+  title?: string;
+  purpose?: string;
+  created_by?: string;
+  status?: string;
+  state?: string;
+  created_at?: string;
+  updated_at?: string;
+};
 /** A queued ask (proto QueuedAsk). */
-export type QueuedAsk = { id: string; source?: string; title?: string; state?: string; state_reason?: string; job_ids?: string[]; created_by?: string; created_at?: string; updated_at?: string };
+export type QueuedAsk = {
+  id: string;
+  source?: string;
+  title?: string;
+  state?: string;
+  state_reason?: string;
+  job_ids?: string[];
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+};
 
 /** The asks state words in five buckets; an unknown word is queued, never hidden. */
 export function askBucket(state: string | undefined): "queued" | "building" | "stuck" | "waiting" | "closed" {
@@ -235,7 +281,12 @@ export function askBucket(state: string | undefined): "queued" | "building" | "s
 export type Me = { subject?: string; user_id?: string; email?: string };
 
 /** The live sessions: running jobs, open threads with no job, and open asks. Someone else's is redacted at draw time (`redact`). */
-export function sessionsOf(jobs: readonly Job[], threads: readonly Thread[], asks: readonly QueuedAsk[], me: Me): SessionPreview[] {
+export function sessionsOf(
+  jobs: readonly Job[],
+  threads: readonly Thread[],
+  asks: readonly QueuedAsk[],
+  me: Me,
+): SessionPreview[] {
   const out: SessionPreview[] = [];
   const withJob = new Set<string>();
   for (const j of jobs) {

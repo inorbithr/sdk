@@ -19,6 +19,9 @@ import {
   rateText,
   redact,
   rollup,
+  type Sensor,
+  type SessionPreview,
+  type Snapshot,
   sparkPoints,
   streamEvent,
   systemLayout,
@@ -26,9 +29,6 @@ import {
   togglePin,
   valueText,
   zoomFor,
-  type Sensor,
-  type SessionPreview,
-  type Snapshot,
 } from "../src/lib/sensors-core.ts";
 
 const NOW = Date.parse("2026-10-14T12:00:00Z");
@@ -95,13 +95,24 @@ test("rate counts the last hour's readings, else 60 / interval, else none", () =
   assert.equal(ratePerMin(30, [], NOW), 2);
   assert.equal(ratePerMin(null, [], NOW), 0);
   // Readings older than an hour do not count.
-  assert.equal(ratePerMin(60, [{ at: NOW - 2 * 3_600_000, value: 1, ok: true }, { at: NOW - 3 * 3_600_000, value: 1, ok: true }], NOW), 1);
+  assert.equal(
+    ratePerMin(
+      60,
+      [
+        { at: NOW - 2 * 3_600_000, value: 1, ok: true },
+        { at: NOW - 3 * 3_600_000, value: 1, ok: true },
+      ],
+      NOW,
+    ),
+    1,
+  );
 });
 
 test("orbit speed rises with the rate, is capped, and stops for silent sensors", () => {
   const rates = [0.1, 1, 6, 60, 600];
   const speeds = rates.map((r) => orbitSpeed(r, "fine", false));
-  for (let i = 1; i < speeds.length; i++) assert.ok(speeds[i] >= speeds[i - 1], `speed at ${rates[i]} >= at ${rates[i - 1]}`);
+  for (let i = 1; i < speeds.length; i++)
+    assert.ok(speeds[i] >= speeds[i - 1], `speed at ${rates[i]} >= at ${rates[i - 1]}`);
   assert.ok(Math.abs(speeds[3] - 0.98) < 1e-9, "60 a minute is the cap");
   assert.equal(speeds[4], speeds[3], "faster than 60 a minute does not blur further");
   assert.ok(speeds[0] > 0.08);
@@ -138,7 +149,17 @@ test("zooming on a planet centres it and never zooms past 6x", () => {
 // ---------------------------------------------------------------- sessions
 
 test("someone else's session shows only that it runs", () => {
-  const s: SessionPreview = { id: "j", thread_id: "t", title: "Secret plan", state: "running", last_step: "reading", starter: "ana@x", at: NOW, mine: false, kind: "session" };
+  const s: SessionPreview = {
+    id: "j",
+    thread_id: "t",
+    title: "Secret plan",
+    state: "running",
+    last_step: "reading",
+    starter: "ana@x",
+    at: NOW,
+    mine: false,
+    kind: "session",
+  };
   const r = redact(s);
   assert.equal(r.title, "A session is running");
   assert.equal(r.last_step, "");
@@ -167,7 +188,15 @@ test("pinned tiles come first in pin order, then worst first", () => {
 });
 
 test("the stream: nothing on first look, then new sensors, changes of health and signals", () => {
-  const snap = (sensors: Sensor[], at: number): Snapshot => ({ origin: "api", label: "", at, problems: [], sources: [{ id: "s", name: "Box", kind: "machine", detail: "", health: rollup(sensors.map((s) => s.health)), sensors }] });
+  const snap = (sensors: Sensor[], at: number): Snapshot => ({
+    origin: "api",
+    label: "",
+    at,
+    problems: [],
+    sources: [
+      { id: "s", name: "Box", kind: "machine", detail: "", health: rollup(sensors.map((s) => s.health)), sensors },
+    ],
+  });
   const first = snap([sensor("a", "fine", { last_seen: NOW - 1000 })], NOW);
   assert.deepEqual(diffEvents(null, first), []);
   const next = snap([sensor("a", "failing", { last_seen: NOW + 5000 }), sensor("b", "fine")], NOW + 8000);
@@ -183,21 +212,56 @@ test("the stream: nothing on first look, then new sensors, changes of health and
     filterStream(merged.map(streamEvent), null, ["failing"]).map(() => "failing"),
   );
   assert.deepEqual(filterStream(merged.map(streamEvent), "other", []), []);
-  assert.ok(merged.map(streamEvent).some((e) => e.strong), "a change is said in bold");
+  assert.ok(
+    merged.map(streamEvent).some((e) => e.strong),
+    "a change is said in bold",
+  );
 });
 
 test("a sparkline needs two values", () => {
   assert.equal(sparkPoints([], 100, 20), null);
-  assert.equal(sparkPoints([{ at: 1, value: 3, ok: true }, { at: 2, value: null, ok: null }], 100, 20), null);
-  assert.equal(sparkPoints([{ at: 1, value: 1, ok: true }, { at: 2, value: 3, ok: true }], 100, 20), "0.0,19.0 100.0,1.0");
+  assert.equal(
+    sparkPoints(
+      [
+        { at: 1, value: 3, ok: true },
+        { at: 2, value: null, ok: null },
+      ],
+      100,
+      20,
+    ),
+    null,
+  );
+  assert.equal(
+    sparkPoints(
+      [
+        { at: 1, value: 1, ok: true },
+        { at: 2, value: 3, ok: true },
+      ],
+      100,
+      20,
+    ),
+    "0.0,19.0 100.0,1.0",
+  );
 });
 
-
 test("the layout puts every planet inside the frame and a click finds the planet under it", () => {
-  const { placed, scale, tracks } = systemLayout([{ id: "a", count: 3 }, { id: "b", count: 12 }, { id: "c", count: 1 }, { id: "d", count: 30 }], 800, 600);
+  const { placed, scale, tracks } = systemLayout(
+    [
+      { id: "a", count: 3 },
+      { id: "b", count: 12 },
+      { id: "c", count: 1 },
+      { id: "d", count: 30 },
+    ],
+    800,
+    600,
+  );
   assert.equal(placed.length, 4);
   assert.ok(scale > 0 && tracks.length >= 1);
-  for (const p of placed) assert.ok(p.x - p.orbit >= -1 && p.x + p.orbit <= 801 && p.y - p.orbit >= -1 && p.y + p.orbit <= 601, `${p.id} fits`);
+  for (const p of placed)
+    assert.ok(
+      p.x - p.orbit >= -1 && p.x + p.orbit <= 801 && p.y - p.orbit >= -1 && p.y + p.orbit <= 601,
+      `${p.id} fits`,
+    );
   assert.equal(hitPlanet(placed, placed[1].x, placed[1].y), placed[1].id);
   assert.equal(hitPlanet(placed, -500, -500), null);
   assert.deepEqual(systemLayout([], 800, 600).placed, []);

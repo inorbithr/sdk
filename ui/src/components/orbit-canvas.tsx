@@ -9,11 +9,11 @@
 // and the canvas is drawn only when something changes: colour carries the meaning. A list for
 // screen readers says everything the drawing does. The layout maths is in lib/sensors-core.ts.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
-import { ease, hitPlanet, moonSlot, systemLayout, zoomFor, type Placed } from "../lib/sensors-core.ts";
-import { Button, cn } from "./kit.tsx";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ease, hitPlanet, moonSlot, type Placed, systemLayout, zoomFor } from "../lib/sensors-core.ts";
 import { useReducedMotion } from "../lib/use-reduced-motion.ts";
+import { Button, cn } from "./kit.tsx";
 
 const ZOOM_MS = 520;
 const STREAK_MS = 900;
@@ -106,7 +106,15 @@ export function OrbitCanvas<T extends string>({
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const layout = useMemo(() => systemLayout(planets.map((p) => ({ id: p.id, count: p.moons.length })), size.w, Math.max(0, size.h - legendH(size.w))), [planets, size.w, size.h]);
+  const layout = useMemo(
+    () =>
+      systemLayout(
+        planets.map((p) => ({ id: p.id, count: p.moons.length })),
+        size.w,
+        Math.max(0, size.h - legendH(size.w)),
+      ),
+    [planets, size.w, size.h],
+  );
   const moons = useMemo(() => moonsOf(planets, reduced), [planets, reduced]);
   const focused = focus ? (planets.find((p) => p.id === focus) ?? null) : null;
 
@@ -129,12 +137,6 @@ export function OrbitCanvas<T extends string>({
     frames: 0,
     statAt: 0,
   });
-  const s = st.current;
-  s.layout = layout;
-  s.moons = moons;
-  s.planets = planets;
-  s.reduced = reduced;
-  s.tones = tones;
 
   const draw = useCallback((t: number) => {
     const c = canvas.current;
@@ -149,7 +151,12 @@ export function OrbitCanvas<T extends string>({
     const P = s.palette;
     // The camera eases from where it was to where it is going.
     const z = s.zoomAt ? ease((t - s.zoomAt) / ZOOM_MS, s.reduced) : 1;
-    const cam = (s.cam = { x: s.from.x + (s.to.x - s.from.x) * z, y: s.from.y + (s.to.y - s.from.y) * z, k: s.from.k + (s.to.k - s.from.k) * z });
+    const cam: Cam = {
+      x: s.from.x + (s.to.x - s.from.x) * z,
+      y: s.from.y + (s.to.y - s.from.y) * z,
+      k: s.from.k + (s.to.k - s.from.k) * z,
+    };
+    s.cam = cam;
     const zooming = z < 1;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, c.width, c.height);
@@ -381,8 +388,16 @@ export function OrbitCanvas<T extends string>({
     kick();
   }, [target, size.w, kick]);
 
-  // Data changed: draw it (this matters with reduced motion, when nothing else asks for a frame).
-  useEffect(() => kick(), [layout, moons, reduced, kick]);
+  // Data changed: hand it to the frame and draw it (this matters with reduced motion, when nothing else asks for a frame).
+  useEffect(() => {
+    const s = st.current;
+    s.layout = layout;
+    s.moons = moons;
+    s.planets = planets;
+    s.reduced = reduced;
+    s.tones = tones;
+    kick();
+  }, [layout, moons, planets, reduced, tones, kick]);
 
   // Streaks for fresh signals.
   useEffect(() => {
@@ -417,7 +432,9 @@ export function OrbitCanvas<T extends string>({
     else if (lastFocus.current) {
       const id = lastFocus.current;
       lastFocus.current = null;
-      requestAnimationFrame(() => wrap.current?.querySelector<HTMLButtonElement>(`[data-planet="${CSS.escape(id)}"]`)?.focus());
+      requestAnimationFrame(() =>
+        wrap.current?.querySelector<HTMLButtonElement>(`[data-planet="${CSS.escape(id)}"]`)?.focus(),
+      );
     }
   }, [focus]);
 
@@ -431,9 +448,22 @@ export function OrbitCanvas<T extends string>({
   };
 
   return (
-    <div className={focused ? "grid grid-cols-1 gap-4 @3xl/page:grid-cols-[minmax(0,1fr)_340px]" : ""} data-testid={testid} data-focus={focus ?? ""}>
-      <div ref={wrap} className="bg-card relative h-[min(64vh,600px)] min-h-[300px] overflow-hidden rounded-xl border shadow-xs">
-        <canvas ref={canvas} aria-hidden onClick={onClick} className="absolute inset-0 size-full cursor-pointer" data-reduced={reduced ? "1" : "0"} />
+    <div
+      className={focused ? "grid grid-cols-1 gap-4 @3xl/page:grid-cols-[minmax(0,1fr)_340px]" : ""}
+      data-testid={testid}
+      data-focus={focus ?? ""}
+    >
+      <div
+        ref={wrap}
+        className="bg-card relative h-[min(64vh,600px)] min-h-[300px] overflow-hidden rounded-xl border shadow-xs"
+      >
+        <canvas
+          ref={canvas}
+          aria-hidden
+          onClick={onClick}
+          className="absolute inset-0 size-full cursor-pointer"
+          data-reduced={reduced ? "1" : "0"}
+        />
         {!focused &&
           layout.placed.map((p: Placed, i) => {
             const src = planets[i];
@@ -452,11 +482,21 @@ export function OrbitCanvas<T extends string>({
             );
           })}
         {focused && (
-          <Button size="sm" variant="outline" className="bg-card/90 absolute top-3 left-3 backdrop-blur" onClick={() => onFocus(null)}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="bg-card/90 absolute top-3 left-3 backdrop-blur"
+            onClick={() => onFocus(null)}
+          >
             <ArrowLeft /> {backLabel}
           </Button>
         )}
-        <div className={cn("bg-card/85 text-muted-foreground pointer-events-none absolute right-3 bottom-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-1 text-[11px] backdrop-blur max-sm:left-3")} aria-hidden>
+        <div
+          className={cn(
+            "bg-card/85 text-muted-foreground pointer-events-none absolute right-3 bottom-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-1 text-[11px] backdrop-blur max-sm:left-3",
+          )}
+          aria-hidden
+        >
           {legend}
         </div>
       </div>

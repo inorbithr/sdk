@@ -3,8 +3,8 @@
 
 import { useState } from "react";
 import { Button, Tag } from "../components/kit.tsx";
-import { askToView } from "./actions.ts";
 import { agoText, redact, type SessionPreview } from "../lib/sensors-core.ts";
+import { askToView } from "./actions.ts";
 
 function Row({ s, now }: { s: SessionPreview; now: number }) {
   const shown = redact(s);
@@ -30,7 +30,10 @@ function Row({ s, now }: { s: SessionPreview; now: number }) {
           </Button>
         )}
         {asked && (
-          <p role="status" className={asked.ok ? "text-success w-full text-[12px]" : "text-muted-foreground w-full text-[12px]"}>
+          <p
+            role="status"
+            className={asked.ok ? "text-success w-full text-[12px]" : "text-muted-foreground w-full text-[12px]"}
+          >
             {asked.text}
           </p>
         )}
@@ -50,7 +53,15 @@ function Row({ s, now }: { s: SessionPreview; now: number }) {
   );
 }
 
-export function SessionList({ sessions, now, empty }: { sessions: readonly SessionPreview[]; now: number; empty: string }) {
+export function SessionList({
+  sessions,
+  now,
+  empty,
+}: {
+  sessions: readonly SessionPreview[];
+  now: number;
+  empty: string;
+}) {
   if (!sessions.length) return <p className="text-muted-foreground py-2 text-[12.5px]">{empty}</p>;
   return (
     <ul className="divide-y">

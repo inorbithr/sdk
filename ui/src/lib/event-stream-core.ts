@@ -14,6 +14,10 @@ export type StreamEvent<T extends string> = {
 };
 
 /** The events of one group (null for every group) in any of the tones (none for every tone). */
-export function filterStream<T extends string>(events: readonly StreamEvent<T>[], group: string | null, tones: readonly T[]): StreamEvent<T>[] {
+export function filterStream<T extends string>(
+  events: readonly StreamEvent<T>[],
+  group: string | null,
+  tones: readonly T[],
+): StreamEvent<T>[] {
   return events.filter((e) => (!group || e.group === group) && (!tones.length || tones.includes(e.tone)));
 }
