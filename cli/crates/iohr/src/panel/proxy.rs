@@ -1228,10 +1228,6 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         rejoin_fetch: None,
         esc_held: None,
     };
-    session
-        .proxy
-        .chat
-        .set_hide_label(settings.open_key.hide_label());
     session.redraw();
     session.refresh();
 

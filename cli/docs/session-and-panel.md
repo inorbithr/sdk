@@ -200,10 +200,11 @@ your history). While Io answers, the status row shows a spinner, what it is doin
 files"), a moving bar with the count and the time (the number of steps is not known, so it is not a
 percentage), and a `■ Stop esc` button; Esc or a click on it stops the answer, and Ctrl-C still
 does. Shift+Tab changes the answer mode (manual, plan, auto), Up recalls the last question, Esc
-clears the line, and a click on the mode chip changes the mode. `Ctrl-]` (or `^G` then `c`, or a
-click on `hide`) folds the box to a corner chip and brings it back; the chip is a click away, and
-`[panel] chat = "hidden"` or `"off"` (or `IOHR_PANEL_CHAT`) sets the start. `Ctrl-]` is zsh's
-find-character key and is rebound only inside the panel. A full-screen program has the whole
+clears the line, and a click on the mode chip changes the mode. Option+h (`⌥h`; Alt+h on Linux)
+folds the box to a corner chip and brings it back, in every terminal, and the box names it so. So
+do `^G` then `c` and a click on `hide`; the chip is a click away, and `[panel] chat = "hidden"` or
+`"off"` (or `IOHR_PANEL_CHAT`) sets the start. `Ctrl-]` does the same, for a keyboard layout where
+Option+h types another character; it is rebound only inside the panel. A full-screen program has the whole
 screen: the box steps aside and comes back after it. While the box shows, the panel takes the
 mouse for its buttons, so select text with Option or Shift held.
 
