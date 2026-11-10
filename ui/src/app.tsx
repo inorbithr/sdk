@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  Atom,
   House,
   LayoutGrid,
   Orbit,
@@ -33,7 +34,6 @@ import { extensionsMenu } from "./frame/extensions-menu.ts";
 import { ARRANGE_MIN_WIDTH, Frame, useViewportWidth } from "./frame/frame.tsx";
 import { GridPicker } from "./frame/grid-picker.tsx";
 import { PanelFrame } from "./frame/panel-frame.tsx";
-import { useFrameShortcuts } from "./frame/shortcuts.ts";
 import { toggleHidden } from "./frame/sidebar-frame.ts";
 import { Home } from "./home.tsx";
 import { accountMenu, accountName } from "./lib/accounts-core.ts";
@@ -52,10 +52,17 @@ import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts"
 import { useSession } from "./lib/session-store.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
 import { useRead } from "./lib/settings-data.ts";
+import { BINDINGS } from "./lib/shortcut-tables.ts";
 import { useSidebar } from "./lib/sidebar-store.ts";
+import { useShortcuts } from "./lib/use-shortcuts.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
 import { Settings } from "./settings.tsx";
+import { HelpOverlay, keysShown, Palette, type PaletteItem } from "./shortcuts-view.tsx";
+
+// The Workload page (3D orbit, room, tree): its own chunk, so three loads only on /workload.
+const Workload = lazy(() => import("./workload.tsx"));
+const WORKLOAD = "/workload";
 
 const Canvas = lazy(() => import("./canvas/canvas-page.tsx"));
 
@@ -96,7 +103,16 @@ export function App() {
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
   const inCanvas = canvasRoute(window.location.pathname) !== null;
-  const pageKey = inSettings ? "settings" : inCanvas ? "canvas" : routed === null ? HOME : `ext:${routed}`;
+  const inWorkload = window.location.pathname === WORKLOAD;
+  const pageKey = inSettings
+    ? "settings"
+    : inCanvas
+      ? "canvas"
+      : inWorkload
+        ? "workload"
+        : routed === null
+          ? HOME
+          : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -161,8 +177,16 @@ export function App() {
   const openGrid = () => setGridAt((at) => (at ? null : layoutButton.current));
   const layoutActions = { layout: pick, grid: openGrid, back: () => updateArr(back) };
 
-  useFrameShortcuts({
+  const [help, setHelp] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const toggleHelp = () => setHelp((h) => !h);
+  useShortcuts("global", {
     sidebar: () => update(toggleHidden),
+    palette: () => setPalette((p) => !p),
+    shortcuts: toggleHelp,
+    "shortcuts-help": toggleHelp,
+    "go-home": () => goTo(HOME),
+    "go-settings": () => goTo("settings"),
     ...(wide
       ? {
           "layout-left": () => pick("left"),
@@ -202,6 +226,7 @@ export function App() {
   const pages = [
     { key: HOME, title: "Home" },
     { key: "canvas", title: "Canvas" },
+    { key: "workload", title: "Workload" },
     { key: "settings", title: "Settings" },
     ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
   ];
@@ -219,9 +244,26 @@ export function App() {
       window.location.assign(CANVAS);
       return;
     }
+    if (key === "workload") {
+      window.location.assign(WORKLOAD);
+      return;
+    }
     const panel = panels.find((p) => `ext:${p.name}` === key);
     if (panel) choose(panel);
   };
+  const pageIds = ["home", "settings"];
+  const paletteItems: PaletteItem[] = [
+    ...pages.map((p) => {
+      const go = BINDINGS.find((b) => b.page === (p.key === HOME ? "home" : p.key));
+      return {
+        id: `go:${p.key}`,
+        label: `Go to ${p.title}`,
+        hint: go ? keysShown(go) : undefined,
+        run: () => goTo(p.key),
+      };
+    }),
+    { id: "help", label: "Keyboard shortcuts", hint: "?", run: () => setHelp(true) },
+  ];
   const orbitActions = {
     go: goTo,
     add: (k: string) => updateOrbits((o) => addOrbit(o, k)),
@@ -275,11 +317,13 @@ export function App() {
 
   const title = (
     <h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
-      <span className={cn((chosen || inSettings || inCanvas) && "text-muted-foreground")}>InOrbit</span>
-      {chosen || inSettings || inCanvas ? (
+      <span className={cn((chosen || inSettings || inWorkload || inCanvas) && "text-muted-foreground")}>InOrbit</span>
+      {chosen || inSettings || inWorkload || inCanvas ? (
         <>
           <span className="text-muted-foreground">/</span>
-          <span className="truncate">{inSettings ? "Settings" : inCanvas ? "Canvas" : chosen?.title}</span>
+          <span className="truncate">
+            {inSettings ? "Settings" : inCanvas ? "Canvas" : inWorkload ? "Workload" : chosen?.title}
+          </span>
         </>
       ) : null}
     </h1>
@@ -381,10 +425,11 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings && !inCanvas}
+          active={routed === null && !inSettings && !inWorkload && !inCanvas}
           onClick={() => window.location.assign("/")}
         />
         <NavItem rail={rail} label="Canvas" icon={<PenTool />} active={inCanvas} onClick={() => goTo("canvas")} />
+        <NavItem rail={rail} label="Workload" icon={<Atom />} active={inWorkload} onClick={() => goTo("workload")} />
       </ul>
       <section aria-label="Extensions" className={cn("flex flex-col gap-0.5", rail && "items-center")}>
         {!rail && <h2 className="text-muted-foreground px-2 pb-0.5 text-[11px] font-medium">Extensions</h2>}
@@ -472,7 +517,11 @@ export function App() {
               {reason}
             </p>
           ) : null}
-          {inSettings ? (
+          {inWorkload ? (
+            <Suspense fallback={<p className="text-muted-foreground text-sm">Loading the workload…</p>}>
+              <Workload />
+            </Suspense>
+          ) : inSettings ? (
             <Settings
               session={account.session}
               accounts={accounts}
@@ -518,6 +567,8 @@ export function App() {
           )}
         </div>
       </Frame>
+      {help ? <HelpOverlay pages={pageIds} onClose={() => setHelp(false)} /> : null}
+      {palette ? <Palette items={paletteItems} onClose={() => setPalette(false)} /> : null}
       {gridAt ? <GridPicker at={gridAt} onPick={pickSpan} onClose={() => setGridAt(null)} /> : null}
       {editing ? (
         <MaintenanceForm id={editing} onSave={(why) => putDown(editing, why)} onClose={() => setEditing(null)} />

@@ -1,1 +1,5 @@
-[{ "id": "sidebar", "label": "Toggle sidebar", "accel": "CmdOrCtrl+\\" }]
+[
+  { "id": "sidebar", "label": "Toggle sidebar", "accel": "CmdOrCtrl+\\" },
+  { "id": "palette", "label": "Command palette", "accel": "CmdOrCtrl+K" },
+  { "id": "shortcuts", "label": "Keyboard shortcuts", "accel": "CmdOrCtrl+/" }
+]

@@ -27,6 +27,7 @@ import {
 import { cn } from "../frame/cn.ts";
 import { showContextMenu } from "../frame/context-menu.tsx";
 import { FIRST_PANEL } from "../frame/dock-frame.ts";
+import { useShortcuts } from "../lib/use-shortcuts.ts";
 import {
   addItems,
   boundsOf,
@@ -70,7 +71,6 @@ import { canvasPath, canvasRoute } from "./canvas-route.ts";
 import { Card, isCard } from "./cards.tsx";
 import { CoordinateBar } from "./coordinate-bar.tsx";
 import { Inspector } from "./inspector.tsx";
-import { useShortcuts } from "./keys-shim.ts";
 import { type CardKind, pick as pickCard } from "./picker-core.ts";
 import { type Box, type Item, paintOrder, removeItems, type ShapeItem, type Tone } from "./schema.ts";
 import { useBoard } from "./use-board.ts";
