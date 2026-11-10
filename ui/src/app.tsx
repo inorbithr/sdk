@@ -1,15 +1,16 @@
 import {
   ArrowLeftRight,
   House,
-  PenTool,
   LayoutGrid,
   Orbit,
   PanelRight,
+  PenTool,
   Puzzle,
   Settings as SettingsIcon,
   Wrench,
 } from "lucide-react";
 import { lazy, type MouseEvent, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
+import { CANVAS, canvasRoute } from "./canvas/canvas-route.ts";
 import {
   applyLayout,
   applySpan,
@@ -45,10 +46,10 @@ import { updateOrbits, useOrbits } from "./lib/orbits-store.ts";
 import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
 import { useSession } from "./lib/session-store.ts";
-import { CANVAS, canvasRoute } from "./canvas/canvas-route.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
 
 const Canvas = lazy(() => import("./canvas/canvas-page.tsx"));
+
 import { useSidebar } from "./lib/sidebar-store.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";

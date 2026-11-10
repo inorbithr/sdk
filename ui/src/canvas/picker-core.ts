@@ -24,7 +24,15 @@ export function pick(kind: CardKind, text: string): Picked {
     const [, owner, repo, n] = m;
     return {
       ok: true,
-      make: (at) => ({ item_id: id(), type: "pr", title: `${owner}/${repo}#${n}`, repo: `${owner}/${repo}`, number: Number(n), ...at, ...size }),
+      make: (at) => ({
+        item_id: id(),
+        type: "pr",
+        title: `${owner}/${repo}#${n}`,
+        repo: `${owner}/${repo}`,
+        number: Number(n),
+        ...at,
+        ...size,
+      }),
     };
   }
   if (kind === "decision") {
@@ -33,13 +41,30 @@ export function pick(kind: CardKind, text: string): Picked {
     const k = m[1].toLowerCase() as "prd" | "rfc" | "adr" | "study";
     return {
       ok: true,
-      make: (at) => ({ item_id: id(), type: "decision", title: `${k.toUpperCase()} ${m[2]}`, kind: k, number: m[2], ...at, ...size }),
+      make: (at) => ({
+        item_id: id(),
+        type: "decision",
+        title: `${k.toUpperCase()} ${m[2]}`,
+        kind: k,
+        number: m[2],
+        ...at,
+        ...size,
+      }),
     };
   }
   const [space, doc] = t.split(/\s+/);
-  if (!space || !doc || !SPACE.test(space) || !DOC.test(doc)) return { ok: false, why: "Type the space id, a space, then the document id." };
+  if (!space || !doc || !SPACE.test(space) || !DOC.test(doc))
+    return { ok: false, why: "Type the space id, a space, then the document id." };
   return {
     ok: true,
-    make: (at) => ({ item_id: id(), type: "document", title: doc, document: { space_id: space, document_id: doc }, ...at, w: 360, h: 240 }),
+    make: (at) => ({
+      item_id: id(),
+      type: "document",
+      title: doc,
+      document: { space_id: space, document_id: doc },
+      ...at,
+      w: 360,
+      h: 240,
+    }),
   };
 }

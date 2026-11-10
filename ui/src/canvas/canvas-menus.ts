@@ -33,7 +33,13 @@ export function itemMenu(items: Item[], act: ItemActions): MenuEntry[] {
         disabled: !one ? "Select one item" : hasText(one) ? false : "This card has no text",
         run: act.edit,
       },
-      { id: "item:inspect", label: "Details", icon: "info", disabled: one ? false : "Select one item", run: act.inspect },
+      {
+        id: "item:inspect",
+        label: "Details",
+        icon: "info",
+        disabled: one ? false : "Select one item",
+        run: act.inspect,
+      },
     ],
     [
       {
@@ -41,7 +47,11 @@ export function itemMenu(items: Item[], act: ItemActions): MenuEntry[] {
         label: "Colour",
         icon: "palette",
         disabled: tones ? false : "Notes and frames only",
-        items: TONES.map((t) => ({ id: `item:tone:${t}`, label: t[0].toUpperCase() + t.slice(1), run: () => act.tone(t) })),
+        items: TONES.map((t) => ({
+          id: `item:tone:${t}`,
+          label: t[0].toUpperCase() + t.slice(1),
+          run: () => act.tone(t),
+        })),
       },
       { id: "item:front", label: "Bring to front", icon: "up", disabled: none, run: act.front },
       { id: "item:back", label: "Send to back", icon: "down", disabled: none, run: act.back },
@@ -75,8 +85,22 @@ export function boardMenu(act: BoardActions): MenuEntry[] {
       { id: "board:fit-home", label: "Back to 100%", icon: "reset", keys: "⇧1", run: act.fitHome },
     ],
     [
-      { id: "board:undo", label: "Undo", icon: "undo", keys: "⌘Z", disabled: act.undo ? false : "Nothing to undo", run: act.undo ?? undefined },
-      { id: "board:redo", label: "Redo", icon: "redo", keys: "⇧⌘Z", disabled: act.redo ? false : "Nothing to redo", run: act.redo ?? undefined },
+      {
+        id: "board:undo",
+        label: "Undo",
+        icon: "undo",
+        keys: "⌘Z",
+        disabled: act.undo ? false : "Nothing to undo",
+        run: act.undo ?? undefined,
+      },
+      {
+        id: "board:redo",
+        label: "Redo",
+        icon: "redo",
+        keys: "⇧⌘Z",
+        disabled: act.redo ? false : "Nothing to redo",
+        run: act.redo ?? undefined,
+      },
     ],
   );
 }

@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { emptyCanvas } from "../src/canvas/schema.ts";
-import { asksFor, buildBrief, buildSelRef, isRepeat, labelsOf, stateOf, suggestionAsk, suggestionText, suggestKind } from "../src/canvas/suggest-core.ts";
+import {
+  asksFor,
+  buildBrief,
+  buildSelRef,
+  isRepeat,
+  labelsOf,
+  stateOf,
+  suggestionAsk,
+  suggestionText,
+  suggestKind,
+} from "../src/canvas/suggest-core.ts";
 
 const canvas = () => {
   const c = { ...emptyCanvas("Plan"), canvas_id: "cnv_1" };
@@ -40,6 +50,15 @@ test("brief never lets the work merge; state and asks from the picture", () => {
   assert.equal(stateOf({ state: "RUNNING" }).state, "running");
   assert.equal(stateOf({ state: "done", pr: "x" }).state, "done");
   assert.equal(stateOf({ state: "queued" }).state, "queued");
-  const l = asksFor([{ id: "a1", source: "canvas:cnv_1", title: "t", state: "queued" }, { id: "a2", source: "canvas:other" }], "cnv_1");
-  assert.deepEqual(l.map((x) => x.id), ["a1"]);
+  const l = asksFor(
+    [
+      { id: "a1", source: "canvas:cnv_1", title: "t", state: "queued" },
+      { id: "a2", source: "canvas:other" },
+    ],
+    "cnv_1",
+  );
+  assert.deepEqual(
+    l.map((x) => x.id),
+    ["a1"],
+  );
 });

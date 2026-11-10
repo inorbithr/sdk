@@ -5,7 +5,10 @@ import { type KeyRow, pressed } from "../src/canvas/keys-core.ts";
 import table from "../src/shortcuts/pages/canvas.keys.json" with { type: "json" };
 
 const rows = table.rows as KeyRow[];
-const ev = (key: string, o: Partial<{ code: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }> = {}) => ({
+const ev = (
+  key: string,
+  o: Partial<{ code: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }> = {},
+) => ({
   key,
   metaKey: false,
   ctrlKey: false,

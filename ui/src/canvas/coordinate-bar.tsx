@@ -7,14 +7,28 @@ import { apiSend, useLive } from "../lib/live-shim.ts";
 import { applyFrame, emptyPicture } from "../lib/picture.ts";
 import type { Canvas } from "./schema.ts";
 import {
-  CHIPS, WORK_KINDS, asksFor, buildBrief, buildSelRef, isRepeat, suggestKind, suggestionAsk, suggestionText, workMarker,
-  type ChipId, type WorkKind,
+  asksFor,
+  buildBrief,
+  buildSelRef,
+  CHIPS,
+  type ChipId,
+  isRepeat,
+  suggestionAsk,
+  suggestionText,
+  suggestKind,
+  WORK_KINDS,
+  type WorkKind,
+  workMarker,
 } from "./suggest-core.ts";
 
 const LABEL = { connecting: "Connecting", live: "Live", reconnecting: "Reconnecting", off: "Off" } as const;
 
 export function CoordinateBar({ canvas, sel }: { canvas: Canvas; sel: string[] }) {
-  const { value: pic, state, reason } = useLive<unknown, ReturnType<typeof emptyPicture>>("/v1/coordinator/picture/events", {
+  const {
+    value: pic,
+    state,
+    reason,
+  } = useLive<unknown, ReturnType<typeof emptyPicture>>("/v1/coordinator/picture/events", {
     reduce: applyFrame,
     initial: emptyPicture(),
   });
@@ -49,11 +63,15 @@ export function CoordinateBar({ canvas, sel }: { canvas: Canvas; sel: string[] }
       links: [],
     });
     setConfirm(false);
-    setNote(r.ok ? "Work queued. It ends in a pull request for review; nothing is merged or rolled." : `Not started: ${r.reason}`);
+    setNote(
+      r.ok
+        ? "Work queued. It ends in a pull request for review; nothing is merged or rolled."
+        : `Not started: ${r.reason}`,
+    );
   };
 
   return (
-    <div className="bg-card flex flex-col gap-2 border-t px-3 py-2 text-xs" aria-label="Coordinator">
+    <section className="bg-card flex flex-col gap-2 border-t px-3 py-2 text-xs" aria-label="Coordinator">
       <div className="flex flex-wrap items-center gap-2">
         <span role="status" className="font-medium" title={reason ?? undefined}>
           Coordinator: {LABEL[state]}
@@ -66,7 +84,9 @@ export function CoordinateBar({ canvas, sel }: { canvas: Canvas; sel: string[] }
         <ul className="flex flex-col gap-0.5">
           {asks.map((a) => (
             <li key={a.id} className="flex gap-2">
-              <span className="bg-muted rounded px-1.5" data-state={a.state}>{a.label}</span>
+              <span className="bg-muted rounded px-1.5" data-state={a.state}>
+                {a.label}
+              </span>
               <span className="min-w-0 truncate">{a.text}</span>
             </li>
           ))}
@@ -76,14 +96,21 @@ export function CoordinateBar({ canvas, sel }: { canvas: Canvas; sel: string[] }
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-muted-foreground">On {ref.elements.length} selected:</span>
           {CHIPS.map((c) => (
-            <button key={c.id} type="button" className="rounded-md border px-2 py-0.5" onClick={() => (c.prefill ? setTyped(c.prefill) : void file(c.id))}>
+            <button
+              key={c.id}
+              type="button"
+              className="rounded-md border px-2 py-0.5"
+              onClick={() => (c.prefill ? setTyped(c.prefill) : void file(c.id))}
+            >
               {c.label}
             </button>
           ))}
           <input
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void file(null); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void file(null);
+            }}
             placeholder="Or say what to change, then Enter"
             aria-label="Suggestion"
             className="bg-background border-input min-w-40 flex-1 rounded-md border px-2 py-0.5"
@@ -93,18 +120,40 @@ export function CoordinateBar({ canvas, sel }: { canvas: Canvas; sel: string[] }
       <div className="flex flex-wrap items-center gap-2">
         {confirm ? (
           <>
-            <select value={kind ?? suggestKind(ref)} onChange={(e) => setKind(e.target.value as WorkKind)} aria-label="Kind of work" className="bg-background rounded-md border px-1 py-0.5">
-              {WORK_KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
+            <select
+              value={kind ?? suggestKind(ref)}
+              onChange={(e) => setKind(e.target.value as WorkKind)}
+              aria-label="Kind of work"
+              className="bg-background rounded-md border px-1 py-0.5"
+            >
+              {WORK_KINDS.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label}
+                </option>
+              ))}
             </select>
-            <span>Queue work for {ref ? "the selection" : "the whole canvas"}? It ends in a pull request; nothing is merged or rolled.</span>
-            <button type="button" className="bg-primary text-primary-foreground rounded-md px-2 py-0.5" onClick={() => void start()}>Approve and start</button>
-            <button type="button" className="rounded-md border px-2 py-0.5" onClick={() => setConfirm(false)}>Cancel</button>
+            <span>
+              Queue work for {ref ? "the selection" : "the whole canvas"}? It ends in a pull request; nothing is merged
+              or rolled.
+            </span>
+            <button
+              type="button"
+              className="bg-primary text-primary-foreground rounded-md px-2 py-0.5"
+              onClick={() => void start()}
+            >
+              Approve and start
+            </button>
+            <button type="button" className="rounded-md border px-2 py-0.5" onClick={() => setConfirm(false)}>
+              Cancel
+            </button>
           </>
         ) : (
-          <button type="button" className="rounded-md border px-2 py-0.5" onClick={() => setConfirm(true)}>Start work…</button>
+          <button type="button" className="rounded-md border px-2 py-0.5" onClick={() => setConfirm(true)}>
+            Start work…
+          </button>
         )}
         {note ? <span role="status">{note}</span> : null}
       </div>
-    </div>
+    </section>
   );
 }

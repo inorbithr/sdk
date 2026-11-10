@@ -1,18 +1,40 @@
 // The Canvas page (PRD 0065, RFC 0217): the board of the Mac app on the web, drawn natively (DOM and SVG over the
 // same `iohr.canvas` v3 file) because the Mac app's patched Excalidraw is not ported. Core has no canvas API yet, so
 // a canvas is kept in this browser's storage, per viewer; the page says so. Slice 1: list, open, draw, edit, undo.
-import { Copy, Hand, MousePointer2, Plus, Redo2, Square, StickyNote, Trash2, Undo2, ArrowUpRight, Circle, Frame } from "lucide-react";
-import { type PointerEvent as RPointer, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowUpRight,
+  Circle,
+  Copy,
+  Frame,
+  Hand,
+  MousePointer2,
+  Plus,
+  Redo2,
+  Square,
+  StickyNote,
+  Trash2,
+  Undo2,
+} from "lucide-react";
+import {
+  type ReactNode,
+  type PointerEvent as RPointer,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { cn } from "../frame/cn.ts";
 import { showContextMenu } from "../frame/context-menu.tsx";
 import { FIRST_PANEL } from "../frame/dock-frame.ts";
 import {
-  duplicate,
-  type Handle,
-  HANDLES,
   addItems,
   boundsOf,
   connect,
+  duplicate,
+  endpoints,
+  HANDLES,
+  type Handle,
   hitTest,
   itemsInRect,
   makeFrame,
@@ -22,13 +44,12 @@ import {
   moveItems,
   normRect,
   reorder,
-  setTitle,
-  setTone,
   resizeBox,
   resizeItem,
   setText,
+  setTitle,
+  setTone,
   snap,
-  endpoints,
 } from "./board-core.ts";
 import {
   browserKV,
@@ -44,13 +65,13 @@ import {
 import { boardMenu, itemMenu } from "./canvas-menus.ts";
 import { canvasPath, canvasRoute } from "./canvas-route.ts";
 import { Card, isCard } from "./cards.tsx";
-import { Inspector } from "./inspector.tsx";
-import { type CardKind, pick as pickCard } from "./picker-core.ts";
-import { useShortcuts } from "./keys-shim.ts";
-import { type Box, type Item, type Tone, paintOrder, removeItems, type ShapeItem } from "./schema.ts";
 import { CoordinateBar } from "./coordinate-bar.tsx";
+import { Inspector } from "./inspector.tsx";
+import { useShortcuts } from "./keys-shim.ts";
+import { type CardKind, pick as pickCard } from "./picker-core.ts";
+import { type Box, type Item, paintOrder, removeItems, type ShapeItem, type Tone } from "./schema.ts";
 import { useBoard } from "./use-board.ts";
-import { type View, detailAt, fit, freeSpot, linkPath, toBoard, zoomAt } from "./viewport.ts";
+import { detailAt, fit, freeSpot, linkPath, toBoard, type View, zoomAt } from "./viewport.ts";
 
 const KEPT_HERE = "Kept in this browser only: core has no canvas API yet, so nothing here is saved to your account.";
 
@@ -77,8 +98,7 @@ const go = (id: string | null) => window.location.assign(canvasPath(id));
 
 function CanvasList() {
   const kv = useMemo(() => browserKV(), []);
-  const [n, setN] = useState(0);
-  const list = useMemo(() => listCanvases(kv), [kv, n]);
+  const [list, setList] = useState(() => listCanvases(kv));
   const [title, setTitle] = useState("");
   return (
     <section className="flex max-w-2xl flex-col gap-4" aria-label="Canvases">
@@ -119,7 +139,7 @@ function CanvasList() {
                 const t = window.prompt("Rename the canvas", c.title);
                 if (t) {
                   renameCanvas(kv, c.canvas_id, t);
-                  setN(n + 1);
+                  setList(listCanvases(kv));
                 }
               }}
             >
@@ -129,7 +149,7 @@ function CanvasList() {
               label="Duplicate"
               onClick={() => {
                 copyCanvas(kv, c.canvas_id);
-                setN(n + 1);
+                setList(listCanvases(kv));
               }}
             >
               <Copy />
@@ -139,7 +159,7 @@ function CanvasList() {
               onClick={() => {
                 if (window.confirm(`Delete "${c.title}" from this browser?`)) {
                   deleteCanvas(kv, c.canvas_id);
-                  setN(n + 1);
+                  setList(listCanvases(kv));
                 }
               }}
             >
@@ -207,18 +227,19 @@ function Editor({ id }: { id: string }) {
   const [panel, setPanel] = useState<{ open: boolean; width: number }>({ open: false, width: FIRST_PANEL });
   const [adding, setAdding] = useState(false);
   const canvas = st.canvas;
+  const ready = canvas !== null;
 
   useEffect(() => {
     rememberCanvas(kv, id);
   }, [kv, id]);
   useEffect(() => {
     const el = host.current;
-    if (!el) return;
+    if (!ready || !el) return;
     const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
     ro.observe(el);
     setSize({ w: el.clientWidth, h: el.clientHeight });
     return () => ro.disconnect();
-  }, [canvas === null]);
+  }, [ready]);
   useEffect(() => {
     const t = setTimeout(() => writeView(kv, id, view), 300);
     return () => clearTimeout(t);
@@ -373,7 +394,8 @@ function Editor({ id }: { id: string }) {
   const move = (e: RPointer<HTMLDivElement>) => {
     if (!drag) return;
     const p = at(e);
-    if (drag.kind === "pan") setView({ ...drag.from, x: drag.from.x + e.clientX - drag.sx, y: drag.from.y + e.clientY - drag.sy });
+    if (drag.kind === "pan")
+      setView({ ...drag.from, x: drag.from.x + e.clientX - drag.sx, y: drag.from.y + e.clientY - drag.sy });
     else if (drag.kind === "move") {
       const dx = p.x - drag.last.x,
         dy = p.y - drag.last.y;
@@ -427,7 +449,12 @@ function Editor({ id }: { id: string }) {
         setSel([s.item_id]);
       }
     } else {
-      const shape = makeShape(d.tool as "rectangle" | "ellipse", small ? { x: snap(d.from.x), y: snap(d.from.y), w: 160, h: 100 } : { x: snap(r.x), y: snap(r.y), w: snap(r.w), h: snap(r.h) });
+      const shape = makeShape(
+        d.tool as "rectangle" | "ellipse",
+        small
+          ? { x: snap(d.from.x), y: snap(d.from.y), w: 160, h: 100 }
+          : { x: snap(r.x), y: snap(r.y), w: snap(r.w), h: snap(r.h) },
+      );
       edit((c) => addItems(c, [shape]));
       setSel([shape.item_id]);
     }
@@ -461,7 +488,11 @@ function Editor({ id }: { id: string }) {
   return (
     <section className="flex h-full min-h-[480px] flex-col gap-2" aria-label={canvas.title}>
       <header className="flex flex-wrap items-center gap-1">
-        <button type="button" className="text-muted-foreground hover:text-foreground text-[13px]" onClick={() => go(null)}>
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-foreground text-[13px]"
+          onClick={() => go(null)}
+        >
           Canvases
         </button>
         <span className="text-muted-foreground">/</span>
@@ -517,87 +548,143 @@ function Editor({ id }: { id: string }) {
         />
       ) : null}
       <div className="flex min-h-0 flex-1">
-      <div
-        ref={host}
-        data-canvas-board
-        className="bg-muted/40 relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden rounded-md border outline-none"
-        style={{ cursor }}
-        tabIndex={0}
-        onPointerDown={down}
-        onPointerMove={move}
-        onPointerUp={up}
-        onWheel={wheel}
-        onContextMenu={menuAt}
-      >
-        <div className="absolute left-0 top-0" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`, transformOrigin: "0 0" }}>
-          <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={1} height={1} aria-hidden="true">
-            <defs>
-              <marker id="cv-head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-                <path d="M0,0 L8,4 L0,8 z" fill="currentColor" />
-              </marker>
-            </defs>
-            {canvas.links.map((l) => {
-              const a = byId.get(l.from.item_id),
-                b = byId.get(l.to.item_id);
-              return a && b ? <path key={l.link_id} d={linkPath(a, b).d} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-muted-foreground" /> : null;
-            })}
-            {canvas.items.map((i) => (i.type === "shape" && (i.shape === "arrow" || i.shape === "line") ? <Line key={i.item_id} it={i} on={sel.includes(i.item_id)} /> : null))}
-            {drag?.kind === "draw" && drag.tool === "arrow" ? (
-              <line x1={drag.from.x} y1={drag.from.y} x2={drag.to.x} y2={drag.to.y} stroke="currentColor" strokeWidth={1.5} markerEnd="url(#cv-head)" strokeDasharray="4 3" />
-            ) : null}
-          </svg>
-          {paintOrder(canvas.items).map((i) =>
-            i.type === "shape" && (i.shape === "arrow" || i.shape === "line") ? null : (
-              <ItemView
-                key={i.item_id}
-                it={i}
-                detail={detail}
-                selected={sel.includes(i.item_id)}
-                editing={editing === i.item_id}
-                onEdit={() => (i.type === "note" || i.type === "frame" || i.type === "shape") && setEditing(i.item_id)}
-                onText={(t) => edit((c) => setText(c, i.item_id, t))}
-                onDone={() => setEditing(null)}
-              />
-            ),
-          )}
-          {single && single.type === "shape" && (single.shape === "arrow" || single.shape === "line")
-            ? (["start", "end"] as const).map((w) => {
-                const ends = endpoints(single);
-                const pt = ends ? ends[w === "start" ? 0 : 1] : null;
-                return pt ? (
-                  <span key={w} role="presentation" className="border-primary bg-background absolute size-3 -translate-x-1/2 -translate-y-1/2 cursor-move rounded-full border-2" style={{ left: pt.x, top: pt.y }} onPointerDown={(e) => startEnd(e, single, w)} />
+        <div
+          ref={host}
+          data-canvas-board
+          role="tree"
+          aria-label="Canvas board"
+          className="bg-muted/40 relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden rounded-md border outline-none"
+          style={{ cursor }}
+          tabIndex={0}
+          onPointerDown={down}
+          onPointerMove={move}
+          onPointerUp={up}
+          onWheel={wheel}
+          onContextMenu={menuAt}
+        >
+          <div
+            className="absolute left-0 top-0"
+            style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`, transformOrigin: "0 0" }}
+          >
+            <svg
+              className="pointer-events-none absolute left-0 top-0 overflow-visible"
+              width={1}
+              height={1}
+              aria-hidden="true"
+            >
+              <defs>
+                <marker id="cv-head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 z" fill="currentColor" />
+                </marker>
+              </defs>
+              {canvas.links.map((l) => {
+                const a = byId.get(l.from.item_id),
+                  b = byId.get(l.to.item_id);
+                return a && b ? (
+                  <path
+                    key={l.link_id}
+                    d={linkPath(a, b).d}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.5}
+                    className="text-muted-foreground"
+                  />
                 ) : null;
-              })
-            : single && !(single.type === "shape" && (single.shape === "arrow" || single.shape === "line")) && !editing
-              ? HANDLES.map((h) => <HandleDot key={h} it={single} handle={h} zoom={view.zoom} onDown={(e) => startResize(e, single, h)} />)
-              : null}
-          {drag?.kind === "marquee" ? <Rect r={normRect(drag.from, drag.to)} /> : null}
-          {drag?.kind === "draw" && drag.tool !== "arrow" ? <Rect r={normRect(drag.from, drag.to)} /> : null}
+              })}
+              {canvas.items.map((i) =>
+                i.type === "shape" && (i.shape === "arrow" || i.shape === "line") ? (
+                  <Line key={i.item_id} it={i} on={sel.includes(i.item_id)} />
+                ) : null,
+              )}
+              {drag?.kind === "draw" && drag.tool === "arrow" ? (
+                <line
+                  x1={drag.from.x}
+                  y1={drag.from.y}
+                  x2={drag.to.x}
+                  y2={drag.to.y}
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                  markerEnd="url(#cv-head)"
+                  strokeDasharray="4 3"
+                />
+              ) : null}
+            </svg>
+            {paintOrder(canvas.items).map((i) =>
+              i.type === "shape" && (i.shape === "arrow" || i.shape === "line") ? null : (
+                <ItemView
+                  key={i.item_id}
+                  it={i}
+                  detail={detail}
+                  selected={sel.includes(i.item_id)}
+                  editing={editing === i.item_id}
+                  onEdit={() =>
+                    (i.type === "note" || i.type === "frame" || i.type === "shape") && setEditing(i.item_id)
+                  }
+                  onText={(t) => edit((c) => setText(c, i.item_id, t))}
+                  onDone={() => setEditing(null)}
+                />
+              ),
+            )}
+            {single && single.type === "shape" && (single.shape === "arrow" || single.shape === "line")
+              ? (["start", "end"] as const).map((w) => {
+                  const ends = endpoints(single);
+                  const pt = ends ? ends[w === "start" ? 0 : 1] : null;
+                  return pt ? (
+                    <span
+                      key={w}
+                      role="presentation"
+                      className="border-primary bg-background absolute size-3 -translate-x-1/2 -translate-y-1/2 cursor-move rounded-full border-2"
+                      style={{ left: pt.x, top: pt.y }}
+                      onPointerDown={(e) => startEnd(e, single, w)}
+                    />
+                  ) : null;
+                })
+              : single &&
+                  !(single.type === "shape" && (single.shape === "arrow" || single.shape === "line")) &&
+                  !editing
+                ? HANDLES.map((h) => (
+                    <HandleDot
+                      key={h}
+                      it={single}
+                      handle={h}
+                      zoom={view.zoom}
+                      onDown={(e) => startResize(e, single, h)}
+                    />
+                  ))
+                : null}
+            {drag?.kind === "marquee" ? <Rect r={normRect(drag.from, drag.to)} /> : null}
+            {drag?.kind === "draw" && drag.tool !== "arrow" ? <Rect r={normRect(drag.from, drag.to)} /> : null}
+          </div>
+          {canvas.items.length === 0 ? (
+            <p className="text-muted-foreground pointer-events-none absolute inset-0 flex items-center justify-center text-sm">
+              An empty canvas. Press N for a sticky note, or pick a tool above.
+            </p>
+          ) : null}
         </div>
-        {canvas.items.length === 0 ? (
-          <p className="text-muted-foreground pointer-events-none absolute inset-0 flex items-center justify-center text-sm">
-            An empty canvas. Press N for a sticky note, or pick a tool above.
-          </p>
+        {panel.open && single ? (
+          <Inspector
+            item={single}
+            width={panel.width}
+            onWidth={(w) => setPanel((x) => ({ ...x, width: w }))}
+            onClose={() => setPanel((x) => ({ ...x, open: false }))}
+            onTitle={(t) => edit((c) => setTitle(c, single.item_id, t))}
+            onText={(t) => edit((c) => setText(c, single.item_id, t))}
+            onTone={(t) => edit((c) => setTone(c, [single.item_id], t))}
+          />
         ) : null}
-      </div>
-      {panel.open && single ? (
-        <Inspector
-          item={single}
-          width={panel.width}
-          onWidth={(w) => setPanel((x) => ({ ...x, width: w }))}
-          onClose={() => setPanel((x) => ({ ...x, open: false }))}
-          onTitle={(t) => edit((c) => setTitle(c, single.item_id, t))}
-          onText={(t) => edit((c) => setText(c, single.item_id, t))}
-          onTone={(t) => edit((c) => setTone(c, [single.item_id], t))}
-        />
-      ) : null}
-      <CoordinateBar canvas={canvas} sel={sel} />
+        <CoordinateBar canvas={canvas} sel={sel} />
       </div>
     </section>
   );
 }
 
-function AddCard({ onAdd, onClose }: { onAdd: (make: (at: { x: number; y: number }) => Item) => void; onClose: () => void }) {
+function AddCard({
+  onAdd,
+  onClose,
+}: {
+  onAdd: (make: (at: { x: number; y: number }) => Item) => void;
+  onClose: () => void;
+}) {
   const [kind, setKind] = useState<CardKind>("decision");
   const [text, setText] = useState("");
   const [why, setWhy] = useState("");
@@ -612,25 +699,43 @@ function AddCard({ onAdd, onClose }: { onAdd: (make: (at: { x: number; y: number
         else setWhy(r.why);
       }}
     >
-      <select aria-label="Kind of card" className="bg-background border-input rounded-md border px-2 py-1" value={kind} onChange={(e) => setKind(e.target.value as CardKind)}>
+      <select
+        aria-label="Kind of card"
+        className="bg-background border-input rounded-md border px-2 py-1"
+        value={kind}
+        onChange={(e) => setKind(e.target.value as CardKind)}
+      >
         <option value="decision">Decision</option>
         <option value="pr">Pull request</option>
         <option value="document">Document</option>
       </select>
-      <input aria-label="Reference" className="bg-background border-input min-w-0 flex-1 rounded-md border px-2 py-1" placeholder={hint} value={text} onChange={(e) => setText(e.target.value)} />
+      <input
+        aria-label="Reference"
+        className="bg-background border-input min-w-0 flex-1 rounded-md border px-2 py-1"
+        placeholder={hint}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
       <button type="submit" className="bg-primary text-primary-foreground rounded-md px-3 py-1">
         Add
       </button>
       <button type="button" className="text-muted-foreground" onClick={onClose}>
         Cancel
       </button>
-      {why ? <span role="alert" className="text-destructive text-[12px]">{why}</span> : null}
+      {why ? (
+        <span role="alert" className="text-destructive text-[12px]">
+          {why}
+        </span>
+      ) : null}
     </form>
   );
 }
 
 const Rect = ({ r }: { r: Box }) => (
-  <div className="border-primary bg-primary/10 pointer-events-none absolute border" style={{ left: r.x, top: r.y, width: r.w, height: r.h }} />
+  <div
+    className="border-primary bg-primary/10 pointer-events-none absolute border"
+    style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
+  />
 );
 
 function Line({ it, on }: { it: ShapeItem; on: boolean }) {
@@ -650,7 +755,17 @@ function Line({ it, on }: { it: ShapeItem; on: boolean }) {
   );
 }
 
-function HandleDot({ it, handle, zoom, onDown }: { it: Item; handle: Handle; zoom: number; onDown: (e: RPointer) => void }) {
+function HandleDot({
+  it,
+  handle,
+  zoom,
+  onDown,
+}: {
+  it: Item;
+  handle: Handle;
+  zoom: number;
+  onDown: (e: RPointer) => void;
+}) {
   const x = handle.includes("w") ? it.x : handle.includes("e") ? it.x + it.w : it.x + it.w / 2;
   const y = handle.includes("n") ? it.y : handle.includes("s") ? it.y + it.h : it.y + it.h / 2;
   const s = 9 / zoom;
@@ -699,29 +814,56 @@ function ItemView({
   );
   if (it.type === "frame")
     return (
-      <div className={cn("absolute rounded-md border-2 border-dashed", TONE[it.tone ?? "plain"], "bg-opacity-30", ring)} style={box} onDoubleClick={onEdit}>
+      <div
+        className={cn("absolute rounded-md border-2 border-dashed", TONE[it.tone ?? "plain"], "bg-opacity-30", ring)}
+        style={box}
+        role="document"
+        aria-label={it.type}
+        onDoubleClick={onEdit}
+      >
         {detail !== "block" ? <div className="px-2 pt-1 text-[12px] font-medium opacity-70">{it.title}</div> : null}
         {body}
       </div>
     );
   if (it.type === "note")
     return (
-      <div className={cn("absolute rounded-sm border shadow-sm", TONE[it.tone ?? "amber"], ring)} style={box} onDoubleClick={onEdit}>
+      <div
+        className={cn("absolute rounded-sm border shadow-sm", TONE[it.tone ?? "amber"], ring)}
+        style={box}
+        role="document"
+        aria-label={it.type}
+        onDoubleClick={onEdit}
+      >
         {body}
       </div>
     );
   if (it.type === "shape")
     return (
       <div
-        className={cn("border-foreground/70 absolute flex items-center justify-center border-2", it.shape === "ellipse" && "rounded-full", it.shape === "diamond" && "rotate-45", ring)}
+        className={cn(
+          "border-foreground/70 absolute flex items-center justify-center border-2",
+          it.shape === "ellipse" && "rounded-full",
+          it.shape === "diamond" && "rotate-45",
+          ring,
+        )}
         style={box}
+        role="document"
+        aria-label={it.type}
         onDoubleClick={onEdit}
       >
         {body}
       </div>
     );
   if (it.type === "image")
-    return <img alt={it.alt ?? it.title} src={it.src} draggable={false} className={cn("absolute select-none object-contain", ring)} style={box} />;
+    return (
+      <img
+        alt={it.alt ?? it.title}
+        src={it.src}
+        draggable={false}
+        className={cn("absolute select-none object-contain", ring)}
+        style={box}
+      />
+    );
   if (isCard(it)) return <Card it={it} detail={detail} ring={ring} />;
   return null;
 }
