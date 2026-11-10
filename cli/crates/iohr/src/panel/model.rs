@@ -880,7 +880,7 @@ mod tests {
         let mut m = model(0);
         m.key(Key::Menu);
         let text = rows(&m).join("\n");
-        assert!(text.contains("Chat box") && text.contains("\u{2325}h"));
+        assert!(text.contains("Chat box") && text.contains(HIDE_LABEL));
         assert_eq!(m.key(Key::Char('c')), Effect::ChatToggle);
         assert_eq!(m.view, View::Rest, "the menu closes so the box is in view");
     }
