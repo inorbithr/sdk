@@ -31,7 +31,7 @@ import { extensionsMenu } from "./frame/extensions-menu.ts";
 import { ARRANGE_MIN_WIDTH, Frame, useViewportWidth } from "./frame/frame.tsx";
 import { GridPicker } from "./frame/grid-picker.tsx";
 import { PanelFrame } from "./frame/panel-frame.tsx";
-import { useFrameShortcuts } from "./frame/shortcuts.ts";
+import { useShortcuts } from "./lib/use-shortcuts.ts";
 import { toggleHidden } from "./frame/sidebar-frame.ts";
 import { Home } from "./home.tsx";
 import { updateArrangement as updateArr, useArrangement } from "./lib/arrange-store.ts";
@@ -144,7 +144,7 @@ export function App() {
   const openGrid = () => setGridAt((at) => (at ? null : layoutButton.current));
   const layoutActions = { layout: pick, grid: openGrid, back: () => updateArr(back) };
 
-  useFrameShortcuts({
+  useShortcuts("global", {
     sidebar: () => update(toggleHidden),
     ...(wide
       ? {

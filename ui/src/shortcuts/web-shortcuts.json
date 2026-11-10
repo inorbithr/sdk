@@ -1,0 +1,10 @@
+[
+  { "id": "shortcuts-help", "label": "Keyboard shortcuts (also ?)", "accel": "?" },
+  { "id": "go-home", "label": "Go to Home", "seq": ["g", "h"], "page": "home", "mac": "CmdOrCtrl+1" },
+  { "id": "go-settings", "label": "Go to Settings", "seq": ["g", ","], "page": "settings", "mac": "CmdOrCtrl+," },
+  { "id": "go-decisions", "label": "Go to Decisions", "seq": ["g", "d"], "page": "decisions", "mac": "CmdOrCtrl+7" },
+  { "id": "go-planner", "label": "Go to Planner", "seq": ["g", "p"], "page": "planner" },
+  { "id": "go-canvas", "label": "Go to Canvas", "seq": ["g", "c"], "page": "canvas" },
+  { "id": "go-workload", "label": "Go to Workload", "seq": ["g", "w"], "page": "workload" },
+  { "id": "go-sensors", "label": "Go to Sensors", "seq": ["g", "s"], "page": "sensors" }
+]
