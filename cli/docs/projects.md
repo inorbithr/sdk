@@ -53,6 +53,11 @@ Every template has one step, "The project's Planner plan" (`blank` too). `init` 
 plan, or finds the one it made before (its `external_id` is `project:NAME`, so a second run
 makes no second plan), and writes its `plan_...` id under `[plan]` in `coordination.toml`.
 
+A project with no `coordination.toml` (the blank template) gets the same step: the plan is
+made or found, because the project's shape item is filed in it, but there is no file to
+write the id into, and the step says so ("the id is not written down"). The step always
+ends with a check mark or a reason, never nothing.
+
 | Flag | What it does |
 |---|---|
 | `--plan-id PLAN` | Use this plan instead of making one. Signed in, init checks you can see it first; a plan it cannot find fails that step, and the message says the files are already written and how to put the id in by hand. Signed out, the id is written as given and said to be unchecked |
@@ -76,9 +81,10 @@ first init at a terminal, `init` asks where all of it should go, and writes the 
 |---|---|---|
 | `project` (the default offered) | `<project>/.inorbit/memory`, `.inorbit/crawl` | `<project>/.inorbit/state`, `cache` (ignored by git through `.inorbit/.gitignore`) |
 | `home` | `~/.inorbit/projects/NAME/memory`, `crawl` | `~/.inorbit/projects/NAME` |
+| a folder you type | `<folder>/memory`, `<folder>/crawl` | `<folder>/state`, `cache` |
 | nothing recorded | `<project>/.inorbit/memory`, `.inorbit/crawl` | `~/.inorbit/projects/NAME` |
 
-The third row is the layout every project had before this question existed, and it stays
+The last row is the layout every project had before this question existed, and it stays
 as it is: no project changes until its owner chooses. The atlas stays in the project in
 both places. The notes store, the crawl, the knowledge base and the project registry ask one
 resolver (`project::place::Layout`), so they move together; the other writers (role notes,
@@ -86,10 +92,24 @@ handoff, permissions) still use the project's `.inorbit/` and follow in a later 
 
 | Flag | What it does |
 |---|---|
-| `--keep-in project\|home` | Answer the question. Also `IOHR_INIT_KEEP_IN`; the flag wins, then the variable, then what `inorbit.toml` records, then the question. With `--yes`, `--json` or no terminal and none of these, nothing is asked or recorded |
+| `--keep-in project\|home\|PATH` | Answer the question. Also `IOHR_INIT_KEEP_IN`; the flag wins, then the variable, then what `inorbit.toml` records, then the question. With `--yes`, `--json` or no terminal and none of these, nothing is asked or recorded |
 | `--copy-data` | When the place changes, copy what the old place holds into the new one. At a terminal it is offered instead. Nothing is ever deleted and nothing already in the new place is overwritten |
 
-A dry run records and writes nothing and says what it would do.
+The question has a third choice, "Somewhere else...", which asks for a folder. `~` is your
+home and a relative path starts at the project folder (write `./project` for a folder
+literally named `project`, which would otherwise read as the first answer). The folder is
+made when you confirm, not before, and the path is recorded as typed in `[project] data`
+(`~/vault/shop`, `kept/here`), so a project moved to another machine resolves it again. An
+unwritable place (a file, or a path under a file) is refused with the reason, at the prompt
+and for `--keep-in PATH`. A folder inside the project is yours to ignore in git (init does not add it to a `.gitignore`); only the
+default `.inorbit/state` is ignored for you. The flag and the prompt go through one resolver
+(`project::place::Layout`), so they agree.
+
+Init shows the preview and then does the work, and each question is asked once across the
+two: the place, the copy offer and the crawl notice are answered in the preview and carried
+into the run, never put again after "Ready?".
+
+A dry run records and writes nothing and says what it would do, including the place line.
 
 ### The project's shape
 

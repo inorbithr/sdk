@@ -4,10 +4,12 @@
 //! [`crate::project::place::Layout`] where to put things, so this file only decides the answer
 //! and applies it (record it, ignore the machine state, seed the notes, copy on request).
 //! Precedence: `--keep-in` (or `IOHR_INIT_KEEP_IN`), then what the project recorded, then
-//! the question at a terminal, else nothing is recorded and the older layout stays.
+//! the question at a terminal, else nothing is recorded and the older layout stays. The
+//! question offers the project folder, the home folder and a folder the person types;
+//! `--keep-in` takes `project`, `home` or that same path.
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::cli::InitArgs;
 use crate::error::Error;
@@ -16,6 +18,7 @@ use crate::project::{Step, step};
 use crate::ui::{Choice, Ui};
 
 /// What init settled about the place.
+#[derive(Clone)]
 pub(super) struct Decision {
     /// Where the data goes from now on.
     pub layout: Layout,
@@ -37,6 +40,7 @@ pub(super) fn decide(
     ui: Ui,
 ) -> Result<Decision, Error> {
     let old = Layout::of(dir);
+    let home = etcetera::home_dir().ok();
     let asked = a
         .place_args
         .keep_in
@@ -44,12 +48,16 @@ pub(super) fn decide(
         .map(Place::parse)
         .transpose()
         .map_err(Error::Usage)?;
-    let chosen = match asked.or(old.place()) {
+    if let Some(Place::Elsewhere(raw)) = &asked {
+        place::check_custom(dir, raw, home.as_deref())
+            .map_err(|e| Error::Usage(format!("--keep-in {raw}: {e}")))?;
+    }
+    let chosen = match asked.or_else(|| old.place()) {
         Some(p) => Some(p),
-        None if interactive => Some(ask(ui, name)?),
+        None if interactive => Some(ask(ui, name, dir, home)?),
         None => None,
     };
-    let layout = Layout::new(dir, name, chosen);
+    let layout = Layout::new(dir, name, chosen.clone());
     let copy = chosen != old.place()
         && chosen.is_some()
         && place::movable(&old, &layout)
@@ -62,7 +70,7 @@ pub(super) fn decide(
     Ok(Decision { layout, old, copy })
 }
 
-fn ask(ui: Ui, name: &str) -> Result<Place, Error> {
+fn ask(ui: Ui, name: &str, dir: &Path, home: Option<PathBuf>) -> Result<Place, Error> {
     let choice = |value: &str, label: &str, hint: String| Choice {
         value: value.into(),
         label: label.into(),
@@ -83,11 +91,28 @@ fn ask(ui: Ui, name: &str) -> Result<Place, Error> {
                 "In your home folder",
                 format!("~/.inorbit/projects/{name}/: stays on this machine"),
             ),
+            choice(
+                ELSEWHERE,
+                "Somewhere else\u{2026}",
+                "a folder you type: ~ is your home, a relative path starts at the project".into(),
+            ),
         ],
         "project",
     )?;
-    Place::parse(&said).map_err(Error::Usage)
+    if said != ELSEWHERE {
+        return Place::parse(&said).map_err(Error::Usage);
+    }
+    let root = dir.to_path_buf();
+    let typed = ui.input(
+        "Which folder? (made when you confirm)",
+        &format!("~/.inorbit/{name}"),
+        move |v| place::check_custom(&root, v, home.as_deref()).map(|_| ()),
+    )?;
+    Place::parse(&typed).map_err(Error::Usage)
 }
+
+/// The select value of the third choice (never a place word, so no typed path clashes).
+const ELSEWHERE: &str = "elsewhere";
 
 impl Decision {
     /// What a dry run says.
@@ -102,6 +127,13 @@ impl Decision {
         if let Some(p) = self.layout.place() {
             let _ = write!(s, " (recorded as [project] data = \"{}\")", p.word());
         }
+        if let Some(dir) = self.layout.custom_dir() {
+            let _ = write!(
+                s,
+                "; make the folder {} if it is not there",
+                self.layout.shown(&dir)
+            );
+        }
         if self.copy {
             s.push_str("; copy the old place's files over, deleting nothing");
         }
@@ -109,9 +141,9 @@ impl Decision {
     }
 
     /// True when the starter notes of the scaffold have to be written by [`Decision::apply`]
-    /// (they sit outside the project folder).
+    /// (they do not sit in the scaffold's own `.inorbit/memory`).
     pub(super) fn seeds_elsewhere(&self) -> bool {
-        self.layout.memory_rel().is_none()
+        self.layout.memory_rel().as_deref() != Some(".inorbit/memory")
     }
 
     /// Records the choice, ignores the machine state when it sits in the project, writes the
@@ -121,9 +153,10 @@ impl Decision {
     /// Any file that cannot be written.
     pub(super) fn apply(&self, dir: &Path, seed: &[(String, String)]) -> Result<Step, String> {
         let l = &self.layout;
+        l.ensure_custom()?;
         if let Some(p) = l.place() {
-            if Layout::of(dir).place() != Some(p) {
-                place::record(dir, p)?;
+            if Layout::of(dir).place().as_ref() != Some(&p) {
+                place::record(dir, &p)?;
             }
             if p == Place::Project {
                 place::ignore_state(dir)?;
@@ -153,7 +186,9 @@ impl Decision {
             let _ = write!(said, "; copied {n} files, the old copy stays");
         }
         if l.place().is_none() {
-            said.push_str("; no choice recorded, the older layout stays (--keep-in project|home)");
+            said.push_str(
+                "; no choice recorded, the older layout stays (--keep-in project|home|PATH)",
+            );
         }
         Ok(step("place", "Where it keeps its data", "done", said, ""))
     }

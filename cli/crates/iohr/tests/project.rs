@@ -1858,5 +1858,25 @@ fn the_demo_template_has_the_plan_step_like_every_template() {
     let (out, dir, v) = made(h.path(), "plaindemo", &["--template", "demo"]);
     assert!(out.status.success(), "{}", text(&out));
     assert!(dir.join("coordination.toml").is_file());
-    assert!(!plan_step(&v).is_null(), "{v}");
+    // The plan is still made or found (the shape item is filed in it), so the step always
+    // prints a mark or a reason; signed out, it is a skip that says why.
+    let st = plan_step(&v);
+    assert!(!st.is_null(), "{v}");
+    assert_eq!(st["state"], "skipped", "{v}");
+    assert!(st["said"].as_str().is_some_and(|s| !s.is_empty()), "{v}");
+}
+
+#[test]
+fn a_blank_project_kept_local_makes_no_plan_and_says_so() {
+    let h = tempfile::tempdir().unwrap();
+    let (out, dir, v) = made(h.path(), "localdemo", &["--template", "demo", "--no-sync"]);
+    assert!(out.status.success(), "{}", text(&out));
+    // Every template but blank ships coordination.toml now (the demo is the extension); kept
+    // local, no plan is made, so its `[plan] id` stays empty.
+    let file = std::fs::read_to_string(dir.join("coordination.toml")).unwrap();
+    let t: toml::Table = file.parse().unwrap();
+    assert_eq!(t["plan"]["id"].as_str(), Some(""), "{file}");
+    let st = plan_step(&v);
+    assert_eq!(st["state"], "skipped", "{v}");
+    assert!(st["said"].as_str().unwrap().contains("--no-sync"), "{v}");
 }
