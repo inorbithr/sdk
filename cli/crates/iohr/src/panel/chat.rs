@@ -245,6 +245,8 @@ pub(super) struct Chat {
     /// Keys went to the shell while it was not at its prompt (type-ahead): its next line is
     /// not clean.
     ahead: bool,
+    /// What the hide key is called on this terminal (`OpenKey::hide_label`).
+    hide_label: &'static str,
 }
 
 impl Chat {
@@ -269,7 +271,13 @@ impl Chat {
             held: Vec::new(),
             clean: false,
             ahead: false,
+            hide_label: "\u{2325}h",
         }
+    }
+
+    /// Names the hide and show key as this terminal sends it.
+    pub(super) fn set_hide_label(&mut self, label: &'static str) {
+        self.hide_label = label;
     }
 
     /// The box can be shown or folded at all.
@@ -630,7 +638,8 @@ impl Chat {
             bold(&chip, self.mode_color()),
         ];
         let title_len = 2 + 4 + 2 + chip.chars().count();
-        let right_text = "⌄ hide ^]";
+        let right_text = format!("⌄ hide {}", self.hide_label);
+        let right_text = right_text.as_str();
         let right = vec![sp(right_text, MUTE)];
         let right_len = right_text.chars().count();
         // The same test `lay_out` makes: the right header goes first when the title is long.
@@ -745,7 +754,7 @@ impl Chat {
                     sp(" deeper  ", MUTE),
                     key("⇧tab"),
                     sp(&format!(" mode: {}  ", self.mode_name()), MUTE),
-                    key("^]"),
+                    key(self.hide_label),
                     sp(" hide", MUTE),
                 ]
             };
@@ -819,7 +828,7 @@ impl Chat {
         } else {
             spans.push(bold("iohr ", ACC));
         }
-        spans.push(bold("^]", KEY));
+        spans.push(bold(self.hide_label, KEY));
         spans.push(sp(" shows the box ", MUTE));
         spans
             .iter()

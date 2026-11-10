@@ -335,7 +335,7 @@ fn the_rest_box_is_four_rows_with_the_hint_row() {
     assert_eq!(laid.floating.cells.len(), ROWS);
     assert!(laid.floating.cells.iter().all(|r| r.len() == 80));
     let top = row_text(&laid, 0);
-    assert!(top.contains("◆ iohr") && top.contains("ask · auto") && top.contains("⌄ hide ^]"));
+    assert!(top.contains("◆ iohr") && top.contains("ask · auto") && top.contains("⌄ hide ⌥h"));
     assert!(row_text(&laid, 1).contains("❯ ? why is the roll slow"));
     let status = row_text(&laid, 2);
     assert!(
@@ -482,7 +482,10 @@ fn the_folded_chip_names_the_key_and_shows_progress() {
     let mut chat = Chat::new(true, true);
     idle(&mut chat);
     let text: String = chat.chip_cells(now()).iter().map(|c| c.ch).collect();
-    assert!(text.contains("^]") && text.contains("iohr"), "{text}");
+    assert!(
+        text.contains("\u{2325}h") && text.contains("iohr"),
+        "{text}"
+    );
     chat.message(Msg::Begin, now());
     chat.message(
         Msg::Step {
@@ -493,7 +496,10 @@ fn the_folded_chip_names_the_key_and_shows_progress() {
         now(),
     );
     let text: String = chat.chip_cells(now()).iter().map(|c| c.ch).collect();
-    assert!(text.contains("4 steps") && text.contains("^]"), "{text}");
+    assert!(
+        text.contains("4 steps") && text.contains("\u{2325}h"),
+        "{text}"
+    );
 }
 
 #[test]

@@ -595,6 +595,9 @@ fn launch(
     })
 }
 
+/// How long a lone Esc is held for an `h` that follows it (Option+h written in two reads).
+const ESC_HOLD: Duration = Duration::from_millis(40);
+
 /// What the loop holds besides the proxy: the shell's input and the reads in flight.
 struct Session {
     proxy: Proxy,
@@ -622,6 +625,9 @@ struct Session {
     held: Option<link::Session>,
     /// A rejoin in flight (starting a host takes seconds).
     rejoin_fetch: Option<Fetch<Joined>>,
+    /// A lone Esc held until this moment, to see whether `h` follows in the next read (Option+h
+    /// from a terminal that writes Esc and `h` apart).
+    esc_held: Option<Instant>,
 }
 
 impl Session {
@@ -801,6 +807,40 @@ impl Session {
     /// its own key, else the shell's. A mouse report goes to the panel or to a program that
     /// asked for the mouse itself, never to a shell that did not.
     fn user_input(&mut self, bytes: &[u8]) {
+        // A lone Esc waits a moment: `h` right after it is Option+h, any other read releases it
+        // with that read (the shell gets Esc and the key together, as a terminal sends Meta).
+        if self.esc_held.take().is_some() {
+            let mut joined = vec![0x1b];
+            joined.extend_from_slice(bytes);
+            self.route_input(&joined);
+            return;
+        }
+        if OpenKey::starts_hide(bytes) && self.can_hold_esc() {
+            self.esc_held = Some(Instant::now() + ESC_HOLD);
+            return;
+        }
+        self.route_input(bytes);
+    }
+
+    /// Whether a lone Esc could still be the box's key: the box is there to take it and nothing
+    /// else reads Esc (the menu, a cut sequence).
+    fn can_hold_esc(&self) -> bool {
+        let p = &self.proxy;
+        !p.stopped
+            && !p.screen.alt()
+            && p.chat.available()
+            && !p.model.open()
+            && !self.reader.pending()
+    }
+
+    /// The held Esc's time is up: it was a key of its own.
+    fn esc_released(&mut self) {
+        if self.esc_held.take().is_some() {
+            self.route_input(&[0x1b]);
+        }
+    }
+
+    fn route_input(&mut self, bytes: &[u8]) {
         // A stopped panel owns no key; Ctrl-G, the menu key on terminals without ⌥, is not the
         // shell's either, and sent on it would echo as `^G` under a command in cooked mode.
         if self.proxy.stopped && bytes == [0x07] && self.proxy.model.open_key().is(bytes) {
@@ -1157,7 +1197,12 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         project: config.project.take(),
         held: None,
         rejoin_fetch: None,
+        esc_held: None,
     };
+    session
+        .proxy
+        .chat
+        .set_hide_label(settings.open_key.hide_label());
     session.redraw();
     session.refresh();
 
@@ -1170,6 +1215,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
     let mut user_open = true;
 
     loop {
+        let esc_at = session.esc_held;
         tokio::select! {
             chunk = from_child.recv() => match chunk {
                 Some(bytes) => session.shell_wrote(&bytes),
@@ -1189,6 +1235,12 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
                     None => std::future::pending().await,
                 }
             } => break,
+            () = async {
+                match esc_at {
+                    Some(t) => tokio::time::sleep_until(t).await,
+                    None => std::future::pending().await,
+                }
+            } => session.esc_released(),
             _ = winch.recv() => session.resized(),
             _ = beat.tick(), if session.proxy.chat.animating() => session.chat_tick(),
             _ = tick.tick(), if !config.stub => session.refresh(),

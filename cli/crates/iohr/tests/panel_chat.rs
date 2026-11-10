@@ -79,6 +79,11 @@ impl Rig {
     /// The panel around `zsh -f` with the hook sourced and the prompt ready; `chat` is the
     /// `IOHR_PANEL_CHAT` value ("" leaves the default).
     fn panel(&self, chat: &str) -> Pty {
+        self.panel_in(chat, "Apple_Terminal")
+    }
+
+    /// The same, in the terminal `$TERM_PROGRAM` names.
+    fn panel_in(&self, chat: &str, term_program: &str) -> Pty {
         let mut c = Command::new(bin());
         c.args(["panel", "--", zsh().to_str().unwrap(), "-f"])
             .current_dir(self.home.join("work"))
@@ -92,7 +97,7 @@ impl Rig {
             )
             .env("SHELL", zsh())
             .env("TERM", "xterm-256color")
-            .env("TERM_PROGRAM", "Apple_Terminal")
+            .env("TERM_PROGRAM", term_program)
             .env("INORBIT_ASKS_PROMPT", "0")
             .env("PS1", "READY> ");
         if !chat.is_empty() {
@@ -496,4 +501,80 @@ fn a_key_cut_between_two_reads_is_not_eaten_in_the_box() {
         "the end of the key was typed: {:?}",
         row(s.screen.screen(), ROWS - 3)
     );
+}
+
+/// Option+h in the three forms a terminal sends it: Esc then `h`, the macOS dead-key `˙`, and
+/// the CSI-u form.
+const OPT_H: [&[u8]; 3] = [b"\x1bh", "\u{2d9}".as_bytes(), b"\x1b[104;3u"];
+
+#[test]
+fn option_h_hides_the_box_and_brings_it_back_in_each_of_its_forms() {
+    let rig = Rig::new("opth", QUICK);
+    let mut s = rig.panel_in("", "xterm");
+    s.until("the box, naming option h", |sc| {
+        any(sc, "⌄ hide ⌥h") && ready(sc)
+    });
+    for form in OPT_H {
+        s.send(form);
+        s.until("the box folded to its chip", |sc| {
+            folded(sc) && !any(sc, "⌄ hide")
+        });
+        assert!(any(s.screen.screen(), "⌥h shows the box"));
+        s.send(form);
+        s.until("the box back", |sc| any(sc, "⌄ hide ⌥h") && !folded(sc));
+    }
+    // Ctrl-] stays an alias.
+    s.send(CTRL_RB);
+    s.until("the box folded by the alias", folded);
+    s.send(CTRL_RB);
+    s.until("the box back by the alias", |sc| any(sc, "⌄ hide ⌥h"));
+}
+
+#[test]
+fn escape_and_h_in_two_reads_is_option_h_and_not_the_shells() {
+    let rig = Rig::new("opthsplit", QUICK);
+    let mut s = rig.panel_in("", "xterm");
+    s.until("the box", |sc| any(sc, "⌄ hide ⌥h") && ready(sc));
+    fresh(&mut s);
+    s.send(b"\x1b");
+    std::thread::sleep(Duration::from_millis(5));
+    s.send(b"h");
+    s.until("the box folded", folded);
+    // The shell got neither the Esc nor the h.
+    assert!(!prompt_row(s.screen.screen()).contains('h'));
+}
+
+#[test]
+fn a_plain_h_is_typing_at_the_prompt_and_in_the_box() {
+    let rig = Rig::new("opthplain", QUICK);
+    let mut s = rig.panel_in("", "xterm");
+    s.until("the box", |sc| any(sc, "⌄ hide ⌥h") && ready(sc));
+    fresh(&mut s);
+    s.send(b"echo h");
+    settle(&mut s, 200);
+    assert!(prompt_row(s.screen.screen()).contains("echo h"));
+    assert!(!folded(s.screen.screen()));
+    s.send(b"\x15");
+    s.send(b"?");
+    s.until("the box focused", |sc| {
+        any(sc, "ask anything about this shell")
+    });
+    s.send(b"hhh");
+    settle(&mut s, 200);
+    assert!(any(s.screen.screen(), "hhh") && !folded(s.screen.screen()));
+}
+
+#[test]
+fn a_lone_escape_is_still_the_shells_after_the_hold() {
+    let rig = Rig::new("opthesc", QUICK);
+    let mut s = rig.panel_in("", "xterm");
+    s.until("the box", |sc| any(sc, "⌄ hide ⌥h") && ready(sc));
+    fresh(&mut s);
+    // Esc, then (after the hold) h: the shell's meta-h (run-help), not the box's key.
+    s.send(b"echo x");
+    s.send(b"\x1b");
+    settle(&mut s, 300);
+    s.send(b"h");
+    settle(&mut s, 300);
+    assert!(!folded(s.screen.screen()), "a late h is not Option+h");
 }

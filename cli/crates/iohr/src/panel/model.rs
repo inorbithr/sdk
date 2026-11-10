@@ -138,7 +138,7 @@ pub(super) enum Effect {
     },
     /// Interrupt the session (the person confirmed).
     StopWork(String),
-    /// Fold the chat box or bring it back (Ctrl-]).
+    /// Fold the chat box or bring it back (Option+h, or Ctrl-]).
     ChatToggle,
     /// Stop the panel: the shell goes on without it.
     Stop,
@@ -555,7 +555,7 @@ impl Model {
             self.work_menu_right(),
             ("›".into(), MUTE),
             ("›".into(), MUTE),
-            ("^]".into(), MUTE),
+            (self.open_key.hide_label().into(), MUTE),
             (String::new(), MUTE),
             (String::new(), MUTE),
         ];
@@ -699,7 +699,7 @@ impl Model {
             row(open_key.label(), "open or close this panel"),
             row("↑↓ ⏎", "move and open"),
             row("esc", "back, then close"),
-            row("^]", "fold or bring back the chat box"),
+            row(open_key.hide_label(), "fold or bring back the chat box"),
             row("a d q o", "phone-approve, deny, ask, read"),
             row("d y", "deny an ask, then confirm"),
             row("", "your command line is kept as is"),
@@ -865,7 +865,7 @@ mod tests {
         let mut m = model(0);
         m.key(Key::Menu);
         let text = rows(&m).join("\n");
-        assert!(text.contains("Chat box") && text.contains("^]"));
+        assert!(text.contains("Chat box") && text.contains("\u{2325}h"));
         assert_eq!(m.key(Key::Char('c')), Effect::ChatToggle);
         assert_eq!(m.view, View::Rest, "the menu closes so the box is in view");
     }
