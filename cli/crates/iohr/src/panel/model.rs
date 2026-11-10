@@ -23,7 +23,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use super::cells::{ACC, AMBER, BoxSpec, FAINT, KEY, Line, MUTE, Span, TXT, bold, one_wide, sp};
-use super::input::OpenKey;
+use super::input::{HIDE_LABEL, OpenKey};
 use super::workloads::{Snapshot, Workload};
 use crate::card::Rgb;
 use crate::commands::asks::{PanelAsk, PanelAuto};
@@ -143,7 +143,7 @@ pub(super) enum Effect {
     },
     /// Interrupt the session (the person confirmed).
     StopWork(String),
-    /// Fold the chat box or bring it back (Option+h, or Ctrl-]).
+    /// Fold the chat box or bring it back (Option+h, Alt+h off macOS; Ctrl-] too).
     ChatToggle,
     /// Stop the panel: the shell goes on without it.
     Stop,
@@ -570,7 +570,7 @@ impl Model {
             self.incidents_menu_right(),
             ("›".into(), MUTE),
             ("›".into(), MUTE),
-            (self.open_key.hide_label().into(), MUTE),
+            (HIDE_LABEL.into(), MUTE),
             (String::new(), MUTE),
             (String::new(), MUTE),
         ];
@@ -714,7 +714,7 @@ impl Model {
             row(open_key.label(), "open or close this panel"),
             row("↑↓ ⏎", "move and open"),
             row("esc", "back, then close"),
-            row(open_key.hide_label(), "fold or bring back the chat box"),
+            row(HIDE_LABEL, "fold or bring back the chat box"),
             row("a d q o", "phone-approve, deny, ask, read"),
             row("d y", "deny an ask, then confirm"),
             row("", "your command line is kept as is"),
@@ -880,7 +880,7 @@ mod tests {
         let mut m = model(0);
         m.key(Key::Menu);
         let text = rows(&m).join("\n");
-        assert!(text.contains("Chat box") && text.contains("\u{2325}h"));
+        assert!(text.contains("Chat box") && text.contains(HIDE_LABEL));
         assert_eq!(m.key(Key::Char('c')), Effect::ChatToggle);
         assert_eq!(m.view, View::Rest, "the menu closes so the box is in view");
     }
