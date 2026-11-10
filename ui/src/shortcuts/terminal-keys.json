@@ -1,0 +1,148 @@
+{
+  "note": "The keys of the terminal panel and chat box (`iohr`, cli/crates/iohr/src/panel). Each row names the file that binds it and a literal that must still be in that file (a test checks), and, where the web UI has the same meaning, the id of its binding. `agree` is how the two compare: same (the same keys do the same), differs (a key means something else on the web) or terminal (no web equivalent).",
+  "rows": [
+    {
+      "id": "term-menu",
+      "label": "Open the panel menu",
+      "keys": "⌥i or ⌃G",
+      "source": "cli/crates/iohr/src/panel/input.rs",
+      "probe": "MENU_KEYS",
+      "agree": "terminal",
+      "note": "The web UI has no panel; ⌘K is its command menu."
+    },
+    {
+      "id": "term-hide",
+      "label": "Hide or show the chat box",
+      "keys": "⌥h or ⌃]",
+      "source": "cli/crates/iohr/src/panel/input.rs",
+      "probe": "HIDE_KEYS",
+      "agree": "terminal",
+      "note": "The web UI has no chat box yet."
+    },
+    {
+      "id": "term-mode",
+      "label": "Next answer mode",
+      "keys": "⇧Tab",
+      "source": "cli/crates/iohr/src/panel/chat.rs",
+      "probe": "BackTab",
+      "agree": "terminal"
+    },
+    {
+      "id": "term-esc",
+      "label": "Go one level back, or close",
+      "keys": "Esc",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "Key::Esc",
+      "agree": "same",
+      "note": "Esc closes the palette, this list and every menu on the web too."
+    },
+    {
+      "id": "term-down",
+      "label": "Next row",
+      "keys": "↓ or j",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "Key::Down | Key::Char('j')",
+      "web": "decisions-next",
+      "agree": "same",
+      "note": "j and k move a list on the web's Decisions page too."
+    },
+    {
+      "id": "term-up",
+      "label": "Previous row",
+      "keys": "↑ or k",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "Key::Up | Key::Char('k')",
+      "web": "decisions-prev",
+      "agree": "same"
+    },
+    {
+      "id": "term-open",
+      "label": "Open the highlighted row",
+      "keys": "↩ or o",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "Key::Char('o') | Key::Enter",
+      "web": "decisions-open",
+      "agree": "same"
+    },
+    {
+      "id": "term-help",
+      "label": "Help in the panel menu",
+      "keys": "?",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "(\"Help\", '?'",
+      "web": "shortcuts-help",
+      "agree": "same",
+      "note": "In the terminal ? is a menu letter; on the web it opens this list."
+    },
+    {
+      "id": "term-workloads",
+      "label": "Workloads in the panel menu",
+      "keys": "w",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "(\"Workloads\", 'w'",
+      "web": "go-workload",
+      "agree": "same",
+      "note": "The web is g w."
+    },
+    {
+      "id": "term-approvals",
+      "label": "Approvals in the panel menu",
+      "keys": "p",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "(\"Approvals\", 'p'",
+      "web": "go-planner",
+      "agree": "differs",
+      "note": "p is Approvals in the terminal and g p is the Planner on the web: the web UI has no Approvals page yet."
+    },
+    {
+      "id": "term-status",
+      "label": "Status in the panel menu",
+      "keys": "s",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "(\"Status\", 's'",
+      "web": "go-sensors",
+      "agree": "differs",
+      "note": "s is Status in the terminal and g s is Sensors on the web."
+    },
+    {
+      "id": "term-auto",
+      "label": "Auto mode in the panel menu",
+      "keys": "a",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "(\"Auto mode\", 'a'",
+      "agree": "terminal"
+    },
+    {
+      "id": "term-incidents",
+      "label": "Incidents in the panel menu",
+      "keys": "i",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "(\"Incidents\", 'i'",
+      "agree": "terminal"
+    },
+    {
+      "id": "term-run",
+      "label": "Run in the panel menu",
+      "keys": "r",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "(\"Run\", 'r'",
+      "agree": "terminal"
+    },
+    {
+      "id": "term-chat",
+      "label": "Chat box in the panel menu",
+      "keys": "c",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "(\"Chat box\", 'c'",
+      "agree": "terminal"
+    },
+    {
+      "id": "term-stop",
+      "label": "Stop the panel",
+      "keys": "x",
+      "source": "cli/crates/iohr/src/panel/model.rs",
+      "probe": "(\"Stop panel\", 'x'",
+      "agree": "terminal"
+    }
+  ]
+}
