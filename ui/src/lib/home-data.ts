@@ -7,11 +7,14 @@ import type { Incident, Me, Monitor, Review, Run, Space } from "./home-core.ts";
 const enc = encodeURIComponent;
 const REFRESH_MS = 30_000;
 
+/** `GET /v1/accounts/me`: who this is, their own account and their teams (the header, the switcher and Home read it). */
+export const ME_READ = { path: "/v1/accounts/me", query: {} as Record<string, string> };
+
 /** The API reads Home makes for an account (an org id). `null` account: nothing to ask, so nothing is asked. */
 export function homeReads(account: string) {
   const org = `/v1/accounts/orgs/${enc(account)}`;
   return {
-    me: { path: "/v1/accounts/me", query: {} },
+    me: ME_READ,
     reviews: { path: "/v1/decisions/reviews", query: { account_id: account, status: "waiting" } },
     spaces: { path: "/v1/decisions/tree", query: { account_id: account } },
     monitors: { path: `${org}/monitors`, query: { page_size: "200" } },
