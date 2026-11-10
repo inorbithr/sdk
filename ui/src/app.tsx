@@ -2,6 +2,7 @@ import {
   ArrowLeftRight,
   House,
   LayoutGrid,
+  ListChecks,
   Orbit,
   PanelRight,
   Puzzle,
@@ -45,6 +46,8 @@ import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
 import { useSession } from "./lib/session-store.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
+import { PLANNER, plannerRoute } from "./lib/planner-route.ts";
+import { PlannerPage } from "./planner/planner-page.tsx";
 import { useSidebar } from "./lib/sidebar-store.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
@@ -79,7 +82,8 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
-  const pageKey = inSettings ? "settings" : routed === null ? HOME : `ext:${routed}`;
+  const inPlanner = plannerRoute(window.location.pathname) !== null;
+  const pageKey = inSettings ? "settings" : inPlanner ? "planner" : routed === null ? HOME : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -166,6 +170,7 @@ export function App() {
 
   const pages = [
     { key: HOME, title: "Home" },
+    { key: "planner", title: "Planner" },
     { key: "settings", title: "Settings" },
     ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
   ];
@@ -173,6 +178,10 @@ export function App() {
     if (key === pageKey) return;
     if (key === HOME) {
       window.location.assign("/");
+      return;
+    }
+    if (key === "planner") {
+      window.location.assign(PLANNER);
       return;
     }
     if (key === "settings") {
@@ -340,9 +349,10 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings}
+          active={routed === null && !inSettings && !inPlanner}
           onClick={() => window.location.assign("/")}
         />
+        <NavItem rail={rail} label="Planner" icon={<ListChecks />} active={inPlanner} onClick={() => goTo("planner")} />
       </ul>
       <section aria-label="Extensions" className={cn("flex flex-col gap-0.5", rail && "items-center")}>
         {!rail && <h2 className="text-muted-foreground px-2 pb-0.5 text-[11px] font-medium">Extensions</h2>}
@@ -430,7 +440,9 @@ export function App() {
               {reason}
             </p>
           ) : null}
-          {inSettings ? (
+          {inPlanner ? (
+            <PlannerPage />
+          ) : inSettings ? (
             <Settings
               session={account.session}
               busy={account.busy}

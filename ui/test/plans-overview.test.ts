@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parsePlan } from "../src/lib/planner.ts";
 import { progressOf } from "../src/lib/planner-progress.ts";
-import { emptyLive, filterCounts, foldFrame, isSampleTitle, keepRow, matchesSearch, prUrl, progressWord, readPlan, searchText, snake, sortPlans, stateLine, summaryFromFile, teamsOf, totalsOf, zeroCounts, type OverviewPlan } from "../src/lib/plans-overview.ts";
+import { emptyLive, filterCounts, foldFrame, isSampleTitle, keepRow, matchesSearch, prUrl, progressWord, readPlan, searchText, sortPlans, stateLine, summaryFromFile, teamsOf, totalsOf, zeroCounts, type OverviewPlan } from "../src/lib/plans-overview.ts";
+import { snake } from "../src/lib/plan-api.ts";
 import type { PrLive } from "../src/lib/planner-shared.ts";
 import type { StageInfo, StageMap } from "../src/lib/plan-stage-core.ts";
 

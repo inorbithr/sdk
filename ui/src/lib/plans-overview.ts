@@ -9,6 +9,7 @@
 // `source` says so. A field the files cannot know is left at its "unknown" value, never guessed:
 // no team, no release stage ("not_observed"), no job runner.
 
+import { snake } from "./plan-api.ts";
 import type { PrLive } from "./planner-shared.ts";
 import { line, liveItems, type Item, type Plan, type PlanState } from "./planner.ts";
 import { STAGES, type Progress, type Stage } from "./planner-progress.ts";
@@ -225,15 +226,6 @@ export type Live = {
 export const emptyLive = (): Live => ({ plans: new Map(), totals: null, seq: 0, tier: "", ready: false, generated_at: "", lastAt: 0 });
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
-const snakeKey = (k: string) => k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
-
-/** The gateway may spell keys camelCase or snake_case (proto JSON); the fold reads snake_case. */
-export function snake(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(snake);
-  if (!isObj(v)) return v;
-  return Object.fromEntries(Object.entries(v).map(([k, x]) => [snakeKey(k), snake(x)]));
-}
-
 const num = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && /^-?\d+$/.test(v) ? Number(v) : 0);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
