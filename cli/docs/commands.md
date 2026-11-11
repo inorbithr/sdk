@@ -40,6 +40,7 @@ ends its `--help` with real examples.
 | `iohr atlas roles list \| import [--dry-run]` | The built-in roles and whether each is in your account | [Roles](roles-and-memory.md#built-in-roles) |
 | `iohr atlas search QUERY [--site S] [--limit N]` | The best chunks of the text of the sites you crawled, each with its page, heading path and offsets (local) | [Projects](projects.md#the-site-knowledge-base) |
 | `iohr atlas facts [--site S] [--predicate P] [--grep TEXT]` | The facts of the site model, each with the chunk it came from | [Projects](projects.md#the-site-knowledge-base) |
+| `iohr atlas claims [--site S] [--prove ID] [--limit N]` | The claims behind the facts, each with its support; `--prove` prints the proof tree down to the page and checks the page still matches its hash | [Projects](projects.md#the-site-knowledge-base) |
 | `iohr atlas index [--pages] [--site S]` | The crawled sites with pages, chunks, words, entities, facts and links; `--pages` lists the pages | [Projects](projects.md#the-site-knowledge-base) |
 | `iohr sync` | Send the project's atlas to your account | [Projects](projects.md#the-atlas-and-iohr-sync) |
 | `iohr ext ...` | Find, install, verify, pin and build extensions; `iohr <name> ...` runs one | [Extensions](extensions.md) |
@@ -71,6 +72,7 @@ ends its `--help` with real examples.
 | Command | What it does | More |
 |---|---|---|
 | `iohr` with no command | On a terminal: your shell inside the project's session, with the floating panel | [The panel](session-and-panel.md#bare-iohr-and-the-panel) |
+| `iohr ui [serve] \| build \| dev \| check \| open` | Serve the built web UI on loopback, or run its package's own scripts | [below](#iohr-ui) |
 | `iohr tunnel` | A loopback SSH pipe into an environment's edge | [below](#iohr-tunnel) |
 | `iohr browser install [--print]` | Install InOrbit Trails, the browser extension | [below](#iohr-browser-install) |
 | `iohr doctor [--fix]` | Check this machine for the known problems (signed out, MCP bridge down, low disk, unreadable `config.toml`), say how to fix each, exit 1 on a failure. `--fix`, or `[doctor] auto_fix = true`, runs the safe fixes (restart a stopped bridge); the `?` card shows what it found | [below](#iohr-doctor) |
@@ -240,6 +242,83 @@ Io. `--account ID` acts on a team you belong to; the default is your own account
     failure and puts it back. An item that is already `done` is skipped, so a build
     resumes. The command's exit code is this command's (1 when it could not start). The
     note names the program, never its arguments.
+
+## `iohr ui`
+
+```sh
+iohr ui [serve [--port P] [--dir D] [--open]]
+iohr ui build|dev|check [--package DIR]
+iohr ui open
+```
+
+`serve` serves the built web UI (`sdk/ui`, RFC 0217) on loopback: `127.0.0.1`, else `[::1]`,
+never another address. `--dir` (or `IOHR_UI_DIR`) names a built `dist/`; without it the
+nearest `ui/dist` above the working folder is used. With no verb it serves and opens the
+browser (`IOHR_NO_BROWSER` prints the address instead).
+
+- Pages are GET and HEAD only. The `Host` must be this listener's own address or `localhost` on its
+  port. Paths cannot leave the folder or follow a link.
+- `/api/*` answers only this listener's own pages (`Sec-Fetch-Site`, `Origin`).
+  `GET /api/extensions` lists the installed extensions that declare a `[panel]` (name,
+  version, title, entry) from the same store `iohr ext install` writes, and starts none of
+  them.
+- Reaching the page takes a per-launch secret (RFC 0217, round 4). `iohr ui open` and
+  `serve --open` put it in the first address (`/?launch=...`); the server answers `303` to
+  `/` and sets a session cookie (`HttpOnly`, `SameSite=Strict`, named by the port), and
+  every other request without that cookie is `401`. The secret is one-shot: only a GET or
+  HEAD can use it, the first use spends it, and a second use is `401`. The server then makes
+  a fresh one and rewrites it in `ui/serving.json` (private), so the next `open` still gets
+  in. `serve` never prints the secret; `open` prints the address only when no browser could
+  be opened.
+- Error text the page can see (a failed sign-in, a failed proxy call) goes through the same
+  redaction as `iohr ask` output: values after a secret's name, bearer values, JWTs, tokens
+  and URLs are replaced.
+- The page never holds a credential. `iohr ui serve` signs in as `iohr login` does (the
+  same profile, the same credential store; `--profile`, `--env` and `IOHR_TOKEN` apply) and
+  calls the API for the page: `GET /api/session` says who (never a token),
+  `POST /api/session/login` starts `iohr login --web` (the system browser, PKCE) and
+  `POST /api/session/logout` is `iohr logout`, and `/api/proxy/v1/...` forwards one call
+  to the API with that credential. Each needs the page's own `x-iohr-token` header.
+  The proxy is under `/v1/`, with plain path segments, and never takes the WebSocket path.
+- Reads (`GET`, `HEAD`) need the token and this page's origin. Writes (`POST`, `PUT`,
+  `PATCH`, `DELETE`) need the same plus `Sec-Fetch-Site: same-origin` and an `Origin`
+  equal to the serve's own address; the token travels in the header only, never a cookie
+  or an address. A write goes only to the areas a view manages (accounts, approvals, atlas,
+  coordinator, decisions), takes a JSON body of at most 1 MiB
+  that arrives within 10 s (`Content-Type: application/json`, no chunked bodies; `DELETE`
+  and reads take none) and is answered within 125 s. Bodies and tokens are never logged.
+- A `GET` with `Accept: text/event-stream` passes the API's server-sent events through
+  as they arrive: each event is flushed at once, the API's resume cursor (`sse_id`)
+  becomes the event `id`, a `: keepalive` comment goes out every 15 s, and a stream with no
+  event for 5 minutes is closed (the page reconnects). At most 4 streams run per serve
+  (the 5th gets `429`; a browser keeps six connections per origin); a stream ends when the
+  page goes away or the serve stops. The page's client is `apiStream` in `ui/src/lib/api.ts`
+  (reconnect with backoff, one shared connection per identical stream) and `useLive`.
+- `GET /api/live` is one WebSocket for all of the page's streams, so six open streams do
+  not use up the browser's six connections. It is for the routes the API has a socket
+  call for (coordinator picture, asks, thread and open items, approval events, atlas
+  signals, events); `apiStream` uses it for those and reads every other path, and any
+  stream when the socket cannot open, as server-sent events. The serve carries the calls
+  to the API on one `/v1/ws` through the SDK's `Streams::Socket`. The upgrade needs the
+  session cookie, the `Host`, `Sec-Fetch-Site: same-origin` and an exact `Origin`. A
+  browser cannot set a header on a WebSocket handshake, so the per-serve token is the first
+  frame (`{"type":"auth","token"}`, constant-time compare, nothing is read before it; a
+  wrong one closes the socket). Then `{"type":"call","id","path":"/v1/..."}` and
+  `{"type":"cancel","id"}` go in; `data`, `end` and `error` frames (with the call's `id`)
+  come out, `unmapped` for a path with no socket call. A socket takes one of the 4 stream
+  slots, carries at most 16 calls, accepts frames of at most 64 KiB, is pinged every 15 s,
+  and closes after 5 minutes with nothing either way or when the serve stops. Nothing it
+  carries is logged.
+- A taken `--port` is an error. A running `serve` records its address in the data folder
+  (`ui/serving.json`, private) and removes it when it stops.
+
+`build`, `dev` and `check` run the UI package's own `pnpm run build`, `dev` or `check` in
+the nearest `ui/` holding a `package.json` (or `--package`), without a shell, and pass its
+exit code on. The mise tasks `ui:build`, `ui:dev`, `ui:check` and `ui:serve` call these
+verbs.
+
+`open` opens the UI the running `serve` recorded, only when it is a loopback address that
+still answers; a stale record is removed. `IOHR_NO_BROWSER` prints the address instead.
 
 ## `iohr tunnel`
 

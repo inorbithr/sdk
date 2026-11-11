@@ -25,13 +25,6 @@ use crate::template::{self, Answer, Answers, Kind, LANGUAGE, Question, Spec, Ste
 use crate::toolchain::{self, Lang, State};
 use crate::ui::{Choice, Mark, Nav, Ui, cancel};
 
-/// The project's own state: `~/.inorbit/projects/<name>/`, never inside the repository.
-pub(super) fn state_root() -> Result<PathBuf, Error> {
-    etcetera::home_dir()
-        .map(|h| h.join(".inorbit").join("projects"))
-        .map_err(|e| Error::Failed(format!("no home folder: {e}")))
-}
-
 /// The publisher half of the id: `--publisher`, else the account's slug when signed in,
 /// else `local`. The private listing takes it when that step lands.
 fn publisher_of(asked: Option<&str>, account: Option<&str>) -> String {
@@ -59,7 +52,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
         ProjectCommand::Init(a) => init(g, env, *a, out).await,
         ProjectCommand::Sync(a) => project_space::sync_command(g, env, a, out).await,
         // The old name of `template list`: the same handler, so the output is identical.
-        ProjectCommand::Templates => template_command(g, TemplateCommand::List, out),
+        ProjectCommand::Templates => template_command(g, TemplateCommand::List { all: false }, out),
         ProjectCommand::Template { cmd } => template_command(g, cmd, out),
     }
 }
@@ -73,7 +66,7 @@ fn default_template(g: &Global) -> Result<String, Error> {
 
 fn template_command(g: &Global, cmd: TemplateCommand, out: Out) -> Result<(), Error> {
     match cmd {
-        TemplateCommand::List => project_template::list(&default_template(g)?, out),
+        TemplateCommand::List { all } => project_template::list(&default_template(g)?, all, out),
         TemplateCommand::Show { id } => project_template::show(&id, &default_template(g)?, out),
         TemplateCommand::Path { id } => project_template::path(&id, out),
         TemplateCommand::New { id, extends } => {
@@ -185,8 +178,8 @@ fn live_names(rows: &[template::Row]) -> String {
 
 /// The language menu: every language of the template, the live ones first, each marked with
 /// whether its toolchain is on the PATH (`have`); the cursor starts on the first live one that
-/// has its toolchain (else on the template's default). The ones still coming are listed, dim,
-/// and refused when picked. `behind` says, for a toolchain that is found, where it stands
+/// has its toolchain (else on the template's default). A variant still coming is not shown
+/// (`--lang` names it and is refused). `behind` says, for a toolchain that is found, where it stands
 /// against the latest stable (`rustc 1.90.0, 1.93.0 is out`), or nothing.
 fn language_choices(
     tpl: &Template,
@@ -200,7 +193,7 @@ fn language_choices(
         .find(|v| found(v))
         .copied()
         .or_else(|| tpl.default_variant());
-    let mut out: Vec<Choice> = live
+    let out: Vec<Choice> = live
         .iter()
         .map(|v| {
             let what = if v.needs.is_empty() {
@@ -227,19 +220,6 @@ fn language_choices(
             }
         })
         .collect();
-    out.extend(
-        tpl.meta
-            .variants
-            .iter()
-            .filter(|v| v.status != template::Status::Live)
-            .map(|v| Choice {
-                value: v.id.clone(),
-                label: v.label.clone(),
-                hint: String::new(),
-                available: false,
-                key: None,
-            }),
-    );
     let initial = recommended.map(|v| v.id.clone()).unwrap_or_default();
     (out, initial)
 }
@@ -750,6 +730,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         ask_thinking: cfg.ask.thinking.clone(),
         role,
         out,
+        asked: std::cell::RefCell::default(),
     };
     let mut wiz = Wizard {
         ui,
@@ -959,7 +940,7 @@ impl Wizard<'_> {
         let mut went = Went::Skip;
         if self.a.template.is_none() && self.interactive {
             let default = choose_template(None, self.configured.as_deref());
-            let rows = template::list(&self.root, &default);
+            let rows = template::list(&self.root, &default, self.a.experimental);
             let mut choices = vec![Choice {
                 value: DESCRIBE.into(),
                 label: "Describe it, your agent builds it".into(),
@@ -1020,7 +1001,7 @@ impl Wizard<'_> {
         }
         let tpl: Template = template::load(&spec, &self.root).map_err(Error::Usage)?;
         if tpl.meta.status == template::Status::Coming {
-            let rows = template::list(&self.root, "");
+            let rows = template::list(&self.root, "", false);
             return Err(Error::Usage(format!(
                 "the `{}` template is coming; live today: {}",
                 tpl.meta.id,
@@ -1074,6 +1055,15 @@ impl Wizard<'_> {
                 )));
             }
             given.insert(LANGUAGE.into(), Answer::Text(l.to_owned()));
+        }
+        if let Some(ci) = a.ci {
+            if !tpl.meta.questions.iter().any(|q| q.key == "ci") {
+                return Err(Error::Usage(format!(
+                    "the `{}` template writes no CI files, so --ci does not apply",
+                    tpl.meta.id
+                )));
+            }
+            given.insert("ci".into(), Answer::Text(ci.word().to_owned()));
         }
         Ok(given)
     }
@@ -1237,6 +1227,35 @@ struct Exec<'a> {
     /// The Role the agent builds in (`--role`, RFC 0211), found before the plan starts.
     role: Option<runtime::Applied>,
     out: Out,
+    /// What the preview asked, so the real run does not ask it again.
+    asked: std::cell::RefCell<Asked>,
+}
+
+/// The questions `execute` puts to the person (where to keep the data, whether to read the
+/// site), settled once. The review page runs `execute` twice, as a preview and for real; the
+/// second run takes these answers, so nothing is asked or shown twice. They are dropped when
+/// the project's folder, name or description change, because the answers depend on them.
+#[derive(Default)]
+struct Asked {
+    key: String,
+    place: Option<super::project_place::Decision>,
+    crawl: Option<CrawlAnswer>,
+}
+
+/// What the crawl question settled: the plan, or no crawl (also an answer, not asked again).
+#[derive(Clone)]
+struct CrawlAnswer(Option<super::init_crawl::Plan>);
+
+impl Asked {
+    /// Forgets the answers unless they were given for the same project.
+    fn for_project(&mut self, key: String) {
+        if self.key != key {
+            *self = Self {
+                key,
+                ..Self::default()
+            };
+        }
+    }
 }
 
 /// What the person answered, settled: the input of the plan.
@@ -1520,8 +1539,26 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         steps.insert(st, agent_step);
     }
 
-    let state_root = state_root()?;
-    let state = state_root.join(name);
+    // Where the notes, the crawl and the machine state live (light PRD 0210): asked once,
+    // recorded in inorbit.toml, then every writer follows it through one resolver.
+    cx.asked.borrow_mut().for_project(format!(
+        "{}\n{name}\n{}",
+        dir.display(),
+        describe.as_deref().unwrap_or_default()
+    ));
+    let kept = cx.asked.borrow().place.clone();
+    let placed = if let Some(d) = kept {
+        d
+    } else {
+        let d = super::project_place::decide(a, &dir, name, interactive, ui)?;
+        cx.asked.borrow_mut().place = Some(d.clone());
+        d
+    };
+    let layout = placed.layout.clone();
+    let seed = super::project_place::split_seed(&placed, &mut files);
+    let state = layout
+        .state()
+        .ok_or_else(|| Error::Failed("cannot find the home folder".into()))?;
     let signed_in = flow
         .act_async("signin", "check your sign-in (one call to /v1/me)", || {
             check_sign_in(g, env, ui)
@@ -1596,6 +1633,14 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             }
             report.files = written;
             report.steps.push(st);
+            // The place: recorded, the machine state ignored when it sits in the project,
+            // the starter notes written where they belong.
+            let at = flow.act("place", &placed.would(), || placed.apply(&dir, &seed));
+            match at {
+                Some(Ok(st)) => report.steps.push(st),
+                Some(Err(e)) => return Err(Error::Failed(e)),
+                None => {}
+            }
             report
                 .steps
                 .push(project_space::step(synced.as_ref(), &env_name));
@@ -1623,7 +1668,10 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             }
             return Err(Error::Failed(e));
         }
-        None => {}
+        // A preview or a dry run: the place is listed as a step, as the others are.
+        None => {
+            flow.gate("place", &placed.would());
+        }
     }
     // The built-in roles (security and the language's engineer) go to the account only as part
     // of the account step above: a local-only init (`--no-sync`) or one without a sign-in
@@ -1667,10 +1715,10 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     };
     // The Planner plan the project's builds go through (RFC 0211): made or found, and its id
     // written into coordination.toml. Signed out, init goes on and says how to set it later.
-    let plan = flow
+    let planned = flow
         .act_async(
             "plan",
-            "create or find the project's Planner plan and write its id into coordination.toml",
+            "create or find the project's Planner plan (its id goes into coordination.toml when the project has one)",
             || {
                 super::project_plan::run(
                     g,
@@ -1679,21 +1727,56 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                     name,
                     a.plan.plan_id.as_deref(),
                     a.plan.no_plan,
+                    a.space.no_sync,
                 )
             },
         )
-        .await
-        .flatten();
-    if let Some(st) = plan {
-        if st.state == "skipped" && !out.json {
-            ui.note("Planner", &st.said);
+        .await;
+    let plan_id = planned.as_ref().and_then(|p| p.id.clone());
+    if let Some(p) = planned {
+        if p.step.state == "skipped" && !out.json {
+            ui.note("Planner", &p.step.said);
         }
-        report.steps.push(st);
+        report.steps.push(p.step);
+    }
+    // The project's shape (PRD 0210): asked once, recorded, and filed as an item in the plan.
+    // A dry run asks nothing and only says what it would do.
+    {
+        let answer = if dry {
+            a.place_args.shape.clone()
+        } else {
+            super::project_shape::pick(a.place_args.shape.as_deref(), interactive, ui, &dir)?
+        };
+        let what = super::project_shape::would(answer.as_deref());
+        let st = flow
+            .act_async("shape", &what, || {
+                super::project_shape::run(g, env, &dir, answer.as_deref(), plan_id.as_deref())
+            })
+            .await;
+        if let Some(st) = st {
+            if st.state == "skipped" && !out.json {
+                ui.note("Planner", &st.said);
+            }
+            report.steps.push(st);
+        }
     }
     // A public site, read on this machine when the person said so (PRD 0190.1).
-    if let Some(plan) =
-        super::init_crawl::decide(&a.crawl, describe.as_deref(), interactive, ui, out)?
-    {
+    let kept = cx.asked.borrow().crawl.clone();
+    let crawl = if let Some(CrawlAnswer(c)) = kept {
+        c
+    } else {
+        let c = super::init_crawl::decide(
+            &a.crawl,
+            describe.as_deref(),
+            &layout.shown(&layout.crawl()),
+            interactive,
+            ui,
+            out,
+        )?;
+        cx.asked.borrow_mut().crawl = Some(CrawlAnswer(c.clone()));
+        c
+    };
+    if let Some(plan) = crawl {
         let what = plan.would();
         let st = flow
             .act_async("crawl", &what, || {
@@ -1730,7 +1813,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 );
                 let sp = (!dry).then(|| ui.step("Registering the project"));
                 let r = flow.act("register", &what, || {
-                    project::register_step(&dir, &state_root, name, &tpl.meta.id, &created_at)
+                    project::register_in(&dir, &state, name, &tpl.meta.id, &created_at)
                 });
                 match r {
                     Some(Ok((_, st))) => {

@@ -27,6 +27,7 @@ mod browser;
 mod card;
 mod commands;
 mod context;
+mod embedded;
 mod error;
 mod examples;
 mod handoff;
@@ -44,6 +45,8 @@ mod permissions;
 mod planner;
 mod prompt;
 mod runner;
+#[cfg(unix)]
+mod safe_open;
 #[cfg(unix)]
 mod session;
 mod steps;

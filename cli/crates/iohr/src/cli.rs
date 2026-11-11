@@ -244,6 +244,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     (
         "Operate",
         &[
+            "ui",
             "tunnel",
             "browser",
             "doctor",
@@ -595,6 +596,14 @@ pub enum Command {
     /// `ssh -N -L` until Ctrl-C; binds 127.0.0.1 only and goes through Envoy, never to a
     /// service directly. The environment is `--env` (production by default).
     Tunnel(Tunnel),
+    /// Serve and open the InOrbit web UI on this machine.
+    ///
+    /// The web UI (`sdk/ui`) with the desktop app's window: frame, header, sidebar, menus
+    /// and right pane, and the panels of installed extensions. Bare `iohr ui` serves the
+    /// built UI on a loopback address and opens it; `iohr ui serve` serves without
+    /// opening. It listens on 127.0.0.1 only (`[::1]` when that is unavailable) and
+    /// answers only requests addressed to that host and port.
+    Ui(UiArgs),
     /// Print a shell completion script.
     Completion {
         /// The shell.
@@ -1849,6 +1858,26 @@ pub enum AtlasCommand {
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
     },
+    /// The claims made from the facts, and with `--prove ID` why one is believed.
+    ///
+    /// A claim is a fact with its proof: the page it was read from, kept by its digest.
+    /// `verified` says a deterministic reader found the value in those bytes; it does not
+    /// say the value is true. A claim whose page changed or whose fact went is `stale`, and
+    /// stays listed.
+    Claims {
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// Show the proof of this claim: its tree, the evidence and where it was read.
+        #[arg(long, value_name = "ID")]
+        prove: Option<String>,
+        /// The most claims to show.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
     /// List the crawled sites: pages, chunks, tokens, entities, facts and sections.
     Index {
         /// List the pages of the sites instead of the sites.
@@ -2333,6 +2362,26 @@ pub struct InitPlanArgs {
     pub no_plan: bool,
 }
 
+/// What `project init --ci` takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InitCi {
+    /// Write the GitHub Actions workflows and the dependency updates.
+    Github,
+    /// Write none of them.
+    None,
+}
+
+impl InitCi {
+    /// The answer the template reads.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Github => "github",
+            Self::None => "none",
+        }
+    }
+}
+
 /// The flags of `project init`: one struct, boxed in [`ProjectCommand::Init`] because the
 /// variant is far larger than its siblings (clippy `large_enum_variant`, seen on Windows where
 /// `PathBuf` is wider).
@@ -2346,7 +2395,7 @@ pub struct InitArgs {
     /// The template: an id (`iohr project template list` shows them), a folder
     /// (`./my-template`), or a git repository (`gh:owner/repo[//subdir][@ref]`,
     /// `git:URL[//subdir][@ref]`). Default: `[project] template` in iohr's config.toml,
-    /// else coordinated. A template that is coming says so and refuses. At a terminal, leaving
+    /// else service. A template that is coming says so and refuses. At a terminal, leaving
     /// it out offers the templates as a menu.
     #[arg(long)]
     pub template: Option<String>,
@@ -2415,6 +2464,14 @@ pub struct InitArgs {
     /// Skip the smoke test (it runs the project once with the language's own runtime).
     #[arg(long)]
     pub no_smoke: bool,
+    /// The CI files: `github` writes the workflows, the release and the dependency updates
+    /// (every template but `blank`, which writes none unless you say `github`); `none`
+    /// writes none of them. The rest of the enterprise floor stays.
+    #[arg(long, value_enum)]
+    pub ci: Option<InitCi>,
+    /// Also show the templates that are not ready (coming) in the menu.
+    #[arg(long)]
+    pub experimental: bool,
     /// Do not write the starter IO.md at the project root.
     ///
     /// `IO.md` is the file `?` and `??` read for context in this folder, like a CLAUDE.md:
@@ -2428,6 +2485,32 @@ pub struct InitArgs {
     /// Reading a public site on this machine (the agent extension's crawler).
     #[command(flatten)]
     pub crawl: InitCrawlArgs,
+    /// Where the project keeps what iohr learns about it, and what shape it has.
+    #[command(flatten)]
+    pub place_args: InitPlaceArgs,
+}
+
+/// Where the project's notes, crawl and state live, and the project's shape (light PRD 0210).
+#[derive(Debug, Args)]
+pub struct InitPlaceArgs {
+    /// Keep the project's notes (ADRs, memory), the crawl and the state in the project
+    /// folder (`project`: `.inorbit/`, travels with the repository), in your home folder
+    /// (`home`: `~/.inorbit/projects/NAME/`, stays on this machine) or in a folder you name
+    /// (`~/notes/shop`, `../shared`, `/srv/shop`: `~` is your home, a relative path starts at
+    /// the project; the folder is made when the run is confirmed). The answer is written to
+    /// `[project] data` in inorbit.toml and every later command follows it. At a terminal it
+    /// is asked once; without a choice the layout older versions made stays as it is.
+    #[arg(long = "keep-in", value_name = "WHERE", env = "IOHR_INIT_KEEP_IN")]
+    pub keep_in: Option<String>,
+    /// When the place changes, copy what the old place holds into the new one (nothing is
+    /// ever deleted, nothing already there is overwritten). At a terminal it is offered.
+    #[arg(long = "copy-data")]
+    pub copy_data: bool,
+    /// The project's shape: `monolith`, `microservices` or `combined`. Without it, a terminal
+    /// is asked once and anywhere else the question stays an open item in the project's
+    /// Planner plan for the Mac app or the phone to answer.
+    #[arg(long, value_name = "SHAPE", env = "IOHR_INIT_SHAPE", value_parser = ["monolith", "microservices", "combined"])]
+    pub shape: Option<String>,
 }
 
 /// The slowest, the fastest and the usual `--crawl-rate`, requests a second to one host
@@ -2605,9 +2688,14 @@ pub enum TemplateCommand {
     /// List the templates `init` accepts.
     ///
     /// The templates `init` and `create` accept: name, live or coming, where each comes
-    /// from, which one is the default (`[project] template` in config.toml, else coordinated) and
-    /// what it is. `--json` prints the same as a list.
-    List,
+    /// from, which one is the default (`[project] template` in config.toml, else service) and
+    /// what it is. `--json` prints the same as a list. `--all` adds the hidden ones (demo and
+    /// coordinated, still there by name) and the ones that are coming.
+    List {
+        /// Also the hidden and the coming templates.
+        #[arg(long)]
+        all: bool,
+    },
     /// Show what a template asks, writes and runs.
     ///
     /// Show one template: where it comes from, what it extends, every question (id, type,
@@ -3036,6 +3124,60 @@ pub struct BrowserInstall {
     /// Print the page's address instead of opening it (for a browser on another machine).
     #[arg(long)]
     pub print: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct UiArgs {
+    /// What to do; none serves the built UI and opens it.
+    #[command(subcommand)]
+    pub command: Option<UiCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum UiCommand {
+    /// Serve the built UI on a loopback address until Ctrl-C.
+    ///
+    /// Serves a built `ui/dist` (the nearest one above this folder, or `--dir`) on
+    /// 127.0.0.1. GET and HEAD only; a request for another host, a path outside the folder
+    /// or a method other than those is refused. Unknown page paths get `index.html`, so
+    /// the app's own routes load.
+    Serve(UiServe),
+    /// Build the UI package into `ui/dist` (its `build` script).
+    ///
+    /// Runs `pnpm run build` in the UI package: the nearest `ui/` with a `package.json`
+    /// above this folder, or `--package`. The mise task `ui:build` runs this.
+    Build(UiPackage),
+    /// Run the UI package's dev server with live reload (its `dev` script).
+    Dev(UiPackage),
+    /// Check the UI package: types, lint and tests (its `check` script).
+    Check(UiPackage),
+    /// Open the UI that `iohr ui serve` is serving in the default browser.
+    ///
+    /// Reads the address the running `iohr ui serve` recorded and opens it; only a
+    /// loopback address is opened. With `IOHR_NO_BROWSER` set, prints it instead.
+    Open,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct UiPackage {
+    /// The UI package folder, holding `package.json` (default: the nearest `ui/` above
+    /// this folder).
+    #[arg(long)]
+    pub package: Option<PathBuf>,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct UiServe {
+    /// The port to listen on (default: one the system picks).
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// The built UI folder, holding `index.html` (default: the nearest `ui/dist` above
+    /// this folder).
+    #[arg(long, env = "IOHR_UI_DIR")]
+    pub dir: Option<PathBuf>,
+    /// Open the UI in the default browser once it listens.
+    #[arg(long)]
+    pub open: bool,
 }
 
 #[derive(Debug, Subcommand)]

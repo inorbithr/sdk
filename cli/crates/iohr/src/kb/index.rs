@@ -17,27 +17,10 @@ use duckdb::{Connection, params, params_from_iter};
 
 use super::Doc;
 use super::chunk::Chunk;
+use super::claims::{self, Ingested, PageEvidence};
+use super::migrate;
 use super::model::{Fact, Model, Section};
 use crate::memory::text;
-
-const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS pages(site TEXT, url TEXT, title TEXT, description TEXT, lang TEXT,
-  depth INTEGER, chunks INTEGER, tokens INTEGER, links INTEGER);
-CREATE TABLE IF NOT EXISTS chunks(id TEXT, site TEXT, url TEXT, ord INTEGER, heading TEXT,
-  path TEXT, start_char INTEGER, end_char INTEGER, tokens INTEGER, est_model_tokens INTEGER,
-  text TEXT);
-CREATE TABLE IF NOT EXISTS terms(chunk_id TEXT, term TEXT, tf INTEGER);
-CREATE TABLE IF NOT EXISTS entities(site TEXT, kind TEXT, name TEXT, mentions INTEGER,
-  pages INTEGER, url TEXT, chunk TEXT, source TEXT);
-CREATE TABLE IF NOT EXISTS facts(site TEXT, id TEXT, subject TEXT, predicate TEXT, value TEXT,
-  url TEXT, chunk TEXT, source TEXT);
-CREATE TABLE IF NOT EXISTS sections(site TEXT, name TEXT, pages INTEGER, chunks INTEGER,
-  tokens INTEGER, summary TEXT);
-CREATE TABLE IF NOT EXISTS links(site TEXT, from_url TEXT, to_url TEXT, text TEXT,
-  internal BOOLEAN);
-CREATE TABLE IF NOT EXISTS sites(site TEXT, crawled TEXT, built TEXT, embeddings TEXT,
-  subject TEXT);
-";
 
 /// The index of the words of a query or a chunk: lower case, a plural `s` taken off words of
 /// five letters or more (not `ss`), so `pickers` finds `picker`.
@@ -109,9 +92,22 @@ pub struct PageRow {
     pub tokens: usize,
 }
 
-/// The index file, open.
+/// When a site was read and indexed, and what its embeddings are.
+#[derive(Debug, Clone, Copy)]
+pub struct Stamp<'a> {
+    /// The day the site was read.
+    pub crawled: &'a str,
+    /// The day the index was built.
+    pub built: &'a str,
+    /// What the embeddings are (a stub is said so).
+    pub embeddings: &'a str,
+}
+
+/// An open index.
 pub struct Store {
     conn: Connection,
+    // The file's lock and guards, held as long as the store is open (see `safe_open`).
+    held: Option<crate::safe_open::Db>,
 }
 
 impl std::fmt::Debug for Store {
@@ -193,41 +189,55 @@ fn add_model(tx: &duckdb::Transaction<'_>, site: &str, model: &Model) -> Result<
 }
 
 impl Store {
-    /// Opens the index, making it when it is not there.
+    /// Opens the index for writing, making it when it is not there, and brings it to the newest
+    /// migration. The folder must be the owner's alone and no other process may be writing.
     ///
     /// # Errors
     ///
-    /// A message when the file cannot be opened or made.
+    /// A message when the file cannot be opened or made, the folder is loose, another process
+    /// holds it, or a migration fails.
     pub fn open(path: &Path) -> Result<Self, String> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-        }
-        let conn = Connection::open(path).map_err(|e| err("cannot open it", &e))?;
-        conn.execute_batch(SCHEMA)
-            .map_err(|e| err("cannot make its tables", &e))?;
-        Ok(Self { conn })
+        let db = crate::safe_open::open_with(
+            path,
+            crate::safe_open::Access::Write,
+            crate::safe_open::Limits::CRAWL,
+        )
+        .map_err(|e| format!("the local index: {e}"))?;
+        let store = Self::held(db)?;
+        migrate::apply(&store.conn)?;
+        Ok(store)
     }
 
-    /// Opens an index that exists, for reading only.
+    /// Opens an index that exists, for reading only, under the same folder rule. It does not
+    /// migrate: a file older than this build answers what it holds, and the next crawl brings
+    /// it up to date.
     ///
     /// # Errors
     ///
-    /// A message when the file cannot be opened.
+    /// A message when the file cannot be opened, the folder is loose, or a writer holds it.
     pub fn open_read(path: &Path) -> Result<Self, String> {
-        let cfg = duckdb::Config::default()
-            .access_mode(duckdb::AccessMode::ReadOnly)
-            .map_err(|e| err("cannot configure it", &e))?;
-        let conn = Connection::open_with_flags(path, cfg).map_err(|e| err("cannot open it", &e))?;
-        Ok(Self { conn })
+        let db = crate::safe_open::open_with(
+            path,
+            crate::safe_open::Access::Read,
+            crate::safe_open::Limits::CRAWL,
+        )
+        .map_err(|e| format!("the local index: {e}"))?;
+        Self::held(db)
+    }
+
+    fn held(db: crate::safe_open::Db) -> Result<Self, String> {
+        let conn = db.try_clone().map_err(|e| err("cannot open it", &e))?;
+        Ok(Self {
+            conn,
+            held: Some(db),
+        })
     }
 
     #[cfg(test)]
     fn in_memory() -> Result<Self, String> {
         let conn = Connection::open_in_memory().map_err(|e| err("cannot open it", &e))?;
-        conn.execute_batch(SCHEMA)
-            .map_err(|e| err("cannot make its tables", &e))?;
-        Ok(Self { conn })
+        migrate::apply(&conn)?;
+        Ok(Self { conn, held: None })
     }
 
     /// Replaces everything the index holds for `site` with `docs` and `model`, in one
@@ -241,10 +251,14 @@ impl Store {
         site: &str,
         docs: &[Doc],
         model: &Model,
-        crawled: &str,
-        built: &str,
-        embeddings: &str,
-    ) -> Result<(), String> {
+        stamp: &Stamp<'_>,
+        evidence: &[PageEvidence],
+    ) -> Result<Ingested, String> {
+        let Stamp {
+            crawled,
+            built,
+            embeddings,
+        } = *stamp;
         let tx = self
             .conn
             .unchecked_transaction()
@@ -297,7 +311,25 @@ impl Store {
             params![site, crawled, built, embeddings, model.subject],
         )
         .map_err(e("cannot note the site"))?;
-        tx.commit().map_err(e("cannot save"))
+        let ingested = claims::ingest(&tx, site, model, evidence, crawled)?;
+        tx.commit().map_err(e("cannot save"))?;
+        self.settle()?;
+        Ok(ingested)
+    }
+
+    /// Folds the log into the file and checks the size cap, so a finished write is on disk and
+    /// a file that grew past its cap is said so rather than left to fill the disk.
+    fn settle(&self) -> Result<(), String> {
+        let Some(held) = &self.held else {
+            return Ok(());
+        };
+        held.checkpoint().map_err(|e| e.to_string())?;
+        held.ensure_room().map_err(|e| e.to_string())
+    }
+
+    /// The connection, for the queries of [`claims`].
+    pub(super) const fn conn(&self) -> &Connection {
+        &self.conn
     }
 
     /// The chunks that best answer `query`, best first, optionally of one site only.
@@ -648,11 +680,19 @@ mod tests {
         ]
     }
 
+    fn stamp(day: &str) -> Stamp<'_> {
+        Stamp {
+            crawled: day,
+            built: day,
+            embeddings: "stub: none",
+        }
+    }
+
     fn filled() -> Store {
         let s = Store::in_memory().unwrap();
         let d = docs();
         let m = model::build("a.test", &d);
-        s.replace("a.test", &d, &m, "2026-11-08", "2026-11-08", "stub: none")
+        s.replace("a.test", &d, &m, &stamp("2026-11-08"), &[])
             .unwrap();
         s
     }
@@ -700,22 +740,14 @@ mod tests {
             "b.test",
             &other,
             &model::build("b.test", &other),
-            "2026-11-08",
-            "2026-11-08",
-            "stub: none",
+            &stamp("2026-11-08"),
+            &[],
         )
         .unwrap();
         let d = docs();
         let again = model::build("a.test", &d);
-        s.replace(
-            "a.test",
-            &d,
-            &again,
-            "2026-11-09",
-            "2026-11-09",
-            "stub: none",
-        )
-        .unwrap();
+        s.replace("a.test", &d, &again, &stamp("2026-11-09"), &[])
+            .unwrap();
         let st = s.status().unwrap();
         assert_eq!(st.len(), 2);
         let a = st.iter().find(|x| x.site == "a.test").unwrap();
@@ -755,9 +787,8 @@ mod tests {
                 "a.test",
                 &d,
                 &model::build("a.test", &d),
-                "2026-11-08",
-                "2026-11-08",
-                "stub: none",
+                &stamp("2026-11-08"),
+                &[],
             )
             .unwrap();
         }
