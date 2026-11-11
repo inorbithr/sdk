@@ -172,3 +172,31 @@ LAYOUT = '''- `src/App/Tools.cs`: one tool (`word_count`) and one resource (`abo
 - `src/App/Program.cs`: starts the server over stdio, the way a host does.
 - `tests/App.Tests/ServerTests.cs`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
 - `src/App/App.csproj`: the SDK pinned to an exact version (`packages.lock.json` beside it).'''
+
+# Swift: the official Swift SDK, github.com/modelcontextprotocol/swift-sdk release 0.12.1 (the
+# modelcontextprotocol organisation's repository; Swift 6.0+, package tools 6.1; checked
+# 2026-11-11), pinned `exact` with Package.resolved committed. 0.12.1 speaks up to 2025-11-25,
+# so this variant tests the `initialize` handshake; the 2026-07-28 checks come with an SDK that
+# has them. The SDK does not check arguments against the schema, so the handler does (the test
+# covers a long, a missing, an extra and a wrongly typed argument). Its client returns the text
+# of a result, so the test reads that.
+[[variants]]
+id = "swift"
+label = "Swift 6.1 or newer on SwiftPM, official swift-sdk 0.12.1"
+status = "live"
+needs = ["swift"]
+toolchain = ["swift", "--version"]
+agent_allow = ["swift test", "swift build", "swift run", "swift package resolve"]
+smoke = "test"
+test = ["swift", "test"]
+[variants.vars]
+SOURCE = "Sources/App/, tests in Tests/AppTests/"
+IGNORE = ".build/\n.swiftpm/"
+RUN_TEST = "`swift test`"
+README_TEST = "swift test"
+RUN = "swift run @@NAME@@"
+TOOLCHAIN_MINOR = "6.1"
+LAYOUT = '''- `Sources/App/Server.swift`: one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `Sources/App/main.swift`: starts the server over stdio, the way a host does.
+- `Tests/AppTests/ServerTests.swift`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
+- `Package.swift`: the SDK pinned to an exact version (`Package.resolved` beside it).'''
