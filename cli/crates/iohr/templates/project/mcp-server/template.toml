@@ -69,3 +69,52 @@ LAYOUT = '''- `src/server.ts`: the server, one tool (`word_count`) and one resou
 - `tests/server.test.ts`: the passes-on-init test; it starts the server and speaks to it with the SDK's client.
 - `package.json`: the SDK pinned to an exact version.
 - `package-lock.json`: the lockfile.'''
+
+# Go: the official SDK, github.com/modelcontextprotocol/go-sdk v1.8.0 (the `mcp` package; its
+# README and mcp/shared.go name 2026-07-28 as the latest revision it speaks, with `server/discover`
+# and the `initialize` handshake still answered). The Go module proxy serves it.
+[[variants]]
+id = "go"
+label = "Go 1.26 or newer, official github.com/modelcontextprotocol/go-sdk 1.8.0"
+status = "live"
+needs = ["go"]
+toolchain = ["go", "version"]
+agent_allow = ["go build", "go test", "go vet", "go mod tidy"]
+smoke = "test"
+test = ["go", "test", "./..."]
+[variants.vars]
+SOURCE = "server.go, main.go, server_test.go"
+IGNORE = "/@@NAME@@"
+RUN_TEST = "`go test ./...`"
+README_TEST = "go vet ./... && go test ./..."
+RUN = "go run ."
+TOOLCHAIN_MINOR = "1.26"
+LAYOUT = '''- `server.go`: the server, one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `main.go`: starts the server over stdio, the way a host does.
+- `server_test.go`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
+- `go.mod`, `go.sum`: the SDK pinned to an exact version, and its checksums.'''
+
+# Rust: rmcp 3.9.0, "the official Rust SDK for the Model Context Protocol" (its crates.io page
+# and README, repository modelcontextprotocol/rust-sdk; spec 2026-07-28, edition 2024, needs Rust
+# 1.88). The server uses its `#[tool]` macros and the stdio transport; the test its child-process
+# client and `ClientLifecycleMode::Discover`. Cargo.lock is checked in and built with --locked.
+[[variants]]
+id = "rust"
+label = "Rust 1.88 or newer, official rmcp 3.9.0"
+status = "live"
+needs = ["cargo"]
+toolchain = ["rustc", "--version"]
+agent_allow = ["cargo build", "cargo test", "cargo fmt", "cargo clippy"]
+smoke = "test"
+test = ["cargo", "test", "--quiet", "--locked"]
+[variants.vars]
+SOURCE = "src/, tests in tests/"
+IGNORE = "target/"
+RUN_TEST = "`cargo test --locked`"
+README_TEST = "cargo test --locked"
+RUN = "cargo run --quiet"
+TOOLCHAIN_MINOR = "1.88"
+LAYOUT = '''- `src/server.rs`: the server, one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `src/main.rs`: starts the server over stdio, the way a host does.
+- `tests/server.rs`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
+- `Cargo.toml`: the SDK pinned to an exact version. `Cargo.lock`: the lockfile; CI builds with `--locked`.'''
