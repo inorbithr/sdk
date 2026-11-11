@@ -15,6 +15,20 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 
+  <dependencyManagement>
+    <dependencies>
+      <!-- The SDK brings Jackson 3.1.4, which has published advisories (GHSA-7hhh-6rmp-j9qf and
+           others, fixed in 3.1.7); the BOM lifts every Jackson artifact to the fixed release. -->
+      <dependency>
+        <groupId>tools.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>3.1.7</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
   <dependencies>
     <!-- The official Java SDK for the Model Context Protocol, pinned to one exact version. -->
     <dependency>
