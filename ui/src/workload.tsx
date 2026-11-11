@@ -284,7 +284,7 @@ export default function Workload() {
 
   const empty = map.nodes.size === 3;
   return (
-    <section aria-label="3D workload" className="flex min-h-0 flex-1 flex-col gap-3">
+    <section aria-label="Explore" className="flex min-h-0 flex-1 flex-col gap-3">
       <header className="flex flex-wrap items-center gap-3">
         <div role="tablist" aria-label="Workload view" className="flex gap-1">
           {VIEWS.map((v) => (
