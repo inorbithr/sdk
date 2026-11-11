@@ -567,7 +567,9 @@ jobs:
       # The panel's pty tests (tests/panel_live.rs) run a real zsh: the panel is a zsh feature,
       # and the runner image has none. macOS ships one.
       - if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends zsh
+        uses: ./.github/actions/apt-install # zizmor: ignore[self-repository]
+        with:
+          packages: zsh
       - run: mise run cli:check
       - run: mise run cli:audit
       # A generated surface builds against rust/ and the wrong profile is refused.
@@ -577,7 +579,9 @@ jobs:
         run: mise run cli:installers
       # A Secret Service for the Linux credential-store test; packages from the runner image's archive.
       - if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends gnome-keyring dbus
+        uses: ./.github/actions/apt-install # zizmor: ignore[self-repository]
+        with:
+          packages: gnome-keyring dbus
       - if: runner.os == 'Linux'
         run: mise run cli:keyring
       # Browser and device sign-in against the identity provider the platform runs.
