@@ -99,6 +99,13 @@ Kept but hidden from the help: `iohr packages` (now `iohr ext packages`),
 Results go to stdout (tables, or JSON with `--json`) and notes to stderr, so a pipe gets
 only data.
 
+On a terminal, lists and `show` views are drawn: the header in the help colour, ids dimmed so
+names lead, a `STATUS` or `STATE` cell as a mark and its word (a green check for `active` or
+`done`, an amber `!` for `pending` or `expiring`, a red cross for `failed` or `revoked`; a word
+not on that list stays plain), keys dimmed, and every line indented two spaces as `iohr
+doctor` is. Under `NO_COLOR`, `TERM=dumb`, `--json` or a pipe the bytes are the same as
+before: columns two spaces apart, no indent, no marks.
+
 ## `iohr doctor`
 
 Looks at four things and prints one line each: `ok`, or `FAIL` with the fix on the next line.

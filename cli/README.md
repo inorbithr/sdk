@@ -14,7 +14,8 @@ latest release receives fixes ([support policy](../SUPPORT.md)). The latest rele
 These pages describe `main`. A change merged after the latest release ships with the next
 one. `iohr-preview` is the same program under another name, built ahead of a release and
 not published as a package; today it carries the `?` modes, `--role`, the extension offer
-in `iohr project init` and `iohr ext show` with no name before a release does.
+in `iohr project init`, `iohr ext show` with no name, and the drawn lists, show views
+and doctor checks on a terminal before a release does.
 
 ## Install
 

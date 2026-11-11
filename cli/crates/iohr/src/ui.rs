@@ -18,6 +18,7 @@ use console::Key;
 
 use crate::card::{Look, nearest_256};
 use crate::error::Error;
+use crate::output::table_text;
 use crate::prompt;
 
 /// Whether the drawn look is wanted. Pure, so the rules are testable: a terminal on stderr,
@@ -397,6 +398,137 @@ impl Paint {
         let _ = writeln!(s, "\n  {}", parts.join(&sep));
         s
     }
+
+    /// A list: with colour, the header in the help colour, ids quiet, a `STATUS` or `STATE`
+    /// cell as its mark and word, the rows indented as the checks card is. With no colour,
+    /// exactly [`table_text`], the bytes scripts read.
+    #[must_use]
+    pub(crate) fn table(self, header: &[&str], rows: &[Vec<String>]) -> String {
+        if !self.color {
+            return table_text(header, rows);
+        }
+        let state_col: Vec<bool> = header
+            .iter()
+            .map(|h| matches!(h.to_ascii_lowercase().as_str(), "status" | "state"))
+            .collect();
+        let head: Vec<String> = header.iter().map(|h| self.head(h)).collect();
+        let head: Vec<&str> = head.iter().map(String::as_str).collect();
+        let rows: Vec<Vec<String>> = rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .enumerate()
+                    .map(|(i, cell)| {
+                        if state_col.get(i).copied().unwrap_or(false) {
+                            self.state(cell)
+                        } else {
+                            self.quiet_id(cell)
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        indent(&table_text(&head, &rows))
+    }
+
+    /// `key  value` lines: with colour, keys dim in one column and a `status` or `state`
+    /// value as its mark and word, indented as a list is. With no colour, exactly the plain
+    /// lines scripts read.
+    #[must_use]
+    pub(crate) fn pairs<K: AsRef<str>>(self, pairs: &[(K, String)]) -> String {
+        use std::fmt::Write as _;
+        let w = pairs
+            .iter()
+            .map(|(k, _)| k.as_ref().chars().count())
+            .max()
+            .unwrap_or(0);
+        let mut s = String::new();
+        for (k, v) in pairs {
+            let k = k.as_ref();
+            if self.color {
+                let v = if matches!(k, "status" | "state") {
+                    self.state(v)
+                } else {
+                    self.quiet_id(v)
+                };
+                let pad = " ".repeat(w - k.chars().count());
+                let _ = writeln!(s, "  {}{pad}  {v}", self.dim(k));
+            } else {
+                let _ = writeln!(s, "{k:w$}  {v}");
+            }
+        }
+        s
+    }
+
+    /// A state word as its mark and the word in the mark's colour (`✓ active`); a word with
+    /// no known mark, or a cell already coloured, stays as it is.
+    fn state(self, word: &str) -> String {
+        match state_mark(word) {
+            Some(m) if self.color && !word.contains('\u{1b}') => {
+                self.tone(m, &format!("{} {word}", m.glyph()))
+            }
+            _ => word.to_owned(),
+        }
+    }
+
+    /// An id dimmed, so the names beside it lead.
+    fn quiet_id(self, cell: &str) -> String {
+        if looks_like_id(cell) {
+            self.dim(cell)
+        } else {
+            cell.to_owned()
+        }
+    }
+}
+
+/// The mark a state word reads as in a list: done and working green, waiting amber, broken
+/// red. Words not named here get no mark, so nothing unknown looks like a success.
+fn state_mark(word: &str) -> Option<Mark> {
+    match word.trim().to_ascii_lowercase().as_str() {
+        "active" | "live" | "online" | "ok" | "done" | "ready" | "connected" | "accepted"
+        | "approved" | "enabled" | "healthy" | "running" | "merged" | "installed" | "passed"
+        | "valid" => Some(Mark::Ok),
+        "pending" | "waiting" | "queued" | "expiring" | "paused" | "draft" | "in_progress"
+        | "question" | "stale" | "held" | "degraded" | "starting" | "proposed" => Some(Mark::Warn),
+        "failed" | "revoked" | "expired" | "offline" | "error" | "denied" | "broken"
+        | "invalid" | "rejected" | "down" => Some(Mark::Fail),
+        _ => None,
+    }
+}
+
+/// An InOrbit id (`tok_01M72X…`, a lowercase prefix, `_` and a ULID) or a UUID.
+fn looks_like_id(s: &str) -> bool {
+    let s = s.trim_end_matches('\u{2026}');
+    if let Some((prefix, rest)) = s.split_once('_') {
+        return !prefix.is_empty()
+            && prefix.len() <= 6
+            && prefix.bytes().all(|b| b.is_ascii_lowercase())
+            && rest.len() >= 8
+            && rest.len() <= 26
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_digit() || b.is_ascii_uppercase());
+    }
+    s.len() == 36
+        && s.bytes().enumerate().all(|(i, b)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                b == b'-'
+            } else {
+                b.is_ascii_hexdigit()
+            }
+        })
+}
+
+/// Every line two spaces in, as the checks card is; blank lines stay blank.
+fn indent(text: &str) -> String {
+    let mut s = String::with_capacity(text.len() + 64);
+    for line in text.split_inclusive('\n') {
+        if line != "\n" {
+            s.push_str("  ");
+        }
+        s.push_str(line);
+    }
+    s
 }
 
 /// How often a step that reports often (a crawl) is drawn: the display updates at most once a
@@ -1894,6 +2026,74 @@ mod tests {
         assert_eq!(strip(p.status("live")), "\u{25cf} live");
         assert_eq!(strip(p.status("coming")), "\u{25cb} coming");
         assert_eq!(strip(p.status("invalid")), "\u{25cf} invalid");
+    }
+
+    fn token_rows() -> Vec<Vec<String>> {
+        vec![
+            vec![
+                "tok_01M72XABCDEF".to_owned(),
+                "ci-deploy".to_owned(),
+                "active".to_owned(),
+            ],
+            vec![
+                "tok_01M6ZQWERTYU".to_owned(),
+                "laptop".to_owned(),
+                "something".to_owned(),
+            ],
+        ]
+    }
+
+    #[test]
+    fn plain_tables_and_pairs_keep_their_bytes() {
+        let rows = token_rows();
+        let header = ["ID", "NAME", "STATE"];
+        assert_eq!(
+            Paint::plain().table(&header, &rows),
+            crate::output::table_text(&header, &rows)
+        );
+        let dumb = Paint::from_parts(true, false, None, Some("dumb"));
+        assert_eq!(
+            dumb.table(&header, &rows),
+            crate::output::table_text(&header, &rows)
+        );
+        let pairs = [
+            ("id", "tok_01M72XABCDEF".to_owned()),
+            ("state", "active".to_owned()),
+        ];
+        assert_eq!(
+            Paint::plain().pairs(&pairs),
+            "id     tok_01M72XABCDEF\nstate  active\n"
+        );
+    }
+
+    #[test]
+    fn drawn_tables_mark_states_and_quiet_ids() {
+        let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let text = p.table(&["ID", "NAME", "STATE"], &token_rows());
+        let lines: Vec<String> = text.lines().map(strip).collect();
+        assert_eq!(lines[0], "  ID                NAME       STATE");
+        assert_eq!(lines[1], "  tok_01M72XABCDEF  ci-deploy  \u{2713} active");
+        assert_eq!(lines[2], "  tok_01M6ZQWERTYU  laptop     something");
+        assert!(text.contains(&p.dim("tok_01M72XABCDEF")), "ids are quiet");
+        assert!(!text.contains(&p.dim("ci-deploy")), "names lead");
+        let shown = p.pairs(&[
+            ("state", "failed".to_owned()),
+            ("name", "laptop".to_owned()),
+        ]);
+        assert_eq!(strip(&shown), "  state  \u{2717} failed\n  name   laptop\n");
+        assert!(shown.contains(&p.dim("state")), "keys are dim");
+    }
+
+    #[test]
+    fn ids_and_states_are_read_narrowly() {
+        assert!(super::looks_like_id("apr_01M74R2BRNZTTKWNYK94DTQHTR"));
+        assert!(super::looks_like_id("2779ba0b-df69-4cfc-89fe-101441554413"));
+        assert!(!super::looks_like_id("ci-deploy"));
+        assert!(!super::looks_like_id("snake_case_name"));
+        assert_eq!(super::state_mark("Active"), Some(super::Mark::Ok));
+        assert_eq!(super::state_mark("in_progress"), Some(super::Mark::Warn));
+        assert_eq!(super::state_mark("revoked"), Some(super::Mark::Fail));
+        assert_eq!(super::state_mark("coming"), None);
     }
 
     fn choice(value: &str, key: char) -> Choice {
