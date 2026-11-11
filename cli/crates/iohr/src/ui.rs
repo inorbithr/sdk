@@ -1049,7 +1049,7 @@ const FIT_MIN: usize = 12;
 
 /// `rows` with their widest columns cut, each cell ending in `…`, until the table (columns
 /// two apart) is no wider than `room`. A column is never cut below [`FIT_MIN`] or its header,
-/// so a table with many columns may still be wider.
+/// and an `ID` column is never cut, so a table with many columns may still be wider.
 fn fit_cells(header: &[&str], rows: &[Vec<String>], room: usize) -> Vec<Vec<String>> {
     let shown = console::measure_text_width;
     let mut width: Vec<usize> = header.iter().map(|h| shown(h)).collect();
@@ -1058,7 +1058,19 @@ fn fit_cells(header: &[&str], rows: &[Vec<String>], room: usize) -> Vec<Vec<Stri
             *w = (*w).max(shown(cell));
         }
     }
-    let floor: Vec<usize> = header.iter().map(|h| shown(h).max(FIT_MIN)).collect();
+    // An id is copied whole, so its column is never cut.
+    let floor: Vec<usize> = header
+        .iter()
+        .zip(&width)
+        .map(|(h, w)| {
+            let h = console::strip_ansi_codes(h);
+            if h == "ID" || h.ends_with(" ID") {
+                *w
+            } else {
+                shown(&h).max(FIT_MIN)
+            }
+        })
+        .collect();
     let total = |w: &[usize]| w.iter().sum::<usize>() + 2 * w.len().saturating_sub(1);
     while total(&width) > room {
         let Some((i, &w)) = width
@@ -2278,24 +2290,22 @@ mod tests {
     #[test]
     fn a_drawn_table_cuts_its_widest_column_to_fit_the_terminal_and_plain_keeps_every_byte() {
         let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
-        let rows = vec![vec![
-            "t1".to_owned(),
-            "a:read ".repeat(30),
-            "active".to_owned(),
-        ]];
+        let id = "60fb098e-0403-4aac-a6db-7ed64b151e21".to_owned();
+        let rows = vec![vec![id.clone(), "a:read ".repeat(30), "active".to_owned()]];
         let header = ["ID", "SCOPES", "STATE"];
-        let text = p.table_within(&header, &rows, 60);
+        let text = p.table_within(&header, &rows, 66);
         for line in text.lines() {
-            assert!(console::measure_text_width(line) <= 60, "{line:?} fits");
+            assert!(console::measure_text_width(line) <= 66, "{line:?} fits");
         }
         assert!(strip(&text).contains('\u{2026}'), "the cut is shown");
         assert!(
             strip(&text).contains("active"),
             "the narrow columns stay whole"
         );
+        assert!(strip(&text).contains(&id), "an id is never cut");
         let plain = Paint::from_parts(false, false, None, None);
         assert_eq!(
-            plain.table_within(&header, &rows, 60),
+            plain.table_within(&header, &rows, 66),
             crate::output::table_text(&header, &rows)
         );
     }
