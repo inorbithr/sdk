@@ -9,6 +9,7 @@ use crate::commands::{pages, str_of};
 use crate::context::{Session, session};
 use crate::error::Error;
 use crate::output::Out;
+use crate::ui::Listed;
 
 pub(crate) async fn run(
     g: &Global,
@@ -41,7 +42,11 @@ pub(crate) async fn run(
                     ]
                 })
                 .collect();
-            Out::table(&["ID", "NAME", "CATEGORY", "MODES", "STATE"], &rows);
+            Out::list(
+                &["ID", "NAME", "CATEGORY", "MODES", "STATE"],
+                &rows,
+                &Listed::new("connector", "connectors").next("connect one", "iohr connections add"),
+            );
             Ok(())
         }
         ConnectorsCommand::Show { id } => {

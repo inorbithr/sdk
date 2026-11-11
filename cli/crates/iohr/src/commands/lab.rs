@@ -13,6 +13,7 @@ use serde::Serialize;
 use crate::cli::LabCheck;
 use crate::error::Error;
 use crate::output::Out;
+use crate::ui::{CheckRow, Mark, Paint};
 
 const DEFAULT_FOLDERS: [&str; 2] = ["docs/rfcs", "docs/studies"];
 const DEFAULT_CONFIG: &str = "docs/lab/redaction.json";
@@ -84,8 +85,21 @@ pub(crate) fn check(args: &LabCheck, out: Out) -> Result<(), Error> {
         }
     }
 
+    let n = findings.len();
+    let summary = format!(
+        "{documents} document{} checked, {n} finding{}",
+        if documents == 1 { "" } else { "s" },
+        if n == 1 { "" } else { "s" }
+    );
+    let paint = Paint::stdout(out.json);
     if out.json {
         Out::print_json(&findings);
+    } else if paint.color() {
+        let checked = format!(
+            "{documents} document{} checked",
+            if documents == 1 { "" } else { "s" }
+        );
+        Out::raw(paint.findings(&rows(&findings), &checked).as_bytes());
     } else {
         let mut text = String::new();
         for l in &findings {
@@ -98,19 +112,32 @@ pub(crate) fn check(args: &LabCheck, out: Out) -> Result<(), Error> {
         }
         Out::raw(text.as_bytes());
     }
-    let n = findings.len();
-    let summary = format!(
-        "{documents} document{} checked, {n} finding{}",
-        if documents == 1 { "" } else { "s" },
-        if n == 1 { "" } else { "s" }
-    );
     if n > 0 {
         return Err(Error::Findings(summary));
     }
-    if !out.json {
+    // The drawn card already ends with this count.
+    if !out.json && !paint.color() {
         Out::note(&summary);
     }
     Ok(())
+}
+
+/// The findings as rows for a person: where, what, and the rule that found it. The same
+/// facts as the plain lines.
+fn rows(findings: &[Located]) -> Vec<CheckRow> {
+    findings
+        .iter()
+        .map(|l| CheckRow {
+            mark: Mark::Fail,
+            id: format!(
+                "{}{}",
+                l.path,
+                l.finding.line.map(|n| format!(":{n}")).unwrap_or_default()
+            ),
+            what: l.finding.message.clone(),
+            notes: vec![("rule", l.finding.rule.clone())],
+        })
+        .collect()
 }
 
 /// The config named, the default one when it exists, or none (the generic rules alone).
@@ -174,4 +201,28 @@ fn file_name(path: &Path) -> Result<String, Error> {
 
 fn read(path: &Path) -> Result<String, Error> {
     fs::read_to_string(path).map_err(|e| Error::Usage(format!("{}: {e}", path.display())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Finding, Located, rows};
+    use crate::ui::Mark;
+
+    #[test]
+    fn a_finding_row_is_where_what_and_the_rule() {
+        let at = |line| Located {
+            path: "docs/rfcs/0001-a.md".into(),
+            finding: Finding {
+                line,
+                rule: "title".into(),
+                message: "no title".into(),
+            },
+        };
+        let r = rows(&[at(Some(3)), at(None)]);
+        assert_eq!(r[0].mark, Mark::Fail);
+        assert_eq!(r[0].id, "docs/rfcs/0001-a.md:3");
+        assert_eq!(r[1].id, "docs/rfcs/0001-a.md");
+        assert_eq!(r[0].what, "no title");
+        assert_eq!(r[0].notes, vec![("rule", "title".to_owned())]);
+    }
 }

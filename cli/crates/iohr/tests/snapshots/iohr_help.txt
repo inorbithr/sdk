@@ -49,6 +49,7 @@ Operate:
   ui           Serve and open the InOrbit web UI on this machine
   tunnel       Open a loopback pipe to an environment's edge
   browser      Install the InOrbit Trails browser extension
+  doctor       Check this machine for the known problems with iohr and say how to fix each
   upgrade      Update iohr to the newest release
   completion   Print a shell completion script
   help         Print this message or the help of a command
@@ -115,4 +116,15 @@ Global options:
           
           [env: IOHR_VIA_JOB=]
 
-Exit codes: 0 ok, 1 a finding or a failure, 2 usage, 3 not signed in, 4 forbidden.
+Examples:
+  # Who you are signed in as.
+  iohr whoami
+  # Call the API.
+  iohr api GET /v1/me
+  # Ask your own AI agent.
+  iohr ask 'how do I list my API tokens'
+
+Get started: iohr login, then iohr doctor
+
+Exit codes: 0 ok, 1 a finding or a failure, 2 usage, 3 not signed in, 4 forbidden, 75 a runner
+stopped to restart after an upgrade.
