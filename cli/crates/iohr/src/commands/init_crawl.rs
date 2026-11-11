@@ -26,7 +26,7 @@ use crate::error::Error;
 use crate::memory::store::{self, Kind as MemKind};
 use crate::output::Out;
 use crate::project::{self, Step};
-use crate::ui::{Choice, Ui};
+use crate::ui::Ui;
 
 mod progress;
 
@@ -71,7 +71,7 @@ impl Plan {
             if self.subdomains {
                 "its subdomains too"
             } else {
-                "a subdomain only after you say yes"
+                "no subdomain unless --crawl-subdomains"
             },
             self.kept_in,
             self.name
@@ -90,7 +90,7 @@ pub(crate) fn consent(p: &Plan) -> String {
     let more = if p.subdomains {
         ""
     } else {
-        " A link to another name in its domain is asked about, once per name, before it is followed; with no terminal none is followed (--crawl-subdomains follows them)."
+        " A link to another name in its domain is not followed and is listed as not read (--crawl-subdomains follows them)."
     };
     format!(
         "This reads the public pages of {scope} on this machine, with iohr-agent: at most {} a second to one host (a slower Crawl-delay in robots.txt wins), robots.txt followed, up to {} pages or {} minutes.{more} It keeps the text of each page for a local search index (an older iohr-agent makes one more request per page, at the same pace and under the same rules). What it finds stays in this project, under {}/{}/ and atlas/. Nothing is sent to InOrbit.",
@@ -642,37 +642,6 @@ pub(crate) enum Answer {
     All,
 }
 
-/// Asks about one subdomain at a terminal; the default is no.
-fn ask_about(ui: Ui, site: &str, host: &str) -> Result<Answer, Error> {
-    let choice = |value: &str, label: &str, hint: &str| Choice {
-        value: value.into(),
-        label: label.into(),
-        hint: hint.into(),
-        available: true,
-        key: None,
-    };
-    let said = ui.select(
-        &format!(
-            "The site links to {host}, another name under the same domain as {site}. Read it too?"
-        ),
-        &[
-            choice("no", "No", "skip it, the default"),
-            choice("yes", "Yes", "read its public pages as well"),
-            choice(
-                "all",
-                "Yes to all",
-                "read every such name without asking again",
-            ),
-        ],
-        "no",
-    )?;
-    Ok(match said.as_str() {
-        "yes" => Answer::Yes,
-        "all" => Answer::All,
-        _ => Answer::No,
-    })
-}
-
 /// A name in the crawl's own domain that the policy kept the crawler from: the host and the
 /// first address on it. The crawler visits such a link and records it as blocked with a
 /// `policy` reason; it reads nothing from it. The domain is the crawl's `scope` (the
@@ -946,14 +915,33 @@ impl Ctx<'_> {
     }
 }
 
+/// The question about a crawler that is not installed: whether to install it. Asked with the
+/// crawl's own consent, before the review, so the run after Create asks nothing. `false`
+/// without a terminal, under `--json`, or when it is installed already.
+///
+/// # Errors
+///
+/// The person cancelled the question.
+pub(crate) fn ask_install(g: &Global, ui: Ui, out: Out, interactive: bool) -> Result<bool, Error> {
+    if !interactive || out.json || have_agent(g) {
+        return Ok(false);
+    }
+    let id = format!("inorbit/{EXTENSION}");
+    ui.confirm(
+        &format!("The crawler is part of the {id} extension, which is not installed. Install it now?"),
+        false,
+    )
+}
+
 /// Runs the crawl and keeps what it found. The report step says how it went; the summary is
-/// printed here.
+/// printed here. `install` is the answer [`ask_install`] took before the review; nothing is
+/// asked here.
 pub(crate) async fn run(
     g: &Global,
     env: &Env,
     ui: Ui,
     out: Out,
-    interactive: bool,
+    install: bool,
     root: &Path,
     p: &Plan,
 ) -> Step {
@@ -961,12 +949,9 @@ pub(crate) async fn run(
     let id = format!("inorbit/{EXTENSION}");
     if !have_agent(g) {
         let line = format!("The crawler is part of the {id} extension, which is not installed.");
-        let install = format!("{bin} ext install {id}");
-        let yes = interactive
-            && !out.json
-            && ui
-                .confirm(&format!("{line} Install it now?"), false)
-                .unwrap_or(false);
+        let install_cmd = format!("{bin} ext install {id}");
+        let yes = install && !out.json;
+        let install = install_cmd;
         if yes {
             if let Err(e) = super::init_extensions::install_one(g, env, out, &id).await {
                 return failed(format!(
@@ -1002,18 +987,12 @@ pub(crate) async fn run(
         Ok(c) => c,
         Err(e) => return failed(e),
     };
-    // With the flag the first pass already read the subdomains; without it each one is asked
-    // about, at a terminal, and left out anywhere else.
+    // With the flag the first pass already read the subdomains; without it none is followed
+    // (the crawl is under way, so nothing is asked now) and the result lists them as not read.
     let crawl = if p.subdomains {
         first
     } else {
-        let ask = |h: &str| {
-            if interactive && !out.json {
-                ask_about(ui, host, h).unwrap_or(Answer::No)
-            } else {
-                Answer::No
-            }
-        };
+        let ask = |_: &str| Answer::No;
         let more_dir = dir.join("more");
         explore(p, first, ask, |sub, start, b| {
             let (ctx, dir) = (&ctx, more_dir.join(folder_part(&sub)));

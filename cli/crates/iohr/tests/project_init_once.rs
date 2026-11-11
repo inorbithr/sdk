@@ -99,6 +99,8 @@ fn old_home(h: &Path, name: &str) {
 
 /// Drives init to the end: place, copy (when asked), review, run, shape. Returns the session
 /// once the process has ended.
+const SHAPE: &str = "What shape is this project?";
+
 fn drive(h: &Path, name: &str, more: &[&str], place_keys: &[&[u8]], path: Option<&str>) -> Session {
     let dir: PathBuf = h.join("w").join(name);
     let a = args(name, dir.to_str().unwrap(), more);
@@ -113,19 +115,18 @@ fn drive(h: &Path, name: &str, more: &[&str], place_keys: &[&[u8]], path: Option
         s.send(p.as_bytes());
         s.send(ENTER);
     }
-    s.until("the copy question or the review", |sc| {
-        on_screen(sc, COPY) || on_screen(sc, "Ready?")
+    s.until("the copy question or the shape", |sc| {
+        on_screen(sc, COPY) || on_screen(sc, SHAPE)
     });
     if on_screen(s.screen.screen(), COPY) {
         s.send(ENTER);
-        s.until("the review", |sc| on_screen(sc, "Ready?"));
+        s.until("the shape question", |sc| on_screen(sc, SHAPE));
     }
+    // Every question comes before the review: the shape is answered first, then Create.
     s.send(ENTER);
-    s.until("the shape question", |sc| {
-        on_screen(sc, "What shape is this project?")
-    });
+    s.until("the review", |sc| on_screen(sc, "Ready?"));
     s.send(ENTER);
-    let _ = s.exited();
+    assert!(s.exited().is_some(), "nothing is asked after Create: {}", s.transcript);
     s
 }
 

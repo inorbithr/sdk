@@ -259,17 +259,35 @@ pub(crate) async fn install_one(g: &Global, env: &Env, out: Out, id: &str) -> Re
 /// init: a catalogue that cannot be read or an install that fails is one line. It returns
 /// the report step to add when it offered or hinted at something, drawn here like init's
 /// other steps on a terminal.
+///
+/// At a terminal the question is put in the planning pass before the review (`preview`), the
+/// ids the person said yes to are kept in `kept`, and the run after Create only installs
+/// those: it asks nothing. A run that finds no kept answer prints the install line instead.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "init's own context, as its other steps take it"
+)]
 pub(crate) async fn offer(
     g: &Global,
     env: &Env,
     ui: Ui,
     out: Out,
     dry: bool,
+    preview: bool,
     interactive: bool,
     signals: &Signals<'_>,
+    kept: &mut Option<Vec<String>>,
 ) -> Option<crate::project::Step> {
-    let how = mode(dry, out.json, interactive);
-    if how == Mode::Skip || !RULES.iter().any(|r| (r.fits)(signals)) {
+    let asking = preview && interactive && !out.json;
+    let how = if asking {
+        Mode::Ask
+    } else if !dry && interactive && !out.json && kept.is_none() {
+        Mode::Hint
+    } else {
+        mode(dry, out.json, interactive)
+    };
+    if how == Mode::Skip || !RULES.iter().any(|r| (r.fits)(signals)) || (asking && kept.is_some())
+    {
         return None;
     }
     let bin = super::shell::running_bin();
@@ -303,8 +321,17 @@ pub(crate) async fn offer(
         &bin,
         &offers,
         // Installing is never the default.
-        |o| ui.confirm(&format!("Install {}? It {}.", o.id, o.why), false),
+        |o| {
+            if asking {
+                ui.confirm(&format!("Install {}? It {}.", o.id, o.why), false)
+            } else {
+                Ok(kept.as_ref().is_some_and(|k| k.contains(&o.id)))
+            }
+        },
         |line| {
+            if asking {
+                return;
+            }
             if !drawn {
                 Out::note(line);
             }
@@ -318,6 +345,10 @@ pub(crate) async fn offer(
             return None;
         }
     };
+    if asking {
+        *kept = Some(ids);
+        return None;
+    }
     let mut installed = Vec::new();
     let mut failed = Vec::new();
     for id in ids {
