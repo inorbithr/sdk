@@ -19,7 +19,7 @@ use std::time::Duration;
 
 mod pty;
 
-use pty::{ROWS, Session as Pty, any, row};
+use pty::{ROWS, Session as Pty, any, row, with_history};
 
 fn bin() -> PathBuf {
     std::env::var_os("IOHR_TEST_BIN")
@@ -623,4 +623,48 @@ fn a_lone_escape_is_still_the_shells_after_the_hold() {
     s.send(b"h");
     settle(&mut s, 300);
     assert!(!folded(s.screen.screen()), "a late h is not Option+h");
+}
+
+/// The box's header, its sent row and its waiting row, each held once on the screen and never
+/// in the lines that scrolled off, while a command prints far more than a screenful.
+fn assert_box_once(raw: &[u8], what: &str) {
+    let (off, screen) = with_history(raw, 5000);
+    for mark in [HIDE, "a command is running"] {
+        let on = screen.iter().filter(|r| r.contains(mark)).count();
+        let gone = off.iter().filter(|r| r.contains(mark)).count();
+        assert!(
+            on <= 1,
+            "{what}: {mark:?} {on} times on the screen: {screen:#?}"
+        );
+        assert_eq!(
+            gone, 0,
+            "{what}: {mark:?} scrolled into the history: {off:#?}"
+        );
+    }
+}
+
+#[test]
+fn output_scrolling_past_the_box_never_stacks_it() {
+    let rig = Rig::new("stack", QUICK);
+    let mut s = rig.panel("");
+    s.until("the box at the prompt", |sc| boxed(sc) && ready(sc));
+    // A command that prints in bursts, a few screens' worth, with the box up.
+    line(
+        &mut s,
+        "for i in $(seq 1 150); do echo card-$i; [ $((i % 10)) = 0 ] && sleep 0.05; done; echo FIN\"\"ISHED",
+    );
+    s.until("the output", |sc| any(sc, "FINISHED"));
+    settle(&mut s, 300);
+    assert_box_once(&s.raw, "a command's output");
+    // And a question answered while the box shows it.
+    s.until("the box back", |sc| boxed(sc) && ready(sc));
+    s.send(b"?");
+    s.until("the box taking the keys", |sc| {
+        any(sc, "ask anything about this shell")
+    });
+    s.send(b"what is this project about");
+    s.send(b"\r");
+    s.until("the answer", |sc| any(sc, "ANSWER-ONE"));
+    settle(&mut s, 300);
+    assert_box_once(&s.raw, "an answered question");
 }
