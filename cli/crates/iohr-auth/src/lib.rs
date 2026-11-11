@@ -30,8 +30,8 @@ mod store;
 
 pub use claims::{Claims, ClaimsError};
 pub use config::{
-    AskConfig, Config, ConfigError, ExtConfig, Kind, MemoryConfig, PanelConfig, Profile,
-    ProfileName, ProfileNameError, ProjectConfig, RunnerConfig, Storage, SyncConfig,
+    AskConfig, Config, ConfigError, DoctorConfig, ExtConfig, Kind, MemoryConfig, PanelConfig,
+    Profile, ProfileName, ProfileNameError, ProjectConfig, RunnerConfig, Storage, SyncConfig,
     create_private_dir, write_private,
 };
 pub use credential::{Bearer, Credential, StaticToken};

@@ -14,6 +14,7 @@ mod connectors;
 pub(crate) mod coordinator;
 mod coordinator_plan;
 mod decisions;
+mod doctor;
 mod domains;
 mod ext;
 mod ext_catalogue;
@@ -143,6 +144,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
+        Command::Doctor { fix } => doctor::run(g, &env, fix, out).await,
         Command::Upgrade { check } => upgrade::run(g, &env, check, out).await,
         Command::SignBinary { path } => upgrade::sign_binary(&env, &path),
         Command::Ask(args) => ask::run(g, &env, *args, out).await,
