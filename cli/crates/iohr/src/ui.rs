@@ -500,7 +500,7 @@ impl Paint {
     /// exactly [`table_text`], the bytes scripts read.
     #[must_use]
     pub(crate) fn table(self, header: &[&str], rows: &[Vec<String>]) -> String {
-        let width = usize::from(console::Term::stdout().size().1).max(40);
+        let width = stdout_width();
         self.table_within(header, rows, width)
     }
 
@@ -877,7 +877,7 @@ impl Row {
         // One line, whatever the message: a held-back redraw must never leave the row at
         // another height than the one on screen. The bar takes what the message leaves free
         // (up to 20 columns) and is left out when that is too little.
-        let width = usize::from(console::Term::stderr().size().1);
+        let width = stderr_cols();
         let room = width.saturating_sub(4).max(20);
         let what = console::truncate_str(what, room, "\u{2026}").into_owned();
         if self.bar.length().is_some() {
@@ -1085,19 +1085,65 @@ fn fit_cells(header: &[&str], rows: &[Vec<String>], room: usize) -> Vec<Vec<Stri
         let over = total(&width) - room;
         width[i] = floor[i].max(next).max(w.saturating_sub(over));
     }
+    // A path keeps its end (the file it names) and loses its start.
+    let path: Vec<bool> = header
+        .iter()
+        .map(|h| {
+            let h = console::strip_ansi_codes(h);
+            h == "PATH" || h.ends_with(" PATH")
+        })
+        .collect();
     rows.iter()
         .map(|row| {
             row.iter()
+                .enumerate()
                 .zip(width.iter().chain(std::iter::repeat(&usize::MAX)))
-                .map(|(cell, w)| console::truncate_str(cell, *w, "\u{2026}").into_owned())
+                .map(|((i, cell), w)| {
+                    if path.get(i).copied().unwrap_or(false) {
+                        cut_front(cell, *w)
+                    } else {
+                        console::truncate_str(cell, *w, "\u{2026}").into_owned()
+                    }
+                })
                 .collect()
         })
         .collect()
 }
 
-/// The width of the terminal on stderr, 80 when it is not known.
+/// `text` no wider than `width` columns, cut at its start behind a `…` when it is wider.
+fn cut_front(text: &str, width: usize) -> String {
+    if console::measure_text_width(text) <= width {
+        return text.to_owned();
+    }
+    let plain = console::strip_ansi_codes(text);
+    let mut room = width.saturating_sub(1);
+    let mut tail: Vec<char> = Vec::new();
+    for c in plain.chars().rev() {
+        let w = console::measure_text_width(c.encode_utf8(&mut [0; 4]));
+        if w > room {
+            break;
+        }
+        room -= w;
+        tail.push(c);
+    }
+    tail.reverse();
+    format!("\u{2026}{}", tail.into_iter().collect::<String>())
+}
+
+/// The columns of the terminal on stderr as `console` reports them (its default when it
+/// cannot tell), with no floor.
+fn stderr_cols() -> usize {
+    usize::from(console::Term::stderr().size().1)
+}
+
+/// The width of the terminal on stderr, at least 40 columns.
 pub(crate) fn terminal_width() -> usize {
-    usize::from(console::Term::stderr().size().1).max(40)
+    stderr_cols().max(40)
+}
+
+/// The width of the terminal on stdout, at least 40 columns: what results are drawn at.
+pub(crate) fn stdout_width() -> usize {
+    usize::from(console::Term::stdout().size().1).max(40)
 }
 
 /// `text` broken at spaces into lines no wider than `width` columns, so a long line sits inside
@@ -1550,7 +1596,7 @@ impl Ui {
         initial: &str,
     ) -> Result<Option<String>, Error> {
         let look = Look::detect(Ui::detect(false).fancy());
-        let cols = usize::from(console::Term::stderr().size().1);
+        let cols = stderr_cols();
         Self::select_drawn(prompt, choices, initial, true, |at| {
             bar_lines(prompt, choices, at, cols, look)
         })
@@ -2308,6 +2354,21 @@ mod tests {
             plain.table_within(&header, &rows, 66),
             crate::output::table_text(&header, &rows)
         );
+    }
+
+    #[test]
+    fn a_drawn_table_cuts_a_path_at_its_start_so_the_file_stays() {
+        let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let path = format!("/{}/folder/IO.md", "deep/".repeat(20));
+        let rows = vec![vec!["IO.md".to_owned(), "8".to_owned(), path.clone()]];
+        let header = ["FILE", "BYTES", "PATH"];
+        let text = strip(&p.table_within(&header, &rows, 50));
+        let line = text.lines().nth(1).unwrap_or_default();
+        assert!(console::measure_text_width(line) <= 50, "{line:?} fits");
+        assert!(line.ends_with("/folder/IO.md"), "the file stays: {line:?}");
+        assert!(line.contains('\u{2026}'), "the cut is shown");
+        assert_eq!(super::cut_front("short", 10), "short");
+        assert_eq!(super::cut_front("/a/b/c/IO.md", 8), "\u{2026}c/IO.md");
     }
 
     #[test]

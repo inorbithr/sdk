@@ -111,7 +111,9 @@ commands) ends on a terminal with a line that counts it and, where one fits, nam
 command (`2 tokens · new one: iohr token create`). An empty list there is one line, such as
 `No tokens yet. Next: iohr token create`. A list wider than the terminal has its widest
 columns cut to fit, each cut cell ending in `…`, down to 12 columns or the header's width; an
-`ID` column is never cut, and `--json` or a pipe gives every cell whole. Plain output keeps the
+`ID` column is never cut, a `PATH` cell loses its start instead (`…/a/IO.md`) so the file it
+names stays, and `--json` or a pipe gives every cell whole. `iohr context` draws its file table
+the same way. Plain output keeps the
 table alone, and an empty list keeps its header line, so scripts read the same bytes.
 
 The other checks are drawn the same way on a terminal: `iohr lab check`, `iohr memory check`,

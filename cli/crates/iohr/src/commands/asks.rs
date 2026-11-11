@@ -1107,7 +1107,7 @@ impl Screen {
 
     fn draw(&mut self, text: &str) {
         let term = Term::stdout();
-        let width = usize::from(term.size().1).max(40);
+        let width = crate::ui::stdout_width();
         let fitted: String = text
             .lines()
             .map(|l| {
