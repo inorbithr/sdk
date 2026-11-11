@@ -97,10 +97,11 @@ fn old_home(h: &Path, name: &str) {
     std::fs::write(at.join("old.md"), "an older note\n").unwrap();
 }
 
-/// Drives init to the end: place, copy (when asked), review, run, shape. Returns the session
-/// once the process has ended.
 const SHAPE: &str = "What shape is this project?";
+const INSTALL: &str = "which is not installed. Install it now?";
 
+/// Drives init to the end: place, copy (when asked), shape, install (when asked), review, run.
+/// Returns the session once the process has ended.
 fn drive(h: &Path, name: &str, more: &[&str], place_keys: &[&[u8]], path: Option<&str>) -> Session {
     let dir: PathBuf = h.join("w").join(name);
     let a = args(name, dir.to_str().unwrap(), more);
@@ -124,7 +125,15 @@ fn drive(h: &Path, name: &str, more: &[&str], place_keys: &[&[u8]], path: Option
     }
     // Every question comes before the review: the shape is answered first, then Create.
     s.send(ENTER);
-    s.until("the review", |sc| on_screen(sc, "Ready?"));
+    // A crawl whose extension is missing asks to install it, also before the review; the
+    // default (no) is taken.
+    s.until("the install question or the review", |sc| {
+        on_screen(sc, INSTALL) || on_screen(sc, "Ready?")
+    });
+    if on_screen(s.screen.screen(), INSTALL) {
+        s.send(ENTER);
+        s.until("the review", |sc| on_screen(sc, "Ready?"));
+    }
     s.send(ENTER);
     assert!(
         s.exited().is_some(),

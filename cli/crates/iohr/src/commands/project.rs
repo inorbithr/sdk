@@ -1256,8 +1256,8 @@ struct Asked {
     key: String,
     place: Option<super::project_place::Decision>,
     crawl: Option<CrawlAnswer>,
-    /// The project's shape (`None` inside: nobody answered, the item stays open).
-    shape: Option<Option<String>>,
+    /// The project's shape, once asked.
+    shape: Option<ShapeAnswer>,
     /// Whether to upgrade the behind toolchain of that language.
     upgrade: Option<(String, bool)>,
     /// The extensions the person said yes to installing, once the offer was put.
@@ -1269,6 +1269,11 @@ struct Asked {
 /// review).
 #[derive(Clone)]
 struct CrawlAnswer(Option<super::init_crawl::Plan>, bool);
+
+/// What the shape question settled: the shape, or `None` when nobody answered (the item stays
+/// open; also an answer, not asked again).
+#[derive(Clone)]
+struct ShapeAnswer(Option<String>);
 
 impl Asked {
     /// Forgets the answers unless they were given for the same project.
@@ -1773,7 +1778,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     // only says what it would do; the real run, after Create, only reads the answer.
     {
         let kept = cx.asked.borrow().shape.clone();
-        let answer = if let Some(k) = kept {
+        let answer = if let Some(ShapeAnswer(k)) = kept {
             k
         } else if dry && !preview {
             a.place_args.shape.clone()
@@ -1785,7 +1790,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 &dir,
             )?;
             if preview {
-                cx.asked.borrow_mut().shape = Some(k.clone());
+                cx.asked.borrow_mut().shape = Some(ShapeAnswer(k.clone()));
             }
             k
         };
