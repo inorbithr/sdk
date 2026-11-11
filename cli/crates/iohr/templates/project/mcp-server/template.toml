@@ -13,7 +13,7 @@
 # read-only or destructive annotation, bounded inputs). A variant is `live` only when that test
 # passes.
 id = "mcp-server"
-description = "An MCP server on the official SDK, protocol revision 2026-07-28, over stdio (Python or TypeScript)"
+description = "An MCP server on the official SDK, protocol revision 2026-07-28, over stdio"
 status = "live"
 extends = "floor"
 kind = "mcp-server"

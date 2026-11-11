@@ -11,7 +11,7 @@
 # refused and never runs; a tool that needs approval does not run without an answer. A variant
 # is `live` only when that test passes.
 id = "agent"
-description = "An agent loop with a budget, a tool allow-list and approval for risky tools (Python or TypeScript)"
+description = "An agent loop with a budget, a tool allow-list and approval for risky tools"
 status = "live"
 extends = "floor"
 kind = "agent"
