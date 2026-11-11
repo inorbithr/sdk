@@ -3,7 +3,8 @@
 // the coordinator's picture stream; writes go through the local server. The board draft itself is
 // kept in this browser only, so the brief carries the cards' labels, not a saved canvas.
 import { useRef, useState } from "react";
-import { apiSend, useLive } from "../lib/live-shim.ts";
+import { apiSend } from "../lib/api.ts";
+import { useLive } from "../lib/live.ts";
 import { applyFrame, emptyPicture } from "../lib/picture.ts";
 import type { Canvas } from "./schema.ts";
 import {
@@ -21,17 +22,14 @@ import {
   workMarker,
 } from "./suggest-core.ts";
 
-const LABEL = { connecting: "Connecting", live: "Live", reconnecting: "Reconnecting", off: "Off" } as const;
+const LABEL = { connecting: "Connecting", live: "Live", reconnecting: "Reconnecting", offline: "Off" } as const;
 
 export function CoordinateBar({ canvas, sel }: { canvas: Canvas; sel: string[] }) {
-  const {
-    value: pic,
-    state,
-    reason,
-  } = useLive<unknown, ReturnType<typeof emptyPicture>>("/v1/coordinator/picture/events", {
-    reduce: applyFrame,
+  const { value, state, reason } = useLive<unknown, ReturnType<typeof emptyPicture>>("/v1/coordinator/picture/events", {
+    reduce: (p, e) => applyFrame(p ?? emptyPicture(), e),
     initial: emptyPicture(),
   });
+  const pic = value ?? emptyPicture();
   const ref = buildSelRef(canvas, sel);
   const asks = asksFor(pic.asks.values(), canvas.canvas_id);
   const [typed, setTyped] = useState("");
@@ -47,8 +45,12 @@ export function CoordinateBar({ canvas, sel }: { canvas: Canvas; sel: string[] }
     if (!body) return;
     if (isRepeat(recent.current, ref, text, Date.now())) return;
     const r = await apiSend("POST", "/v1/coordinator/asks", { ...body, priority: 0, links: [] });
-    setNote(r.ok ? "Filed with the coordinator." : `Not filed: ${r.reason}`);
-    if (r.ok) setTyped("");
+    setNote(
+      r.state === "ok"
+        ? "Filed with the coordinator."
+        : `Not filed: ${r.state === "error" ? r.reason : "You are signed out."}`,
+    );
+    if (r.state === "ok") setTyped("");
   };
   const start = async () => {
     const k = kind ?? suggestKind(ref);
@@ -64,9 +66,9 @@ export function CoordinateBar({ canvas, sel }: { canvas: Canvas; sel: string[] }
     });
     setConfirm(false);
     setNote(
-      r.ok
+      r.state === "ok"
         ? "Work queued. It ends in a pull request for review; nothing is merged or rolled."
-        : `Not started: ${r.reason}`,
+        : `Not started: ${r.state === "error" ? r.reason : "You are signed out."}`,
     );
   };
 
@@ -75,7 +77,7 @@ export function CoordinateBar({ canvas, sel }: { canvas: Canvas; sel: string[] }
       <div className="flex flex-wrap items-center gap-2">
         <span role="status" className="font-medium" title={reason ?? undefined}>
           Coordinator: {LABEL[state]}
-          {state === "off" || state === "reconnecting" ? " (writes need the local server's live support)" : ""}
+          {state === "offline" || state === "reconnecting" ? " (writes need the local server's live support)" : ""}
         </span>
         <span className="text-muted-foreground">{asks.length} filed from this canvas</span>
         <span className="text-muted-foreground ml-auto">Drafts stay in this browser; no canvas API yet.</span>
