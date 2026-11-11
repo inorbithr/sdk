@@ -307,7 +307,7 @@ BUILD = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67
         env:
           DIR: ${{ matrix.dir }}
         run: dotnet publish "src/${NAME//-/_}" --configuration Release --runtime osx-arm64 --no-self-contained --output "dist/bin/$DIR"'''
-CI_TEST = "dotnet run --project tests/${NAME//-/_}.SelfTest"
+CI_TEST = "dotnet run --project tests/@@MODULE@@.SelfTest"
 SOURCE = "src/@@MODULE@@/"
 NEEDS = '"dotnet"'
 IGNORE = "bin/\nobj/"
