@@ -286,8 +286,7 @@ pub(crate) async fn offer(
     } else {
         mode(dry, out.json, interactive)
     };
-    if how == Mode::Skip || !RULES.iter().any(|r| (r.fits)(signals)) || (asking && kept.is_some())
-    {
+    if how == Mode::Skip || !RULES.iter().any(|r| (r.fits)(signals)) || (asking && kept.is_some()) {
         return None;
     }
     let bin = super::shell::running_bin();

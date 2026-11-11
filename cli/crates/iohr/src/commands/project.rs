@@ -2057,7 +2057,11 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     // Extensions that fit the project: one more step, offered at a terminal, a hint
     // line otherwise.
     // The question is put in the planning pass; the run after Create installs what was said yes to.
-    let ext_key = format!("{}\n{}", tpl.meta.id, describe.as_deref().unwrap_or_default());
+    let ext_key = format!(
+        "{}\n{}",
+        tpl.meta.id,
+        describe.as_deref().unwrap_or_default()
+    );
     let mut ext_kept = cx
         .asked
         .borrow()

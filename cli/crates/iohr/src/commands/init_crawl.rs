@@ -928,7 +928,9 @@ pub(crate) fn ask_install(g: &Global, ui: Ui, out: Out, interactive: bool) -> Re
     }
     let id = format!("inorbit/{EXTENSION}");
     ui.confirm(
-        &format!("The crawler is part of the {id} extension, which is not installed. Install it now?"),
+        &format!(
+            "The crawler is part of the {id} extension, which is not installed. Install it now?"
+        ),
         false,
     )
 }

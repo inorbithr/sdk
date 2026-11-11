@@ -126,7 +126,11 @@ fn drive(h: &Path, name: &str, more: &[&str], place_keys: &[&[u8]], path: Option
     s.send(ENTER);
     s.until("the review", |sc| on_screen(sc, "Ready?"));
     s.send(ENTER);
-    assert!(s.exited().is_some(), "nothing is asked after Create: {}", s.transcript);
+    assert!(
+        s.exited().is_some(),
+        "nothing is asked after Create: {}",
+        s.transcript
+    );
     s
 }
 
