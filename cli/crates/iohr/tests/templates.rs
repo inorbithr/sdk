@@ -444,7 +444,8 @@ fn every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here(
         // An MCP server's smoke installs the official SDK from its registry (a cold cache in
         // this test's private home), so it needs the network; without it the row is skipped.
         // The C# and Dart evals restore their pinned test packages once, so they need it too.
-        let restores = *template == "mcp-server" || (*template == "evals" && matches!(*lang, "csharp" | "dart"));
+        let restores = *template == "mcp-server"
+            || (*template == "evals" && matches!(*lang, "csharp" | "dart"));
         if restores && !registry_reachable(lang) {
             eprintln!("{template}/{lang}: skipped, its package registry is not reachable");
             continue;
