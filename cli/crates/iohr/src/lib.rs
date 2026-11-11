@@ -32,6 +32,7 @@ mod error;
 mod examples;
 mod handoff;
 mod headless;
+mod health;
 mod hints;
 mod io_signin;
 mod iomd;
@@ -73,7 +74,9 @@ pub fn bare_inside(g: &cli::Global) -> bool {
     })
 }
 pub use error::Error;
-pub use usage::{report_clap as report_usage_clap, report_message as report_usage_message};
+pub use usage::{
+    report_clap as report_usage_clap, report_failure, report_message as report_usage_message,
+};
 
 use iohr_auth::Redacted;
 

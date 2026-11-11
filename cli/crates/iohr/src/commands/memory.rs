@@ -27,7 +27,7 @@ use crate::memory::store::{self, Entry, Kind, Remembered, Scope, Store};
 use crate::memory::{self, check, drift, recall};
 use crate::output::Out;
 use crate::roles;
-use crate::ui::Ui;
+use crate::ui::{CheckRow, Listed, Mark, Paint, Ui};
 
 use super::{day, pages, str_of};
 
@@ -418,7 +418,7 @@ async fn recall_cmd(
             .iter()
             .map(|h| local_cells(&h.entry, Some(h.score)))
             .collect();
-        Out::table(&LOCAL_HEAD, &rows);
+        Out::list(&LOCAL_HEAD, &rows, &Listed::new("memory", "memories"));
     }
     Ok(())
 }
@@ -437,7 +437,11 @@ async fn list(g: &Global, env: &Env, w: &Where, limit: usize, out: Out) -> Resul
             Out::note("nothing kept");
         } else {
             let rows: Vec<Vec<String>> = all.iter().map(remote_cells).collect();
-            Out::table(&LOCAL_HEAD, &rows);
+            Out::list(
+                &LOCAL_HEAD,
+                &rows,
+                &Listed::new("memory", "memories").next("keep one", "iohr memory remember"),
+            );
         }
         return Ok(());
     }
@@ -450,7 +454,11 @@ async fn list(g: &Global, env: &Env, w: &Where, limit: usize, out: Out) -> Resul
         Out::note("nothing kept");
     } else {
         let rows: Vec<Vec<String>> = entries.iter().map(|e| local_cells(e, None)).collect();
-        Out::table(&LOCAL_HEAD, &rows);
+        Out::list(
+            &LOCAL_HEAD,
+            &rows,
+            &Listed::new("memory", "memories").next("keep one", "iohr memory remember"),
+        );
     }
     Ok(())
 }
@@ -557,6 +565,18 @@ fn check_cmd(
         }));
     } else if findings.is_empty() {
         Ui::detect(false).outro(format!("{} memories, nothing found", entries.len()));
+    } else if Paint::stdout(false).color() {
+        let rows: Vec<CheckRow> = findings
+            .iter()
+            .map(|f| CheckRow {
+                mark: Mark::Warn,
+                id: f.id.clone(),
+                what: f.message.clone(),
+                notes: vec![("rule", f.rule.to_owned())],
+            })
+            .collect();
+        let checked = format!("{} memories checked", entries.len());
+        Out::raw(Paint::stdout(false).findings(&rows, &checked).as_bytes());
     } else {
         let rows: Vec<Vec<String>> = findings
             .iter()
@@ -611,6 +631,19 @@ async fn drift_cmd(
             Out::note(&format!("code: skipped, {why}"));
         } else if code.drifts.is_empty() {
             Out::note("code: no memory's files changed since it was confirmed");
+        } else if Paint::stdout(false).color() {
+            let rows: Vec<CheckRow> = code
+                .drifts
+                .iter()
+                .map(|d| CheckRow {
+                    mark: Mark::Warn,
+                    id: d.id.clone(),
+                    what: d.message.clone(),
+                    notes: vec![("file", d.path.clone()), ("rule", d.rule.to_owned())],
+                })
+                .collect();
+            let checked = format!("{} memories checked against the code", entries.len());
+            Out::raw(Paint::stdout(false).findings(&rows, &checked).as_bytes());
         } else {
             let rows: Vec<Vec<String>> = code
                 .drifts
