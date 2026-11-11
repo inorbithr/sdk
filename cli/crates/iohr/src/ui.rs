@@ -19,6 +19,7 @@ use console::Key;
 use crate::ask_template;
 use crate::card::{Look, nearest_256};
 use crate::error::Error;
+use crate::output::table_text;
 use crate::prompt;
 
 /// Whether the drawn look is wanted. Pure, so the rules are testable: a terminal on stderr,
@@ -112,6 +113,12 @@ impl Paint {
             color: false,
             tty: false,
         }
+    }
+
+    /// Whether output is coloured: the drawn look is for a person, plain lines for the rest.
+    #[must_use]
+    pub(crate) const fn color(self) -> bool {
+        self.color
     }
 
     /// Whether a person is reading stdout (next-step hints are printed only then).
@@ -293,6 +300,369 @@ impl Mark {
             _ => Self::Warn,
         }
     }
+
+    /// The glyph a person reads at a glance: a check, a bang, a cross.
+    #[must_use]
+    pub(crate) const fn glyph(self) -> &'static str {
+        match self {
+            Self::Ok => CHECK,
+            Self::Warn => BANG,
+            Self::Fail => CROSS,
+        }
+    }
+
+    /// Its colour from the shared palette: green, amber, red.
+    fn style(self, look: Look) -> console::Style {
+        match self {
+            Self::Ok => look.green(),
+            Self::Warn => look.amber(),
+            Self::Fail => look.red(),
+        }
+    }
+}
+
+/// What a list holds, for the line under it on a terminal ([`Paint::list`]): the noun in
+/// the singular and plural, and the command to run next (a label and the command).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Listed<'a> {
+    one: &'a str,
+    many: &'a str,
+    next: Option<(&'a str, &'a str)>,
+}
+
+impl<'a> Listed<'a> {
+    pub(crate) const fn new(one: &'a str, many: &'a str) -> Self {
+        Self {
+            one,
+            many,
+            next: None,
+        }
+    }
+
+    /// The command to run next, shown after the count, and alone when the list is empty.
+    pub(crate) const fn next(self, label: &'a str, command: &'a str) -> Self {
+        Self {
+            next: Some((label, command)),
+            ..self
+        }
+    }
+}
+
+/// One row of a list of checks (`iohr doctor`): how it ended, its name, what was found, and
+/// the lines under it as a label and a text (`fix`, `or`, `fixed`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CheckRow {
+    pub(crate) mark: Mark,
+    pub(crate) id: String,
+    pub(crate) what: String,
+    pub(crate) notes: Vec<(&'static str, String)>,
+}
+
+impl Paint {
+    /// `text` in a mark's colour, or as it is with no colour.
+    #[must_use]
+    pub(crate) fn tone(self, mark: Mark, text: &str) -> String {
+        if self.color {
+            mark.style(Look::detect(true)).apply_to(text).to_string()
+        } else {
+            text.to_owned()
+        }
+    }
+
+    /// A list of checks drawn for a person: each row's mark in its colour, the names in one
+    /// column, a passing finding dimmed so the problems stand out, the lines under a row
+    /// indented under its text, then a count (`3 ok · 1 to fix`). No box, no rule: the
+    /// colours and the column carry it. Commands call this only with colour on; their plain
+    /// lines stay what scripts read.
+    #[must_use]
+    pub(crate) fn checks(self, rows: &[CheckRow]) -> String {
+        self.card(rows, None)
+    }
+
+    /// A list of findings drawn as the checks card: only the problems are rows, and the count
+    /// line says what was checked (`12 documents checked · 3 to fix`). With nothing found it is
+    /// that line alone, under a green check.
+    #[must_use]
+    pub(crate) fn findings(self, rows: &[CheckRow], checked: &str) -> String {
+        self.card(rows, Some(checked))
+    }
+
+    fn card(self, rows: &[CheckRow], checked: Option<&str>) -> String {
+        use std::fmt::Write as _;
+        let look = Look::detect(self.color);
+        if rows.is_empty()
+            && let Some(checked) = checked
+        {
+            let ok = Mark::Ok.style(look);
+            return format!(
+                "  {} {}\n",
+                ok.clone().bold().apply_to(Mark::Ok.glyph()),
+                ok.apply_to(format!("{checked}, nothing found"))
+            );
+        }
+        let width = rows.iter().map(|r| r.id.chars().count()).max().unwrap_or(0);
+        let label_width = rows
+            .iter()
+            .flat_map(|r| r.notes.iter().map(|(l, _)| l.chars().count()))
+            .max()
+            .unwrap_or(0);
+        let mut s = String::new();
+        for r in rows {
+            let what = if r.mark == Mark::Ok {
+                look.dim().apply_to(r.what.as_str()).to_string()
+            } else {
+                r.what.clone()
+            };
+            let _ = writeln!(
+                s,
+                "  {} {:<width$}  {what}",
+                r.mark.style(look).bold().apply_to(r.mark.glyph()),
+                r.id,
+            );
+            for (label, text) in &r.notes {
+                let _ = writeln!(
+                    s,
+                    "    {:width$}  {}  {text}",
+                    "",
+                    look.dim().apply_to(format!("{label:<label_width$}")),
+                );
+            }
+        }
+        let count = |m: Mark| rows.iter().filter(|r| r.mark == m).count();
+        let mut parts = Vec::new();
+        if let Some(checked) = checked {
+            parts.push(look.dim().apply_to(checked).to_string());
+        }
+        for (m, word) in [
+            (Mark::Ok, "ok"),
+            (Mark::Warn, "to check"),
+            (Mark::Fail, "to fix"),
+        ] {
+            let n = count(m);
+            let said = m == Mark::Ok && checked.is_some();
+            if !said && (n > 0 || m == Mark::Ok) {
+                parts.push(m.style(look).apply_to(format!("{n} {word}")).to_string());
+            }
+        }
+        let sep = look.dim().apply_to(" \u{b7} ").to_string();
+        let _ = writeln!(s, "\n  {}", parts.join(&sep));
+        s
+    }
+
+    /// A failure drawn for a person: a red cross and what happened, then the lines under it,
+    /// each with its label (`code`, `request`, `hint`) in one quiet column, or indented alone
+    /// when it has none. Called only with colour on; the plain line stays `iohr: <message>`.
+    #[must_use]
+    pub(crate) fn failure(self, headline: &str, notes: &[(&'static str, String)]) -> String {
+        use std::fmt::Write as _;
+        let look = Look::detect(self.color);
+        let red = Mark::Fail.style(look);
+        let mut s = format!(
+            "{} {}",
+            red.bold().apply_to(Mark::Fail.glyph()),
+            console::Style::new()
+                .bold()
+                .force_styling(self.color)
+                .apply_to(headline),
+        );
+        let width = notes
+            .iter()
+            .map(|(l, _)| l.chars().count())
+            .max()
+            .unwrap_or(0);
+        for (label, text) in notes {
+            if label.is_empty() {
+                let _ = write!(s, "\n  {text}");
+            } else {
+                let _ = write!(
+                    s,
+                    "\n  {}  {text}",
+                    look.dim().apply_to(format!("{label:<width$}")),
+                );
+            }
+        }
+        s
+    }
+
+    /// Io's line under an outcome: something to type at the `?` prompt, bold, and what it
+    /// does, quiet. Only for a colour terminal whose shell has the hook; never in plain or
+    /// JSON output, where nothing may be added to the bytes scripts read.
+    #[must_use]
+    pub(crate) fn io_line(self, typed: &str, what: &str) -> String {
+        format!("{}  {}", self.name(typed), self.dim(what))
+    }
+
+    /// A list: with colour, the header in the help colour, ids quiet, a `STATUS` or `STATE`
+    /// cell as its mark and word, the rows indented as the checks card is. With no colour,
+    /// exactly [`table_text`], the bytes scripts read.
+    #[must_use]
+    pub(crate) fn table(self, header: &[&str], rows: &[Vec<String>]) -> String {
+        let width = stdout_width();
+        self.table_within(header, rows, width)
+    }
+
+    /// [`Paint::table`] for a terminal `width` columns wide: with colour, the widest columns
+    /// are cut (ending in `…`) until the indented table fits. With no colour, nothing is cut.
+    fn table_within(self, header: &[&str], rows: &[Vec<String>], width: usize) -> String {
+        if !self.color {
+            return table_text(header, rows);
+        }
+        let state_col: Vec<bool> = header
+            .iter()
+            .map(|h| matches!(h.to_ascii_lowercase().as_str(), "status" | "state"))
+            .collect();
+        let head: Vec<String> = header.iter().map(|h| self.head(h)).collect();
+        let head: Vec<&str> = head.iter().map(String::as_str).collect();
+        let rows: Vec<Vec<String>> = rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .enumerate()
+                    .map(|(i, cell)| {
+                        if state_col.get(i).copied().unwrap_or(false) {
+                            self.state(cell)
+                        } else {
+                            self.quiet_id(cell)
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let rows = fit_cells(&head, &rows, width.saturating_sub(2));
+        indent(&table_text(&head, &rows))
+    }
+
+    /// A list with its footer: with colour, [`Paint::table`] and under it the count and the
+    /// next command (`2 tokens · new one: iohr token create`); with no rows, one line in
+    /// place of the header (`No tokens yet. Next: iohr token create`). With no colour,
+    /// exactly [`table_text`], a header-only line when empty, as scripts have always read.
+    #[must_use]
+    pub(crate) fn list(self, header: &[&str], rows: &[Vec<String>], what: &Listed<'_>) -> String {
+        if !self.color {
+            return table_text(header, rows);
+        }
+        if rows.is_empty() {
+            let none = format!("No {} yet.", what.many);
+            return match what.next {
+                Some((_, command)) => format!(
+                    "  {} {}\n",
+                    self.dim(&format!("{none} Next:")),
+                    self.name(command)
+                ),
+                None => format!("  {}\n", self.dim(&none)),
+            };
+        }
+        let n = rows.len();
+        let count = format!("{n} {}", if n == 1 { what.one } else { what.many });
+        let footer = match what.next {
+            Some((label, command)) => format!(
+                "{} {}",
+                self.dim(&format!("{count} \u{b7} {label}:")),
+                self.name(command)
+            ),
+            None => self.dim(&count),
+        };
+        format!("{}  {footer}\n", self.table(header, rows))
+    }
+
+    /// `key  value` lines: with colour, keys dim in one column and a `status` or `state`
+    /// value as its mark and word, indented as a list is. With no colour, exactly the plain
+    /// lines scripts read.
+    #[must_use]
+    pub(crate) fn pairs<K: AsRef<str>>(self, pairs: &[(K, String)]) -> String {
+        use std::fmt::Write as _;
+        let w = pairs
+            .iter()
+            .map(|(k, _)| k.as_ref().chars().count())
+            .max()
+            .unwrap_or(0);
+        let mut s = String::new();
+        for (k, v) in pairs {
+            let k = k.as_ref();
+            if self.color {
+                let v = if matches!(k, "status" | "state") {
+                    self.state(v)
+                } else {
+                    self.quiet_id(v)
+                };
+                let pad = " ".repeat(w - k.chars().count());
+                let _ = writeln!(s, "  {}{pad}  {v}", self.dim(k));
+            } else {
+                let _ = writeln!(s, "{k:w$}  {v}");
+            }
+        }
+        s
+    }
+
+    /// A state word as its mark and the word in the mark's colour (`✓ active`); a word with
+    /// no known mark, or a cell already coloured, stays as it is.
+    fn state(self, word: &str) -> String {
+        match state_mark(word) {
+            Some(m) if self.color && !word.contains('\u{1b}') => {
+                self.tone(m, &format!("{} {word}", m.glyph()))
+            }
+            _ => word.to_owned(),
+        }
+    }
+
+    /// An id dimmed, so the names beside it lead.
+    fn quiet_id(self, cell: &str) -> String {
+        if looks_like_id(cell) {
+            self.dim(cell)
+        } else {
+            cell.to_owned()
+        }
+    }
+}
+
+/// The mark a state word reads as in a list: done and working green, waiting amber, broken
+/// red. Words not named here get no mark, so nothing unknown looks like a success.
+fn state_mark(word: &str) -> Option<Mark> {
+    match word.trim().to_ascii_lowercase().as_str() {
+        "active" | "live" | "online" | "ok" | "done" | "ready" | "connected" | "accepted"
+        | "approved" | "enabled" | "healthy" | "running" | "merged" | "installed" | "passed"
+        | "valid" => Some(Mark::Ok),
+        "pending" | "waiting" | "queued" | "expiring" | "paused" | "draft" | "in_progress"
+        | "question" | "stale" | "held" | "degraded" | "starting" | "proposed" => Some(Mark::Warn),
+        "failed" | "revoked" | "expired" | "offline" | "error" | "denied" | "broken"
+        | "invalid" | "rejected" | "down" => Some(Mark::Fail),
+        _ => None,
+    }
+}
+
+/// An InOrbit id (`tok_01M72X…`, a lowercase prefix, `_` and a ULID) or a UUID.
+fn looks_like_id(s: &str) -> bool {
+    let s = s.trim_end_matches('\u{2026}');
+    if let Some((prefix, rest)) = s.split_once('_') {
+        return !prefix.is_empty()
+            && prefix.len() <= 6
+            && prefix.bytes().all(|b| b.is_ascii_lowercase())
+            && rest.len() >= 8
+            && rest.len() <= 26
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_digit() || b.is_ascii_uppercase());
+    }
+    s.len() == 36
+        && s.bytes().enumerate().all(|(i, b)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                b == b'-'
+            } else {
+                b.is_ascii_hexdigit()
+            }
+        })
+}
+
+/// Every line two spaces in, as the checks card is; blank lines stay blank.
+fn indent(text: &str) -> String {
+    let mut s = String::with_capacity(text.len() + 64);
+    for line in text.split_inclusive('\n') {
+        if line != "\n" {
+            s.push_str("  ");
+        }
+        s.push_str(line);
+    }
+    s
 }
 
 /// How often a step that reports often (a crawl) is drawn: the display updates at most once a
@@ -504,7 +874,7 @@ impl Row {
         // One line, whatever the message: a held-back redraw must never leave the row at
         // another height than the one on screen. The bar takes what the message leaves free
         // (up to 20 columns) and is left out when that is too little.
-        let width = usize::from(console::Term::stderr().size().1);
+        let width = stderr_cols();
         let room = width.saturating_sub(4).max(20);
         let what = console::truncate_str(what, room, "\u{2026}").into_owned();
         if self.bar.length().is_some() {
@@ -671,9 +1041,106 @@ fn plain(line: &str) {
     let _ = writeln!(io::stderr().lock(), "{line}");
 }
 
-/// The width of the terminal on stderr, 80 when it is not known.
+/// The narrowest a column is cut to when a table is fitted to the terminal.
+const FIT_MIN: usize = 12;
+
+/// `rows` with their widest columns cut, each cell ending in `…`, until the table (columns
+/// two apart) is no wider than `room`. A column is never cut below [`FIT_MIN`] or its header,
+/// and an `ID` column is never cut, so a table with many columns may still be wider.
+fn fit_cells(header: &[&str], rows: &[Vec<String>], room: usize) -> Vec<Vec<String>> {
+    let shown = console::measure_text_width;
+    let mut width: Vec<usize> = header.iter().map(|h| shown(h)).collect();
+    for row in rows {
+        for (w, cell) in width.iter_mut().zip(row) {
+            *w = (*w).max(shown(cell));
+        }
+    }
+    // An id is copied whole, so its column is never cut.
+    let floor: Vec<usize> = header
+        .iter()
+        .zip(&width)
+        .map(|(h, w)| {
+            let h = console::strip_ansi_codes(h);
+            if h == "ID" || h.ends_with(" ID") {
+                *w
+            } else {
+                shown(&h).max(FIT_MIN)
+            }
+        })
+        .collect();
+    let total = |w: &[usize]| w.iter().sum::<usize>() + 2 * w.len().saturating_sub(1);
+    while total(&width) > room {
+        let Some((i, &w)) = width
+            .iter()
+            .enumerate()
+            .filter(|(i, w)| **w > floor[*i])
+            .max_by_key(|(_, w)| **w)
+        else {
+            break;
+        };
+        let next = width.iter().filter(|v| **v < w).max().copied().unwrap_or(0);
+        let over = total(&width) - room;
+        width[i] = floor[i].max(next).max(w.saturating_sub(over));
+    }
+    // A path keeps its end (the file it names) and loses its start.
+    let path: Vec<bool> = header
+        .iter()
+        .map(|h| {
+            let h = console::strip_ansi_codes(h);
+            h == "PATH" || h.ends_with(" PATH")
+        })
+        .collect();
+    rows.iter()
+        .map(|row| {
+            row.iter()
+                .enumerate()
+                .zip(width.iter().chain(std::iter::repeat(&usize::MAX)))
+                .map(|((i, cell), w)| {
+                    if path.get(i).copied().unwrap_or(false) {
+                        cut_front(cell, *w)
+                    } else {
+                        console::truncate_str(cell, *w, "\u{2026}").into_owned()
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// `text` no wider than `width` columns, cut at its start behind a `…` when it is wider.
+fn cut_front(text: &str, width: usize) -> String {
+    if console::measure_text_width(text) <= width {
+        return text.to_owned();
+    }
+    let plain = console::strip_ansi_codes(text);
+    let mut room = width.saturating_sub(1);
+    let mut tail: Vec<char> = Vec::new();
+    for c in plain.chars().rev() {
+        let w = console::measure_text_width(c.encode_utf8(&mut [0; 4]));
+        if w > room {
+            break;
+        }
+        room -= w;
+        tail.push(c);
+    }
+    tail.reverse();
+    format!("\u{2026}{}", tail.into_iter().collect::<String>())
+}
+
+/// The columns of the terminal on stderr as `console` reports them (its default when it
+/// cannot tell), with no floor.
+fn stderr_cols() -> usize {
+    usize::from(console::Term::stderr().size().1)
+}
+
+/// The width of the terminal on stderr, at least 40 columns.
 pub(crate) fn terminal_width() -> usize {
-    usize::from(console::Term::stderr().size().1).max(40)
+    stderr_cols().max(40)
+}
+
+/// The width of the terminal on stdout, at least 40 columns: what results are drawn at.
+pub(crate) fn stdout_width() -> usize {
+    usize::from(console::Term::stdout().size().1).max(40)
 }
 
 /// `text` broken at spaces into lines no wider than `width` columns, so a long line sits inside
@@ -1659,6 +2126,66 @@ mod tests {
         assert_eq!(strip(&Marks.error_symbol()), "\u{2717}");
     }
 
+    fn check_rows() -> Vec<super::CheckRow> {
+        use super::{CheckRow, Mark};
+        vec![
+            CheckRow {
+                mark: Mark::Fail,
+                id: "auth".into(),
+                what: "signed out".into(),
+                notes: vec![("fix", "iohr login".into())],
+            },
+            CheckRow {
+                mark: Mark::Ok,
+                id: "config".into(),
+                what: "reads".into(),
+                notes: vec![],
+            },
+        ]
+    }
+
+    #[test]
+    fn checks_line_up_names_hang_the_fix_under_its_row_and_count_what_needs_doing() {
+        let out =
+            Paint::from_parts(true, false, None, Some("xterm-256color")).checks(&check_rows());
+        assert!(out.contains('\u{1b}'), "a person gets colour: {out:?}");
+        let lines: Vec<String> = strip(&out).lines().map(str::to_owned).collect();
+        assert_eq!(lines[0], "  \u{2717} auth    signed out");
+        assert_eq!(lines[1], "            fix  iohr login");
+        assert_eq!(lines[2], "  \u{2713} config  reads");
+        assert_eq!(lines[3], "");
+        assert_eq!(lines[4], "  1 ok \u{b7} 1 to fix");
+    }
+
+    #[test]
+    fn findings_count_what_was_checked_and_say_so_when_nothing_was_found() {
+        let tty = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let rows = check_rows();
+        let out = strip(&tty.findings(&rows[..1], "4 documents checked"));
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "  \u{2717} auth  signed out");
+        assert_eq!(lines[1], "          fix  iohr login");
+        assert_eq!(lines[3], "  4 documents checked \u{b7} 1 to fix");
+        assert_eq!(
+            strip(&tty.findings(&[], "4 documents checked")),
+            "  \u{2713} 4 documents checked, nothing found\n"
+        );
+    }
+
+    #[test]
+    fn a_tone_is_colour_for_a_person_and_the_same_text_for_a_pipe() {
+        use super::Mark;
+        let tty = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let toned = tty.tone(Mark::Fail, "down");
+        assert_ne!(toned, "down");
+        assert_eq!(strip(&toned), "down");
+        assert_eq!(Paint::plain().tone(Mark::Fail, "down"), "down");
+        assert_eq!(
+            Paint::from_parts(true, false, Some("1"), None).tone(Mark::Ok, "up"),
+            "up"
+        );
+    }
+
     fn strip(s: &str) -> String {
         console::strip_ansi_codes(s).into_owned()
     }
@@ -1753,6 +2280,153 @@ mod tests {
         assert_eq!(strip(p.status("live")), "\u{25cf} live");
         assert_eq!(strip(p.status("coming")), "\u{25cb} coming");
         assert_eq!(strip(p.status("invalid")), "\u{25cf} invalid");
+    }
+
+    fn token_rows() -> Vec<Vec<String>> {
+        vec![
+            vec![
+                "tok_01M72XABCDEF".to_owned(),
+                "ci-deploy".to_owned(),
+                "active".to_owned(),
+            ],
+            vec![
+                "tok_01M6ZQWERTYU".to_owned(),
+                "laptop".to_owned(),
+                "something".to_owned(),
+            ],
+        ]
+    }
+
+    #[test]
+    fn plain_tables_and_pairs_keep_their_bytes() {
+        let rows = token_rows();
+        let header = ["ID", "NAME", "STATE"];
+        assert_eq!(
+            Paint::plain().table(&header, &rows),
+            crate::output::table_text(&header, &rows)
+        );
+        let dumb = Paint::from_parts(true, false, None, Some("dumb"));
+        assert_eq!(
+            dumb.table(&header, &rows),
+            crate::output::table_text(&header, &rows)
+        );
+        let pairs = [
+            ("id", "tok_01M72XABCDEF".to_owned()),
+            ("state", "active".to_owned()),
+        ];
+        assert_eq!(
+            Paint::plain().pairs(&pairs),
+            "id     tok_01M72XABCDEF\nstate  active\n"
+        );
+    }
+
+    #[test]
+    fn drawn_tables_mark_states_and_quiet_ids() {
+        let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let text = p.table(&["ID", "NAME", "STATE"], &token_rows());
+        let lines: Vec<String> = text.lines().map(strip).collect();
+        assert_eq!(lines[0], "  ID                NAME       STATE");
+        assert_eq!(lines[1], "  tok_01M72XABCDEF  ci-deploy  \u{2713} active");
+        assert_eq!(lines[2], "  tok_01M6ZQWERTYU  laptop     something");
+        assert!(text.contains(&p.dim("tok_01M72XABCDEF")), "ids are quiet");
+        assert!(!text.contains(&p.dim("ci-deploy")), "names lead");
+        let shown = p.pairs(&[
+            ("state", "failed".to_owned()),
+            ("name", "laptop".to_owned()),
+        ]);
+        assert_eq!(strip(&shown), "  state  \u{2717} failed\n  name   laptop\n");
+        assert!(shown.contains(&p.dim("state")), "keys are dim");
+    }
+
+    #[test]
+    fn a_drawn_table_cuts_its_widest_column_to_fit_the_terminal_and_plain_keeps_every_byte() {
+        let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let id = "60fb098e-0403-4aac-a6db-7ed64b151e21".to_owned();
+        let rows = vec![vec![id.clone(), "a:read ".repeat(30), "active".to_owned()]];
+        let header = ["ID", "SCOPES", "STATE"];
+        let text = p.table_within(&header, &rows, 66);
+        for line in text.lines() {
+            assert!(console::measure_text_width(line) <= 66, "{line:?} fits");
+        }
+        assert!(strip(&text).contains('\u{2026}'), "the cut is shown");
+        assert!(
+            strip(&text).contains("active"),
+            "the narrow columns stay whole"
+        );
+        assert!(strip(&text).contains(&id), "an id is never cut");
+        let plain = Paint::from_parts(false, false, None, None);
+        assert_eq!(
+            plain.table_within(&header, &rows, 66),
+            crate::output::table_text(&header, &rows)
+        );
+    }
+
+    #[test]
+    fn a_drawn_table_cuts_a_path_at_its_start_so_the_file_stays() {
+        let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let path = format!("/{}/folder/IO.md", "deep/".repeat(20));
+        let rows = vec![vec!["IO.md".to_owned(), "8".to_owned(), path.clone()]];
+        let header = ["FILE", "BYTES", "PATH"];
+        let text = strip(&p.table_within(&header, &rows, 50));
+        let line = text.lines().nth(1).unwrap_or_default();
+        assert!(console::measure_text_width(line) <= 50, "{line:?} fits");
+        assert!(line.ends_with("/folder/IO.md"), "the file stays: {line:?}");
+        assert!(line.contains('\u{2026}'), "the cut is shown");
+        assert_eq!(super::cut_front("short", 10), "short");
+        assert_eq!(super::cut_front("/a/b/c/IO.md", 8), "\u{2026}c/IO.md");
+    }
+
+    #[test]
+    fn a_drawn_list_ends_with_its_count_and_next_command() {
+        let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let tokens = super::Listed::new("token", "tokens").next("new one", "iohr token create");
+        let text = p.list(&["ID", "NAME", "STATE"], &token_rows(), &tokens);
+        let lines: Vec<String> = text.lines().map(strip).collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[3], "  2 tokens \u{b7} new one: iohr token create");
+        assert!(
+            text.contains(&p.name("iohr token create")),
+            "the command stands out"
+        );
+        let one = p.list(&["ID", "NAME", "STATE"], &token_rows()[..1], &tokens);
+        assert!(strip(&one).ends_with("  1 token \u{b7} new one: iohr token create\n"));
+        let bare = p.list(
+            &["ID"],
+            &token_rows(),
+            &super::Listed::new("token", "tokens"),
+        );
+        assert!(strip(&bare).ends_with("\n  2 tokens\n"));
+    }
+
+    #[test]
+    fn an_empty_list_says_so_on_a_terminal_and_keeps_its_header_line_in_plain_output() {
+        let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let tokens = super::Listed::new("token", "tokens").next("new one", "iohr token create");
+        assert_eq!(
+            strip(&p.list(&["ID", "NAME"], &[], &tokens)),
+            "  No tokens yet. Next: iohr token create\n"
+        );
+        let grants = super::Listed::new("grant", "grants");
+        assert_eq!(strip(&p.list(&["ID"], &[], &grants)), "  No grants yet.\n");
+        let plain = Paint::plain();
+        assert_eq!(plain.list(&["ID", "NAME"], &[], &tokens), "ID  NAME\n");
+        assert_eq!(
+            plain.list(&["ID", "NAME", "STATE"], &token_rows(), &tokens),
+            plain.table(&["ID", "NAME", "STATE"], &token_rows()),
+            "plain output is the table alone"
+        );
+    }
+
+    #[test]
+    fn ids_and_states_are_read_narrowly() {
+        assert!(super::looks_like_id("apr_01M74R2BRNZTTKWNYK94DTQHTR"));
+        assert!(super::looks_like_id("2779ba0b-df69-4cfc-89fe-101441554413"));
+        assert!(!super::looks_like_id("ci-deploy"));
+        assert!(!super::looks_like_id("snake_case_name"));
+        assert_eq!(super::state_mark("Active"), Some(super::Mark::Ok));
+        assert_eq!(super::state_mark("in_progress"), Some(super::Mark::Warn));
+        assert_eq!(super::state_mark("revoked"), Some(super::Mark::Fail));
+        assert_eq!(super::state_mark("coming"), None);
     }
 
     fn choice(value: &str, key: char) -> Choice {
