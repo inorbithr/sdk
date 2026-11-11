@@ -1,6 +1,6 @@
 // The Planner's data on the web (RFC 0217): the plans overview over SSE (`GET /v1/coordinator/plan/events`), one plan read
 // when the stream says it changed, the machine's stage for its pull requests and jobs (`POST /v1/coordinator/plan/status`),
-// and the writes. Reads and writes go through lib/api.ts's `apiGet` and the live layer's `apiWrite`/`useLive`; nothing here
+// and the writes. Reads and writes go through lib/api.ts's `apiGet` and `apiSend` and the live layer's `useLive`; nothing here
 // calls `fetch` or `EventSource`.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
