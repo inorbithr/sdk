@@ -489,7 +489,15 @@ impl Proxy {
 
     /// A change of the panel with no output from the shell.
     fn redraw(&mut self) -> Vec<u8> {
+        self.redraw_lifting(false)
+    }
+
+    /// `redraw`, putting back what the panel covers first when `lift` (a resize).
+    fn redraw_lifting(&mut self, lift: bool) -> Vec<u8> {
         let mut out = SYNC_ON.to_vec();
+        if lift {
+            out.extend(self.lift());
+        }
         out.extend(self.region());
         out.extend(self.sync());
         out.extend(self.mouse_sync());
@@ -510,11 +518,10 @@ impl Proxy {
         self.rows = rows;
         self.cols = cols;
         self.screen.resize(rows, cols);
-        // The terminal reflowed what it had: whatever it holds of the panel is the shell's to
-        // redraw; the next paint is a fresh one.
-        self.on_screen = None;
-        self.chip_on = None;
-        out.extend(self.redraw());
+        // The terminal keeps the painted cells where they were and the shell redraws only its
+        // prompt, so the old panel and chip rects are put back from the resized model (clipped
+        // to the new size) in the same update that paints them again.
+        out.extend(self.redraw_lifting(true));
         out
     }
 }
@@ -1407,6 +1414,42 @@ mod tests {
             truecolor: true,
         };
         Proxy::new(Model::new(true), 24, 100, look, mouse)
+    }
+
+    /// The rows of a terminal of `rows` x `cols` that has been fed `bytes`.
+    fn rows_of(rows: u16, cols: u16, bytes: &[&[u8]]) -> Vec<String> {
+        let mut parser = vt100::Parser::new(rows, cols, 0);
+        for b in bytes {
+            parser.process(b);
+        }
+        parser.screen().rows(0, cols).collect()
+    }
+
+    #[test]
+    fn a_resize_puts_back_what_the_old_panel_covered() {
+        let (mut p, mut term_bytes) = (proxy(MouseMode::Menu), Vec::new());
+        p.resize(24, 60);
+        // The shell's output fills the top row; the terminal gets it and the panel on top.
+        term_bytes.extend(p.child_output(&b"x".repeat(60)));
+        assert!(p.on_screen.is_some(), "the panel is painted");
+        let narrow = rows_of(24, 60, &[&term_bytes]);
+        let badge = narrow.iter().position(|r| r.contains("iohr")).unwrap();
+        let old_at = narrow[badge].find("iohr").unwrap();
+        // A wider terminal keeps the cells as they were.
+        let mut wide = vt100::Parser::new(24, 60, 0);
+        wide.process(&term_bytes);
+        wide.screen_mut().set_size(24, 100);
+        let mut after = Vec::new();
+        after.extend(p.resize(24, 100));
+        wide.process(&after);
+        let rows: Vec<String> = wide.screen().rows(0, 100).collect();
+        assert_eq!(
+            rows.iter().filter(|r| r.contains("iohr")).count(),
+            1,
+            "one badge, the live one: {rows:?}"
+        );
+        let new_at = rows[badge].find("iohr").unwrap();
+        assert!(new_at > old_at, "at the new corner, not the old one");
     }
 
     fn has(bytes: &[u8], needle: &[u8]) -> bool {
