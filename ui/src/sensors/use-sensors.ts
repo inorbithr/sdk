@@ -7,8 +7,7 @@
 //   sessions GET /v1/coordinator/{jobs,threads,asks}, again (debounced) on each event of /v1/coordinator/picture/events;
 //   clock    a tick every TICK_MS so "2 minutes ago" and staleness move between looks.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiGet, type Read } from "../lib/api.ts";
-import { apiStream, type LiveState } from "../lib/live-shim.ts";
+import { apiGet, apiStream, type LiveState, type Read } from "../lib/api.ts";
 import type { Reading } from "../lib/sensors-core.ts";
 import { diffEvents, mergeEvents, type SessionPreview, type SignalEvent, type Snapshot } from "../lib/sensors-core.ts";
 import {
@@ -36,7 +35,7 @@ export type SensorsData = {
   events: SignalEvent[];
   fresh: SignalEvent[];
   sessions: SessionPreview[];
-  /** How the signal stream stands: connecting, live, reconnecting, off. */
+  /** How the signal stream stands: connecting, live, reconnecting, offline. */
   conn: LiveState;
   loading: boolean;
   signedOut: boolean;

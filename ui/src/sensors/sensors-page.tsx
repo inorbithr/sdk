@@ -16,7 +16,7 @@ import { SAFETY_POLL_MS, useSensorsData } from "./use-sensors.ts";
 import { YourSensors } from "./your-sensors.tsx";
 import "./sensors.css";
 
-const CONN_WORD = { connecting: "Connecting", live: "Live", reconnecting: "Reconnecting", off: "Offline" } as const;
+const CONN_WORD = { connecting: "Connecting", live: "Live", reconnecting: "Reconnecting", offline: "Offline" } as const;
 
 function ViewSwitch({ view, onView }: { view: View; onView: (v: View) => void }) {
   const opt = (v: View, label: string, Icon: typeof Orbit) => (
