@@ -109,8 +109,10 @@ before: columns two spaces apart, no indent, no marks.
 A list (`token list`, `connections list`, `domains list`, `ext list` and the other `list`
 commands) ends on a terminal with a line that counts it and, where one fits, names the next
 command (`2 tokens · new one: iohr token create`). An empty list there is one line, such as
-`No tokens yet. Next: iohr token create`. Plain output keeps the table alone, and an empty
-list keeps its header line, so scripts read the same bytes.
+`No tokens yet. Next: iohr token create`. A list wider than the terminal has its widest
+columns cut to fit, each cut cell ending in `…`, down to 12 columns or the header's width; an
+`ID` column is never cut, and `--json` or a pipe gives every cell whole. Plain output keeps the
+table alone, and an empty list keeps its header line, so scripts read the same bytes.
 
 The other checks are drawn the same way on a terminal: `iohr lab check`, `iohr memory check`,
 `iohr memory drift` (its code part), `iohr sdk check` and `iohr ext verify`. Each problem is a
