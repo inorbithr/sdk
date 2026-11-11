@@ -9,6 +9,7 @@ export type Feature = { id: string; name: string };
 /** What can be put in maintenance. A page joins this list in the change that adds the page. */
 export const FEATURES: Feature[] = [
   { id: "home", name: "Home" },
+  { id: "planner", name: "Planner" },
   { id: "extensions", name: "Extension panels" },
 ];
 
