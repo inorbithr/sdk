@@ -21,6 +21,7 @@ mod access;
 mod actions;
 mod args;
 mod ask;
+mod ask_template;
 mod askback;
 mod attach;
 mod browser;

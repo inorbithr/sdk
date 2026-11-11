@@ -925,7 +925,7 @@ async fn decide(
         choice("deny", "Deny", "with a note if you like", 'd'),
         choice("question", "Ask a question", "the ask stays open", 'w'),
     ];
-    match Ui::select_keyed("What do you want to do?", &choices, "approve")?.as_deref() {
+    match Ui::select_bar("What do you want to do?", &choices, "approve")?.as_deref() {
         Some("approve") => approve(g, s, id, false, account_flag, out).await,
         Some("deny") => {
             let note = Ui::detect(false).input("Why? (optional, Enter to skip)", "", |_| Ok(()))?;
