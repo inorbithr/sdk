@@ -1,13 +1,13 @@
 # The cli template as data (PRD 0088.1): a command line with text and JSON output, exit codes
 # that mean something, a golden-output test and a version that says which commit it was built
-# from. Go, Rust and Python, each on its standard library alone. The enterprise floor (CI,
+# from. Go, Rust, Python, TypeScript, Java, C#, Dart and Swift, each on its standard library alone. The enterprise floor (CI,
 # signed and attested release, SBOM, dependency updates, secret scan) comes from `floor`.
 #
 # The test of each variant is the passes-on-init check: golden output in text and JSON
 # (`golden/`), the exit codes, and a version line that carries a commit. A variant is `live`
 # only when that test passes.
 id = "cli"
-description = "A command line with text and JSON output, exit codes and a version with the commit (Go, Rust or Python)"
+description = "A command line with text and JSON output, exit codes and a version with the commit"
 status = "live"
 extends = "floor"
 kind = "cli"
@@ -81,3 +81,184 @@ LAYOUT = '''- `src/@@MODULE@@/cli.py`: the program. `run` takes the arguments an
 - `src/@@MODULE@@/__main__.py`: passes the real streams and exits with the result.
 - `tests/test_cli.py`: the passes-on-init test.
 - `uv.lock`: the lockfile (`uv lock` refreshes it).'''
+
+# TypeScript: Node 22.18 or newer runs .ts as it is (https://nodejs.org/api/typescript.html). Node's own test runner.
+[[variants]]
+id = "typescript"
+label = "TypeScript on Node 22.18 or newer (standard library only)"
+status = "live"
+needs = ["node"]
+toolchain = ["node", "--version"]
+agent_allow = ["node --test", "node --check", "npm test"]
+smoke = "test"
+test = ["node", "--test", "tests/**/*.test.ts"]
+[variants.vars]
+SOURCE = "src/, tests in tests/"
+IGNORE = "node_modules/"
+RUN_TEST = "`node --test 'tests/**/*.test.ts'`"
+README_TEST = "node --test 'tests/**/*.test.ts'"
+RUN = "node src/main.ts greet Ada"
+INSTALL = "npm install --global ."
+TOOLCHAIN_MINOR = "22.18"
+LAYOUT = '''- `src/cli.ts`: the program. `run` takes the arguments and the two output streams, so a test reads both. Node runs the TypeScript as it is (22.18 or newer): nothing to build.
+- `src/main.ts`: passes the real streams and exits with the result.
+- `tests/cli.test.ts`: the passes-on-init test.'''
+
+# Java: JDK 17 (the long-term-support release the SDK's own java/ module targets, java/pom.xml maven.compiler.release 17;
+# https://openjdk.org/projects/jdk/17/). Standard library only: javac and java, no build tool.
+[[variants]]
+id = "java"
+label = "Java 17 or newer (standard library only)"
+status = "live"
+needs = ["javac", "java"]
+toolchain = ["java", "-version"]
+agent_allow = ["javac", "java"]
+smoke = "test"
+build = ["javac", "-d", "$CACHE/classes", "src/app/Cli.java", "src/app/Main.java", "tests/CliTest.java"]
+test = ["java", "-cp", "$CACHE/classes", "CliTest"]
+[variants.vars]
+CI_SETUP = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"'''
+CI_TEST = '''javac -d out src/app/*.java tests/*.java && java -cp out CliTest'''
+RELEASE_STEPS = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build the jar
+        run: |
+          mkdir -p dist out
+          javac -d out src/app/*.java
+          git rev-parse --short=12 HEAD > out/commit.txt
+          jar --create --file "dist/@@NAME@@.jar" --main-class app.Main -C out .'''
+DEPENDABOT_ECOSYSTEM = "maven"
+SOURCE = "src/app/, tests in tests/"
+IGNORE = '''out/
+*.class'''
+RUN_TEST = "`javac -d out src/app/*.java tests/*.java && java -cp out CliTest`"
+README_TEST = "javac -d out src/app/*.java tests/*.java && java -cp out CliTest"
+RUN = "javac -d out src/app/*.java && java -cp out app.Main greet Ada"
+INSTALL = "javac -d out src/app/*.java && git rev-parse --short=12 HEAD > out/commit.txt && jar --create --file @@NAME@@.jar --main-class app.Main -C out ."
+TOOLCHAIN_MINOR = "17"
+LAYOUT = '''- `src/app/Cli.java`: the program. `run` takes the arguments and the two output streams, so a test reads both. The version's commit comes from `commit.txt` next to the classes (written at build time), else `unknown`.
+- `src/app/Main.java`: passes the real streams and exits with the result.
+- `tests/CliTest.java`: the passes-on-init test (a plain `main`, no test framework).'''
+
+# C#: .NET SDK 10 (LTS, https://dotnet.microsoft.com/platform/support/policy/dotnet-core), pinned by global.json
+# (rollForward latestFeature). Standard library only; the test is a console project that runs itself, no test package.
+[[variants]]
+id = "csharp"
+label = "C# on .NET 10 or newer (standard library only)"
+status = "live"
+needs = ["dotnet"]
+toolchain = ["dotnet", "--version"]
+agent_allow = ["dotnet build", "dotnet test", "dotnet run"]
+smoke = "test"
+test = ["dotnet", "run", "--project", "tests/Tests.csproj", "--artifacts-path", "$CACHE/artifacts"]
+[variants.env]
+DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+DOTNET_NOLOGO = "1"
+DOTNET_CLI_HOME = "$CACHE/dotnet"
+[variants.vars]
+CI_SETUP = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json'''
+CI_TEST = '''dotnet run --project tests/Tests.csproj'''
+RELEASE_STEPS = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Publish
+        run: dotnet publish src --configuration Release --output dist'''
+DEPENDABOT_ECOSYSTEM = "nuget"
+SOURCE = "src/, tests in tests/"
+IGNORE = '''bin/
+obj/
+artifacts/'''
+RUN_TEST = "`dotnet run --project tests/Tests.csproj`"
+README_TEST = "dotnet run --project tests/Tests.csproj"
+RUN = "dotnet run --project src -- greet Ada"
+INSTALL = "dotnet pack src && dotnet tool install --global --add-source src/bin/Release @@NAME@@"
+TOOLCHAIN_MINOR = "10.0"
+LAYOUT = '''- `src/Cli.cs`: the program. `Run` takes the arguments and the two output streams, so a test reads both.
+- `src/Program.cs`: passes the real streams and exits with the result.
+- `src/@@MODULE@@.csproj`: stamps the commit into the version (`git rev-parse` at build time, else `unknown`).
+- `tests/CliTests.cs`: the passes-on-init test (a console project that runs itself, no test package).
+- `global.json`: pins the .NET SDK.'''
+
+# Dart: SDK 3.9 or newer (https://dart.dev/get-dart, pubspec `sdk: ^3.9.0`). Standard library only (dart:io, dart:convert); the test is a plain script, no test package.
+[[variants]]
+id = "dart"
+label = "Dart 3.9 or newer (standard library only)"
+status = "live"
+needs = ["dart"]
+toolchain = ["dart", "--version"]
+agent_allow = ["dart run", "dart analyze", "dart format"]
+smoke = "test"
+test = ["dart", "run", "test/cli_test.dart"]
+[variants.env]
+DART_SUPPRESS_ANALYTICS = "true"
+[variants.vars]
+CI_SETUP = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: stable'''
+CI_TEST = '''dart analyze && dart run test/cli_test.dart'''
+RELEASE_STEPS = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: stable
+      - name: Compile
+        run: |
+          mkdir -p dist
+          dart compile exe bin/main.dart -DCOMMIT="$(git rev-parse --short=12 HEAD)" -o "dist/@@NAME@@-linux-amd64"'''
+DEPENDABOT_ECOSYSTEM = "pub"
+SOURCE = "bin/, lib/, tests in test/"
+IGNORE = '''.dart_tool/
+*.exe'''
+RUN_TEST = "`dart run test/cli_test.dart`"
+README_TEST = "dart run test/cli_test.dart"
+RUN = "dart run bin/main.dart greet Ada"
+INSTALL = "dart compile exe bin/main.dart -DCOMMIT=$(git rev-parse --short=12 HEAD) -o @@NAME@@"
+TOOLCHAIN_MINOR = "3.9"
+LAYOUT = '''- `lib/cli.dart`: the program. `run` takes the arguments and the two output streams, so a test reads both. The commit is `-DCOMMIT=...` at compile time, else `git rev-parse`, else `unknown`.
+- `bin/main.dart`: passes the real streams and exits with the result.
+- `test/cli_test.dart`: the passes-on-init test (a plain script, no test package).'''
+
+# Swift: 6.0 or newer with SwiftPM (https://www.swift.org/install/, Package.swift tools-version 6.0). Foundation and XCTest only.
+[[variants]]
+id = "swift"
+label = "Swift 6.0 or newer (Foundation only)"
+status = "live"
+needs = ["swift"]
+toolchain = ["swift", "--version"]
+agent_allow = ["swift build", "swift test", "swift run"]
+smoke = "test"
+test = ["swift", "test", "--scratch-path", "$CACHE/build"]
+[variants.vars]
+CI_SETUP = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.0"'''
+CI_TEST = '''swift test'''
+RELEASE_STEPS = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.0"
+      - name: Build (release)
+        run: |
+          if [ -f Sources/Cli/Commit.swift ]; then
+            sed -i "s/let stampedCommit = \"\"/let stampedCommit = \"$(git rev-parse --short=12 HEAD)\"/" Sources/Cli/Commit.swift
+          fi
+          swift build --configuration release
+          mkdir -p dist
+          install -m 0755 ".build/release/@@NAME@@" "dist/@@NAME@@-linux-amd64"'''
+DEPENDABOT_ECOSYSTEM = "swift"
+SOURCE = "Sources/, tests in Tests/"
+IGNORE = '''.build/
+.swiftpm/'''
+RUN_TEST = "`swift test`"
+README_TEST = "swift test"
+RUN = "swift run @@NAME@@ greet Ada"
+INSTALL = "swift build -c release && install .build/release/@@NAME@@ /usr/local/bin/@@NAME@@"
+TOOLCHAIN_MINOR = "6.0"
+LAYOUT = '''- `Sources/Cli/Cli.swift`: the program. `run` takes the arguments and the two output streams, so a test reads both.
+- `Sources/Cli/Commit.swift`: the stamped commit (a release rewrites it), else `git rev-parse`, else `unknown`.
+- `Sources/App/main.swift`: passes the real streams and exits with the result.
+- `Tests/CliTests/CliTests.swift`: the passes-on-init test (XCTest).'''
