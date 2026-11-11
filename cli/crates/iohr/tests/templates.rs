@@ -58,10 +58,11 @@ fn on_path(program: &str) -> bool {
 /// Whether the package registry a variant installs from answers (TCP connect, 5 s).
 fn registry_reachable(lang: &str) -> bool {
     use std::net::ToSocketAddrs;
-    let host = if lang == "python" {
-        "pypi.org:443"
-    } else {
-        "registry.npmjs.org:443"
+    let host = match lang {
+        "python" => "pypi.org:443",
+        "csharp" => "api.nuget.org:443",
+        "dart" => "pub.dev:443",
+        _ => "registry.npmjs.org:443",
     };
     host.to_socket_addrs().is_ok_and(|mut a| {
         a.any(|addr| {
@@ -233,8 +234,19 @@ fn the_enterprise_floor_is_written_on_every_template_but_blank() {
         ("mcp-server", "python"),
         ("mcp-server", "typescript"),
         ("evals", "python"),
+        ("evals", "typescript"),
+        ("evals", "go"),
+        ("evals", "rust"),
+        ("evals", "java"),
+        ("evals", "csharp"),
+        ("evals", "dart"),
+        ("evals", "swift"),
         ("extension", "python"),
         ("extension", "typescript"),
+        ("extension", "java"),
+        ("extension", "csharp"),
+        ("extension", "dart"),
+        ("extension", "swift"),
     ] {
         let (_h, dir, out) = init(template, Some(lang), false, &[]);
         assert!(out.status.success(), "{template}/{lang}: {}", text(&out));
@@ -408,10 +420,21 @@ fn every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here(
         ("mcp-server", "python", &["uv"]),
         ("mcp-server", "typescript", &["node", "npm"]),
         ("evals", "python", &["python3"]),
+        ("evals", "typescript", &["node"]),
+        ("evals", "go", &["go"]),
+        ("evals", "rust", &["cargo"]),
+        ("evals", "java", &["javac", "java"]),
+        ("evals", "csharp", &["dotnet"]),
+        ("evals", "dart", &["dart"]),
+        ("evals", "swift", &["swift"]),
         ("extension", "python", &["python3"]),
         ("extension", "typescript", &["node"]),
         ("extension", "go", &["go"]),
         ("extension", "rust", &["cargo"]),
+        ("extension", "java", &["javac", "java"]),
+        ("extension", "csharp", &["dotnet"]),
+        ("extension", "dart", &["dart"]),
+        ("extension", "swift", &["swift"]),
     ];
     let mut ran = 0;
     for (template, lang, needs) in table {
@@ -420,7 +443,9 @@ fn every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here(
         }
         // An MCP server's smoke installs the official SDK from its registry (a cold cache in
         // this test's private home), so it needs the network; without it the row is skipped.
-        if *template == "mcp-server" && !registry_reachable(lang) {
+        // The C# and Dart evals restore their pinned test packages once, so they need it too.
+        let restores = *template == "mcp-server" || (*template == "evals" && matches!(*lang, "csharp" | "dart"));
+        if restores && !registry_reachable(lang) {
             eprintln!("{template}/{lang}: skipped, its package registry is not reachable");
             continue;
         }
