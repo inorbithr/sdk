@@ -193,6 +193,9 @@ test = ["dart", "run", "test/selftest.dart"]
 [variants.env]
 DART_SUPPRESS_ANALYTICS = "true"
 [variants.vars]
+CI_SETUP = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: "3.9"'''
 MATRIX = '''          - { os: macos-15, dir: darwin-arm64 }'''
 BUILD = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
         with:
@@ -237,6 +240,10 @@ build = ["javac", "--release", "17", "-Xlint:all", "-d", "$CACHE/classes", "-sou
 run = ["java", "-cp", "$CACHE/classes", "@@MODULE@@.Main"]
 test = ["java", "-cp", "$CACHE/classes", "@@MODULE@@.SelfTest"]
 [variants.vars]
+CI_SETUP = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"'''
 MATRIX = '''          - { os: ubuntu-24.04, dir: any }'''
 BUILD = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
@@ -289,6 +296,9 @@ test = ["dotnet", "run", "--project", "tests/@@MODULE@@.SelfTest"]
 DOTNET_NOLOGO = "1"
 DOTNET_CLI_TELEMETRY_OPTOUT = "1"
 [variants.vars]
+CI_SETUP = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"'''
 MATRIX = '''          - { os: macos-15, dir: darwin-arm64 }'''
 BUILD = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -330,6 +340,9 @@ build = ["swift", "build", "--build-tests", "--scratch-path", "$CACHE/swift"]
 run = ["swift", "run", "--scratch-path", "$CACHE/swift", "@@NAME@@"]
 test = ["swift", "test", "--scratch-path", "$CACHE/swift"]
 [variants.vars]
+CI_SETUP = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.1"'''
 MATRIX = '''          - { os: macos-15, dir: darwin-arm64 }'''
 BUILD = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
