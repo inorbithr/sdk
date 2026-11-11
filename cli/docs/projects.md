@@ -106,8 +106,10 @@ default `.inorbit/state` is ignored for you. The flag and the prompt go through 
 (`project::place::Layout`), so they agree.
 
 Init shows the preview and then does the work, and each question is asked once across the
-two: the place, the copy offer and the crawl notice are answered in the preview and carried
-into the run, never put again after "Ready?".
+two: the place, the copy offer, the shape, the crawl notice, the toolchain upgrade, the
+crawler install, the extension offers and the agent offer are all answered before "Ready?"
+and carried into the run. Nothing is asked after Create: the run only acts and prints
+progress (a debug build panics if a question is put after Create).
 
 A dry run records and writes nothing and says what it would do, including the place line.
 
@@ -119,7 +121,8 @@ the answer is work the Mac app and the phone see as well. The answer is written 
 `[project] shape` in `inorbit.toml` and as one fact in the project's notes, which `?` and
 `??` read.
 
-- At a terminal init asks inline, records the answer and marks the item done.
+- At a terminal init asks inline, before the review (and keeps the answer if you go back
+  and change something), records the answer and marks the item done.
 - `--shape monolith|microservices|combined` (or `IOHR_INIT_SHAPE`) answers without
   asking, with the same result.
 - Without a terminal and without the flag the item stays open (`proposed`), for the Mac
@@ -377,8 +380,8 @@ iohr project init my-shop --no-crawl
 `inorbit/agent` extension (`iohr agent atlas crawl`), and keeps what it found in the
 project. Nothing is sent to InOrbit.
 
-- **Consent.** At a terminal, a web address in the `--describe` text is asked about first
-  (default no). `--crawl URL` is the consent, and with `--json`, `--yes` or no terminal
+- **Consent.** At a terminal, a web address in the `--describe` text is asked about before
+  the review (default no), as is installing the crawler when it is missing. `--crawl URL` is the consent, and with `--json`, `--yes` or no terminal
   nothing is read unless you pass it. `--no-crawl` never reads.
 - **Limits.** Before it starts, init says what it will do: the host you gave only,
   robots.txt honoured, at most `--crawl-pages` pages (default 200) and `--crawl-minutes`
@@ -395,14 +398,13 @@ project. Nothing is sent to InOrbit.
   `TERM=dumb` or no terminal nothing is drawn. An `agent` extension from before RFC 0163
   does not know `--rate` or `--progress`: init runs it again without them and it crawls at
   its own pace with the spinner only.
-- **Other names in the same domain.** The crawl stays on that host. When a page links to
+- **Other names in the same domain.** The crawl stays on that host. A page that links to
   another name in the same domain (`blog.example.com` from `example.com`; from
-  `www.example.com` that also means the apex and its siblings), init asks once per name at
-  a terminal: yes, no, or yes to all, default no. A yes runs one more pass on that name
-  alone, inside what is left of the same limits, and its raw record is in
-  `.inorbit/crawl/<host>/more/<name>/`. With `--yes`, `--json` or no terminal, init follows
-  none, and the summary lists the names it left out. `--crawl-subdomains` is the yes to all
-  given in advance: the first pass is allowed the host and `*.host`, and nothing is asked.
+  `www.example.com` that also means the apex and its siblings) is not followed, and the
+  summary lists the names it left out. Init does not ask about them, because they are only
+  known once the crawl has run and nothing is asked after Create. `--crawl-subdomains`
+  is the yes given in advance: the first pass is allowed the host and `*.host`. Run init again
+  with it, or crawl a name on its own, to read one.
 
 What it keeps:
 
