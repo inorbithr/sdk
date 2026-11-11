@@ -425,6 +425,41 @@ impl Paint {
         s
     }
 
+    /// A failure drawn for a person: a red cross and what happened, then the lines under it,
+    /// each with its label (`code`, `request`, `hint`) in one quiet column, or indented alone
+    /// when it has none. Called only with colour on; the plain line stays `iohr: <message>`.
+    #[must_use]
+    pub(crate) fn failure(self, headline: &str, notes: &[(&'static str, String)]) -> String {
+        use std::fmt::Write as _;
+        let look = Look::detect(self.color);
+        let red = Mark::Fail.style(look);
+        let mut s = format!(
+            "{} {}",
+            red.bold().apply_to(Mark::Fail.glyph()),
+            console::Style::new()
+                .bold()
+                .force_styling(self.color)
+                .apply_to(headline),
+        );
+        let width = notes
+            .iter()
+            .map(|(l, _)| l.chars().count())
+            .max()
+            .unwrap_or(0);
+        for (label, text) in notes {
+            if label.is_empty() {
+                let _ = write!(s, "\n  {text}");
+            } else {
+                let _ = write!(
+                    s,
+                    "\n  {}  {text}",
+                    look.dim().apply_to(format!("{label:<width$}")),
+                );
+            }
+        }
+        s
+    }
+
     /// A list: with colour, the header in the help colour, ids quiet, a `STATUS` or `STATE`
     /// cell as its mark and word, the rows indented as the checks card is. With no colour,
     /// exactly [`table_text`], the bytes scripts read.

@@ -172,6 +172,29 @@ Everything goes to stderr. Under `--json` it is one line in the platform's error
 
 With no terminal, `NO_COLOR` or `TERM=dumb` it is plain text.
 
+## Other errors
+
+Any other error (a refused call, a file that cannot be written) also goes to stderr. On a
+colour terminal it is drawn as a block: a red mark and the message, then a line each for
+the API's error code and HTTP status, the request id, and a hint when `iohr` has one:
+
+```text
+✗ the token cannot read this account's keys
+  code     forbidden · HTTP 403
+  request  req_01H...
+  hint     an API token needs the account:read scope
+```
+
+With no terminal, `NO_COLOR` or `TERM=dumb` it stays one plain line, `iohr: <message>`,
+with the hint on the line after it. Under `--json` it is one line in the same envelope as a
+usage error: `code` is the API's code for a refused call (else `failed`, `unauthenticated`,
+`connection`, `timeout` and the like), and a `failure` detail carries the other lines, the
+HTTP status, the request id and the hint when there are any:
+
+```json
+{"code":"forbidden","error":"the token cannot read this account's keys","details":[{"type":"failure","notes":[],"status":403,"request_id":"req_01H...","hint":"an API token needs the account:read scope"}]}
+```
+
 ## Exit codes
 
 | Code | Meaning |

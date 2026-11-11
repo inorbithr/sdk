@@ -14,9 +14,9 @@ latest release receives fixes ([support policy](../SUPPORT.md)). The latest rele
 These pages describe `main`. A change merged after the latest release ships with the next
 one. `iohr-preview` is the same program under another name, built ahead of a release and
 not published as a package; today it carries the `?` modes, `--role`, the extension offer
-in `iohr project init`, `iohr ext show` with no name, and the drawn lists, show views
-and the checks card (`doctor`, `lab check`, `memory check` and `drift`, `sdk check`, `ext
-verify`) on a terminal before a release does.
+in `iohr project init`, `iohr ext show` with no name, the drawn lists, show views,
+the checks card (`doctor`, `lab check`, `memory check` and `drift`, `sdk check`, `ext
+verify`) and errors drawn as a block on a terminal before a release does.
 
 ## Install
 
