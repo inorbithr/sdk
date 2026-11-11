@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "../frame/cn.ts";
-import type { LiveState } from "../lib/live-shim.ts";
+import type { LiveState } from "../lib/api.ts";
 
 export const card = "bg-card text-card-foreground rounded-2xl border shadow-xs";
 export const button =
@@ -11,7 +11,7 @@ const LIVE_WORD: Record<LiveState, string> = {
   connecting: "Connecting",
   live: "Live",
   reconnecting: "Reconnecting",
-  off: "Offline",
+  offline: "Offline",
 };
 
 /** The stream's state in a word, with why when it is not live (RFC 0217: SSE, a reconnect with a growing pause). */
@@ -37,7 +37,7 @@ export function LiveBadge({
       <span
         className={cn(
           "size-1.5 rounded-full",
-          state === "live" ? "bg-green-500" : state === "off" ? "bg-red-500" : "bg-amber-500",
+          state === "live" ? "bg-green-500" : state === "offline" ? "bg-red-500" : "bg-amber-500",
         )}
       />
       {LIVE_WORD[state]}

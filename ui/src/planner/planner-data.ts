@@ -4,9 +4,9 @@
 // calls `fetch` or `EventSource`.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiGet, type Read } from "../lib/api.ts";
+import { apiGet, apiSend, type LiveState, type Read } from "../lib/api.ts";
 import { itemJobs, planStatusRefs } from "../lib/job-controls.ts";
-import { apiWrite, type LiveState, useLive } from "../lib/live-shim.ts";
+import { useLive } from "../lib/live.ts";
 import { type ApiItem, type ApiPlanResponse, foldServer } from "../lib/plan-api.ts";
 import { prMap, type StageMap } from "../lib/plan-stage-core.ts";
 import { prLives, type RefStatus, readStatuses, webStages } from "../lib/plan-stage-web.ts";
@@ -17,10 +17,11 @@ import { emptyLive, foldFrame, type Live } from "../lib/plans-overview.ts";
 /** The overview as the plan stream folds it, and the stream's state for the badge. */
 export function useOverview(): { live: Live; state: LiveState; reason: string | null } {
   const { value, state, reason } = useLive<unknown, Live>("/v1/coordinator/plan/events", {
-    reduce: (prev, frame) => foldFrame(prev, frame),
+    reduce: (prev, frame) => foldFrame(prev ?? emptyLive(), frame),
     initial: emptyLive(),
   });
-  return { live: value, state, reason };
+  const none = useMemo(emptyLive, []);
+  return { live: value ?? none, state, reason };
 }
 
 export type PlanData = {
@@ -86,7 +87,7 @@ export function useStages({ plan, listed }: Pick<PlanData, "plan" | "listed">): 
     if (key === asked.current) return;
     asked.current = key;
     let live = true;
-    void apiWrite<unknown>("POST", "/v1/coordinator/plan/status", { refs }).then((r) => {
+    void apiSend<unknown>("POST", "/v1/coordinator/plan/status", { refs }).then((r) => {
       if (!live) return;
       if (r.state !== "ok") {
         setOut({
@@ -121,7 +122,7 @@ export function useStages({ plan, listed }: Pick<PlanData, "plan" | "listed">): 
 export type Wrote = { ok: true } | { ok: false; reason: string };
 
 export async function send(method: "POST" | "PUT", path: string, body: unknown): Promise<Wrote> {
-  const r = await apiWrite<unknown>(method, path, body);
+  const r = await apiSend<unknown>(method, path, body);
   if (r.state === "ok") return { ok: true };
   if (r.state === "signed-out") return { ok: false, reason: "Signed out: sign in from Settings, then try again." };
   return {
