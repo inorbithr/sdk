@@ -557,7 +557,7 @@ impl Paint {
             ),
             None => self.dim(&count),
         };
-        format!("{}\n  {footer}\n", self.table(header, rows))
+        format!("{}  {footer}\n", self.table(header, rows))
     }
 
     /// `key  value` lines: with colour, keys dim in one column and a `status` or `state`

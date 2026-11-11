@@ -245,7 +245,11 @@ fn failure_parts(e: &Error) -> (String, Vec<(&'static str, String)>) {
         notes.extend(rest.into_iter().map(|l| ("", l)));
     }
     if headline.is_empty() {
-        headline = e.to_string().lines().next().unwrap_or_default().to_owned();
+        e.to_string()
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .clone_into(&mut headline);
     }
     (headline, notes)
 }
