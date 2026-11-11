@@ -352,8 +352,30 @@ impl Paint {
     /// lines stay what scripts read.
     #[must_use]
     pub(crate) fn checks(self, rows: &[CheckRow]) -> String {
+        self.card(rows, None)
+    }
+
+    /// A list of findings drawn as the checks card: only the problems are rows, and the count
+    /// line says what was checked (`12 documents checked · 3 to fix`). With nothing found it is
+    /// that line alone, under a green check.
+    #[must_use]
+    pub(crate) fn findings(self, rows: &[CheckRow], checked: &str) -> String {
+        self.card(rows, Some(checked))
+    }
+
+    fn card(self, rows: &[CheckRow], checked: Option<&str>) -> String {
         use std::fmt::Write as _;
         let look = Look::detect(self.color);
+        if rows.is_empty()
+            && let Some(checked) = checked
+        {
+            let ok = Mark::Ok.style(look);
+            return format!(
+                "  {} {}\n",
+                ok.clone().bold().apply_to(Mark::Ok.glyph()),
+                ok.apply_to(format!("{checked}, nothing found"))
+            );
+        }
         let width = rows.iter().map(|r| r.id.chars().count()).max().unwrap_or(0);
         let label_width = rows
             .iter()
@@ -384,13 +406,17 @@ impl Paint {
         }
         let count = |m: Mark| rows.iter().filter(|r| r.mark == m).count();
         let mut parts = Vec::new();
+        if let Some(checked) = checked {
+            parts.push(look.dim().apply_to(checked).to_string());
+        }
         for (m, word) in [
             (Mark::Ok, "ok"),
             (Mark::Warn, "to check"),
             (Mark::Fail, "to fix"),
         ] {
             let n = count(m);
-            if n > 0 || m == Mark::Ok {
+            let said = m == Mark::Ok && checked.is_some();
+            if !said && (n > 0 || m == Mark::Ok) {
                 parts.push(m.style(look).apply_to(format!("{n} {word}")).to_string());
             }
         }
@@ -1879,6 +1905,21 @@ mod tests {
         assert_eq!(lines[2], "  \u{2713} config  reads");
         assert_eq!(lines[3], "");
         assert_eq!(lines[4], "  1 ok \u{b7} 1 to fix");
+    }
+
+    #[test]
+    fn findings_count_what_was_checked_and_say_so_when_nothing_was_found() {
+        let tty = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let rows = check_rows();
+        let out = strip(&tty.findings(&rows[..1], "4 documents checked"));
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "  \u{2717} auth  signed out");
+        assert_eq!(lines[1], "          fix  iohr login");
+        assert_eq!(lines[3], "  4 documents checked \u{b7} 1 to fix");
+        assert_eq!(
+            strip(&tty.findings(&[], "4 documents checked")),
+            "  \u{2713} 4 documents checked, nothing found\n"
+        );
     }
 
     #[test]

@@ -106,6 +106,14 @@ not on that list stays plain), keys dimmed, and every line indented two spaces a
 doctor` is. Under `NO_COLOR`, `TERM=dumb`, `--json` or a pipe the bytes are the same as
 before: columns two spaces apart, no indent, no marks.
 
+The other checks are drawn the same way on a terminal: `iohr lab check`, `iohr memory check`,
+`iohr memory drift` (its code part), `iohr sdk check` and `iohr ext verify`. Each problem is a
+row with its mark, where it is, what is wrong, and labelled lines under it (the `rule` that
+found it, the operations a moved profile gained `+` and lost `-`, the `fix`). A memory finding
+is an amber `!`, since it fails only under `--strict`. The last line says what was checked and
+what needs doing (`12 documents checked · 3 to fix`), or a green check with `nothing found`.
+The plain lines, tables and `--json` stay as they are under `NO_COLOR`, `TERM=dumb` or a pipe.
+
 ## `iohr doctor`
 
 Looks at four things and prints one line each: `ok`, or `FAIL` with the fix on the next line.
