@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <!-- .NET 10 is the current LTS (.NET 8 reaches end of support in November 2026). -->
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>@@MODULE@@</RootNamespace>
+    <AssemblyName>@@NAME@@</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The panel page travels beside the program: AppContext.BaseDirectory/panel/index.html. -->
+    <Content Include="../../panel/index.html" Link="panel/index.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
