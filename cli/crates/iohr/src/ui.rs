@@ -460,6 +460,14 @@ impl Paint {
         s
     }
 
+    /// Io's line under an outcome: something to type at the `?` prompt, bold, and what it
+    /// does, quiet. Only for a colour terminal whose shell has the hook; never in plain or
+    /// JSON output, where nothing may be added to the bytes scripts read.
+    #[must_use]
+    pub(crate) fn io_line(self, typed: &str, what: &str) -> String {
+        format!("{}  {}", self.name(typed), self.dim(what))
+    }
+
     /// A list: with colour, the header in the help colour, ids quiet, a `STATUS` or `STATE`
     /// cell as its mark and word, the rows indented as the checks card is. With no colour,
     /// exactly [`table_text`], the bytes scripts read.

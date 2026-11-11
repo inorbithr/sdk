@@ -118,7 +118,7 @@ pub fn report_failure(json: bool, e: &Error) -> ExitCode {
         let text = if json {
             failure_envelope(e)
         } else {
-            failure_text(e, Paint::stderr(json))
+            failure_text(e, Paint::stderr(json), ask_hook())
         };
         let _ = writeln!(std::io::stderr().lock(), "{text}");
     }
@@ -187,12 +187,34 @@ fn failure_envelope(e: &Error) -> String {
     json!({ "code": code, "error": headline, "details": [detail] }).to_string()
 }
 
-fn failure_text(e: &Error, paint: Paint) -> String {
+fn failure_text(e: &Error, paint: Paint, offer: bool) -> String {
     if !paint.color() {
         return format!("iohr: {e}");
     }
     let (headline, notes) = failure_parts(e);
-    paint.failure(&headline, &notes)
+    let drawn = paint.failure(&headline, &notes);
+    if offer {
+        let io = paint.io_line(
+            "? why did that fail",
+            "asks your own agent about this command",
+        );
+        format!("{drawn}\n\n{io}")
+    } else {
+        drawn
+    }
+}
+
+/// Whether `?` works in the shell that ran this: the zsh hook exports `IOHR_ASK_HOOK=1`, and
+/// `INORBIT_ASK=0` turns `?` off for a shell.
+fn ask_hook() -> bool {
+    ask_hook_from(
+        std::env::var("IOHR_ASK_HOOK").ok().as_deref(),
+        std::env::var("INORBIT_ASK").ok().as_deref(),
+    )
+}
+
+fn ask_hook_from(hook: Option<&str>, ask: Option<&str>) -> bool {
+    hook == Some("1") && ask != Some("0")
 }
 
 /// What happened, and the lines under it: an API refusal's own lines, its code and HTTP
@@ -778,7 +800,7 @@ mod tests {
     fn a_failure_keeps_its_plain_line_without_colour() {
         let plain = Paint::from_parts(false, false, None, None);
         assert_eq!(
-            failure_text(&refused(), plain),
+            failure_text(&refused(), plain, true),
             "iohr: the token cannot read this account's keys (forbidden, HTTP 403), \
              request id req_test\nan API token needs the account:read scope"
         );
@@ -788,7 +810,7 @@ mod tests {
         ] {
             let e = Error::Failed("cannot write config.toml\nthe folder is read-only".into());
             assert_eq!(
-                failure_text(&e, paint),
+                failure_text(&e, paint, true),
                 "iohr: cannot write config.toml\nthe folder is read-only"
             );
         }
@@ -797,7 +819,7 @@ mod tests {
     #[test]
     fn a_failure_on_a_colour_terminal_is_drawn_with_its_labels() {
         let color = Paint::from_parts(true, false, None, Some("xterm-256color"));
-        let drawn = failure_text(&refused(), color);
+        let drawn = failure_text(&refused(), color, false);
         assert_ne!(drawn, console::strip_ansi_codes(&drawn));
         assert_eq!(
             console::strip_ansi_codes(&drawn),
@@ -808,7 +830,7 @@ mod tests {
         );
         let e = Error::Failed("cannot write config.toml\nthe folder is read-only".into());
         assert_eq!(
-            console::strip_ansi_codes(&failure_text(&e, color)),
+            console::strip_ansi_codes(&failure_text(&e, color, false)),
             "\u{2717} cannot write config.toml\n  the folder is read-only"
         );
     }
@@ -842,5 +864,21 @@ mod tests {
                 "details": [{ "type": "failure", "notes": ["the folder is read-only"] }],
             })
         );
+    }
+
+    #[test]
+    fn a_drawn_failure_offers_the_ask_prompt_only_where_the_hook_is() {
+        let color = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let e = Error::Failed("cannot write config.toml".into());
+        assert_eq!(
+            console::strip_ansi_codes(&failure_text(&e, color, true)),
+            "\u{2717} cannot write config.toml\n\n\
+             ? why did that fail  asks your own agent about this command"
+        );
+        assert!(ask_hook_from(Some("1"), None));
+        assert!(ask_hook_from(Some("1"), Some("1")));
+        assert!(!ask_hook_from(Some("1"), Some("0")));
+        assert!(!ask_hook_from(None, None));
+        assert!(!ask_hook_from(Some("0"), None));
     }
 }

@@ -185,6 +185,10 @@ the API's error code and HTTP status, the request id, and a hint when `iohr` has
   hint     an API token needs the account:read scope
 ```
 
+In a zsh with the `?` hook (`iohr shell hook zsh`), the block ends with one more line,
+`? why did that fail`, which you can type to ask your own agent about the command. It is
+not shown when `INORBIT_ASK=0`.
+
 With no terminal, `NO_COLOR` or `TERM=dumb` it stays one plain line, `iohr: <message>`,
 with the hint on the line after it. Under `--json` it is one line in the same envelope as a
 usage error: `code` is the API's code for a refused call (else `failed`, `unauthenticated`,
