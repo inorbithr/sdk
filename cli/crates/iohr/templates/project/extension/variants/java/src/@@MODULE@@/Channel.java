@@ -59,8 +59,11 @@ public final class Channel {
         long deadline = System.currentTimeMillis() + WAIT_MS;
         try (SocketChannel ch = SocketChannel.open(StandardProtocolFamily.UNIX)) {
             ch.connect(UnixDomainSocketAddress.of(Path.of(path)));
-            ch.write(ByteBuffer.wrap(head));
-            ch.write(ByteBuffer.wrap(body));
+            // One buffer, written until empty: the channel sees the head and the body together.
+            ByteBuffer request = ByteBuffer.allocate(head.length + body.length).put(head).put(body).flip();
+            while (request.hasRemaining()) {
+                ch.write(request);
+            }
             ch.configureBlocking(false);
             ByteBuffer buf = ByteBuffer.allocate(8192);
             while (raw.size() < MAX_ANSWER) {

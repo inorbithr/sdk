@@ -186,7 +186,6 @@ status = "live"
 needs = ["dart"]
 toolchain = ["dart", "--version"]
 agent_allow = ["dart pub get", "dart analyze", "dart run", "dart format", "dart compile exe", "iohr ext lint"]
-smoke = "test"
 build = ["dart", "pub", "get", "--enforce-lockfile"]
 run = ["dart", "run", "bin/@@MODULE@@.dart"]
 test = ["dart", "run", "test/selftest.dart"]
@@ -209,6 +208,15 @@ BUILD = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cd
           dart compile exe "bin/${NAME//-/_}.dart" -o "dist/bin/$DIR/$NAME"
           cp panel/index.html "dist/bin/$DIR/panel/index.html"'''
 CI_TEST = "dart pub get --enforce-lockfile && dart analyze --fatal-infos && dart run test/selftest.dart"
+RELEASE_STEPS = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: "3.9"
+      - name: Build (locked, native executable)
+        run: |
+          dart pub get --enforce-lockfile
+          mkdir -p dist
+          dart compile exe bin/@@MODULE@@.dart -o "dist/@@NAME@@-linux-amd64"'''
+DEPENDABOT_ECOSYSTEM = "pub"
 SOURCE = "bin/ and lib/"
 NEEDS = ''
 IGNORE = ".dart_tool/"
@@ -235,7 +243,6 @@ status = "live"
 needs = ["javac", "java"]
 toolchain = ["java", "-version"]
 agent_allow = ["javac", "java", "iohr ext lint"]
-smoke = "test"
 build = ["javac", "--release", "17", "-Xlint:all", "-d", "$CACHE/classes", "-sourcepath", "src", "tests/@@MODULE@@/SelfTest.java", "src/@@MODULE@@/Main.java"]
 run = ["java", "-cp", "$CACHE/classes", "@@MODULE@@.Main"]
 test = ["java", "-cp", "$CACHE/classes", "@@MODULE@@.SelfTest"]
@@ -262,6 +269,16 @@ BUILD = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74
             chmod 0755 "$d/$NAME"
           done'''
 CI_TEST = '''mkdir -p "$RUNNER_TEMP/classes" && javac --release 17 -Xlint:all -d "$RUNNER_TEMP/classes" -sourcepath src "tests/${NAME//-/_}/SelfTest.java" "src/${NAME//-/_}/Main.java" && java -cp "$RUNNER_TEMP/classes" "${NAME//-/_}.SelfTest"'''
+RELEASE_STEPS = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build (one jar)
+        run: |
+          mkdir -p classes dist
+          javac --release 17 -Xlint:all -d classes -sourcepath src src/@@MODULE@@/Main.java
+          jar --create --file "dist/@@NAME@@.jar" --main-class @@MODULE@@.Main -C classes .'''
+DEPENDABOT_ECOSYSTEM = "maven"
 SOURCE = "src/@@MODULE@@/"
 NEEDS = '"java"'
 IGNORE = "*.class"
@@ -289,7 +306,6 @@ status = "live"
 needs = ["dotnet"]
 toolchain = ["dotnet", "--version"]
 agent_allow = ["dotnet build", "dotnet run", "dotnet publish", "iohr ext lint"]
-smoke = "test"
 run = ["dotnet", "run", "--project", "src/@@MODULE@@"]
 test = ["dotnet", "run", "--project", "tests/@@MODULE@@.SelfTest"]
 [variants.env]
@@ -308,6 +324,12 @@ BUILD = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67
           DIR: ${{ matrix.dir }}
         run: dotnet publish "src/${NAME//-/_}" --configuration Release --runtime osx-arm64 --no-self-contained --output "dist/bin/$DIR"'''
 CI_TEST = "dotnet run --project tests/@@MODULE@@.SelfTest"
+RELEASE_STEPS = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"
+      - name: Publish
+        run: dotnet publish src/@@MODULE@@ --configuration Release --output dist'''
+DEPENDABOT_ECOSYSTEM = "nuget"
 SOURCE = "src/@@MODULE@@/"
 NEEDS = '"dotnet"'
 IGNORE = "bin/\nobj/"
@@ -335,7 +357,6 @@ status = "live"
 needs = ["swift"]
 toolchain = ["swift", "--version"]
 agent_allow = ["swift build", "swift test", "swift run", "iohr ext lint"]
-smoke = "test"
 build = ["swift", "build", "--build-tests", "--scratch-path", "$CACHE/swift"]
 run = ["swift", "run", "--scratch-path", "$CACHE/swift", "@@NAME@@"]
 test = ["swift", "test", "--scratch-path", "$CACHE/swift"]
@@ -356,6 +377,15 @@ BUILD = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48fee
           install -m 0755 ".build/release/$NAME" "dist/bin/$DIR/$NAME"
           cp panel/index.html "dist/bin/$DIR/panel/index.html"'''
 CI_TEST = "swift test"
+RELEASE_STEPS = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.1"
+      - name: Build (release)
+        run: |
+          swift build --configuration release
+          mkdir -p dist
+          install -m 0755 ".build/release/@@NAME@@" "dist/@@NAME@@-linux-amd64"'''
+DEPENDABOT_ECOSYSTEM = "swift"
 SOURCE = "Sources/"
 NEEDS = ''
 IGNORE = ".build/\n.swiftpm/"

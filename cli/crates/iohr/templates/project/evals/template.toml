@@ -193,7 +193,7 @@ RELEASE_STEPS = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac3178
           mkdir -p classes dist
           javac --release 17 -Xlint:all -d classes -sourcepath src src/@@MODULE@@/Main.java
           jar --create --file "dist/@@NAME@@.jar" --main-class @@MODULE@@.Main -C classes .'''
-DEPENDABOT_ECOSYSTEM = "github-actions"
+DEPENDABOT_ECOSYSTEM = "maven"
 
 # NET 10 is an LTS release: https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core ; `dotnet test --project` with the Microsoft.Testing.Platform runner: https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-with-dotnet-test ; locked restore: https://learn.microsoft.com/en-us/nuget/consume-packages/package-references-in-project-files#locking-dependencies. The packages restore once from nuget.org (the lock files pin them); after that the suite runs offline.
 [[variants]]

@@ -81,7 +81,10 @@ public final class SelfTest {
                 for (int i = 0; i < 2; i++) {
                     try (SocketChannel c = server.accept()) {
                         ByteBuffer in = ByteBuffer.allocate(4096);
-                        c.read(in);
+                        // Read until the whole request (head and JSON body) has arrived.
+                        while (c.read(in) >= 0 && !new String(in.array(), 0, in.position(), StandardCharsets.UTF_8).contains("]}")) {
+                            // keep reading
+                        }
                         boolean ok = new String(in.array(), 0, in.position(), StandardCharsets.UTF_8).contains("identity:read");
                         String body = ok
                                 ? "{\"access_token\":\"t\",\"expires_at\":\"x\"}"
