@@ -248,7 +248,7 @@ export function App() {
     { key: "planner", title: "Planner" },
     { key: "canvas", title: "Canvas" },
     { key: "sensors", title: "Sensors" },
-    { key: "workload", title: "Workload" },
+    { key: "workload", title: "3D" },
     { key: "settings", title: "Settings" },
     ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
   ];
@@ -365,7 +365,7 @@ export function App() {
                 : inCanvas
                   ? "Canvas"
                   : inWorkload
-                    ? "Workload"
+                    ? "3D"
                     : chosen?.title}
           </span>
         </>
@@ -484,7 +484,7 @@ export function App() {
         <NavItem rail={rail} label="Planner" icon={<ListChecks />} active={inPlanner} onClick={() => goTo("planner")} />
         <NavItem rail={rail} label="Canvas" icon={<PenTool />} active={inCanvas} onClick={() => goTo("canvas")} />
         <NavItem rail={rail} label="Sensors" icon={<Radar />} active={inSensors} onClick={() => goTo("sensors")} />
-        <NavItem rail={rail} label="Workload" icon={<Atom />} active={inWorkload} onClick={() => goTo("workload")} />
+        <NavItem rail={rail} label="3D" icon={<Atom />} active={inWorkload} onClick={() => goTo("workload")} />
       </ul>
       <section aria-label="Extensions" className={cn("flex flex-col gap-0.5", rail && "items-center")}>
         {!rail && <h2 className="text-muted-foreground px-2 pb-0.5 text-[11px] font-medium">Extensions</h2>}
@@ -577,7 +577,7 @@ export function App() {
           ) : inPlanner ? (
             <PlannerPage />
           ) : inWorkload ? (
-            <Suspense fallback={<p className="text-muted-foreground text-sm">Loading the workload…</p>}>
+            <Suspense fallback={<p className="text-muted-foreground text-sm">Loading the 3D view…</p>}>
               <Workload />
             </Suspense>
           ) : inSettings ? (

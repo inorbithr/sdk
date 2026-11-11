@@ -5,6 +5,6 @@
   { "id": "go-decisions", "label": "Go to Decisions", "seq": ["g", "d"], "page": "decisions", "mac": "CmdOrCtrl+7" },
   { "id": "go-planner", "label": "Go to Planner", "seq": ["g", "p"], "page": "planner" },
   { "id": "go-canvas", "label": "Go to Canvas", "seq": ["g", "c"], "page": "canvas" },
-  { "id": "go-workload", "label": "Go to Workload", "seq": ["g", "w"], "page": "workload" },
+  { "id": "go-workload", "label": "Go to 3D", "seq": ["g", "w"], "page": "workload" },
   { "id": "go-sensors", "label": "Go to Sensors", "seq": ["g", "s"], "page": "sensors" }
 ]

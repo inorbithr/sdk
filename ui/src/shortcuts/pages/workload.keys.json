@@ -1,8 +1,8 @@
 {
   "scope": "workload",
-  "title": "Workload",
+  "title": "3D",
   "page": "workload",
-  "where": "On Workload",
+  "where": "On 3D",
   "rows": [
     { "id": "workload-view-orbit", "label": "Orbit view", "accel": "1" },
     { "id": "workload-view-room", "label": "Room view", "accel": "2" },
