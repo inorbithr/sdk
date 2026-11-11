@@ -671,8 +671,20 @@ enum Kind {
     Head,
 }
 
+/// Text with no terminal escapes of its own: whole escape sequences and the orphaned tails of
+/// cut ones (`;252m`, `167;139;250m`, which a model copies from a screen it read) are dropped,
+/// so words and widths are measured on what shows and a stray fragment never reaches a card.
+fn scrub(text: &str) -> std::borrow::Cow<'_, str> {
+    static CUT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\x1b\[[0-9;:]*[A-Za-z]|\x1b|(?:\b\d{1,3})?(?:;\d{1,3}){1,4}m\b")
+            .unwrap_or_else(|_| unreachable!("a fixed pattern"))
+    });
+    CUT.replace_all(text, "")
+}
+
 /// Inline `code` and **bold**, the marks dropped; everything else is text.
 fn spans(text: &str) -> Vec<(Kind, String)> {
+    let text = &*scrub(text);
     let mut out: Vec<(Kind, String)> = Vec::new();
     let mut rest = text;
     while !rest.is_empty() {
@@ -825,7 +837,7 @@ fn wrap(spans: &[(Kind, String)], width: usize, look: Look, base: Kind) -> Vec<S
 pub(crate) fn body(text: &str, width: usize, look: Look) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut last: Option<&Block> = None;
-    let all = blocks(text);
+    let all = blocks(&scrub(text));
     for b in &all {
         // Items of one list and commands of one fence sit together; other blocks get air.
         let together = matches!(
@@ -1385,5 +1397,53 @@ mod tests {
         assert!(plain.iter().all(|l| !l.contains('\u{1b}')), "{plain:?}");
         let fancy: Vec<String> = body(SUMMARY, 50, FANCY).iter().map(|l| strip(l)).collect();
         assert_eq!(plain, fancy);
+    }
+
+    /// Every line of a card, through a real terminal model: no stray `NN;NNm` text and every
+    /// word still there, at several widths and both looks.
+    #[test]
+    fn styled_wrapped_text_never_leaks_an_escape_into_the_screen() {
+        let answer = "Use **reqwest and rustls** for `iohr ask --help` calls; the `;252m` and 167;139;250m \
+            fragments a model copies from a screen, plus \x1b[38;2;167;139;250mraw\x1b[0m escapes, must not show. \
+            A long `command --with --many --flags --that --wrap --across --lines` ends it.";
+        let words = [
+            "reqwest",
+            "and",
+            "rustls",
+            "iohr",
+            "ask",
+            "--help",
+            "fragments",
+            "wrap",
+            "ends",
+        ];
+        let stray = regex::Regex::new(r"\d;\d*m|;\d+m").unwrap();
+        for look in [
+            Look {
+                fancy: true,
+                truecolor: true,
+            },
+            Look {
+                fancy: true,
+                truecolor: false,
+            },
+        ] {
+            for cols in [40usize, 60, 80] {
+                let c = Card {
+                    body: Body::Answer(answer),
+                    full: false,
+                    hint: Some("`iohr ask --help` for flags."),
+                    ..card(answer)
+                };
+                let out = render(&c, cols, look).replace('\n', "\r\n");
+                let mut p = vt100::Parser::new(60, u16::try_from(cols).unwrap(), 0);
+                p.process(out.as_bytes());
+                let shown = p.screen().contents();
+                assert!(!stray.is_match(&shown), "{cols}: {shown}");
+                for w in words {
+                    assert!(shown.contains(w), "{w} lost at {cols}: {shown}");
+                }
+            }
+        }
     }
 }
