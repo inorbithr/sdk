@@ -16,13 +16,16 @@ import Testing
 private final class BundleToken {}
 
 /// The built server: the test target depends on it, so SwiftPM builds it beside the test bundle.
+/// On macOS the bundle is `<name>PackageTests.xctest` inside the build folder; on Linux the
+/// bundle URL is the build folder itself. So look in the bundle's folder and in its parent.
 private func serverURL() throws -> URL {
-    let beside = Bundle(for: BundleToken.self).bundleURL.deletingLastPathComponent()
-    let candidate = beside.appendingPathComponent("@@NAME@@")
-    guard FileManager.default.isExecutableFile(atPath: candidate.path) else {
-        throw MCPError.internalError("the server binary is not at \(candidate.path); run `swift build` first")
+    let bundle = Bundle(for: BundleToken.self).bundleURL
+    let folders = [bundle.deletingLastPathComponent(), bundle]
+    for folder in folders {
+        let candidate = folder.appendingPathComponent("@@NAME@@")
+        if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }
     }
-    return candidate
+    throw MCPError.internalError("the server binary is not beside \(bundle.path); run `swift build` first")
 }
 
 private struct Running {
