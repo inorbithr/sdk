@@ -102,6 +102,10 @@ only data.
 ## `iohr doctor`
 
 Looks at four things and prints one line each: `ok`, or `FAIL` with the fix on the next line.
+On a terminal each line starts with a coloured mark (a green check or a red cross), the fix
+sits under the line it fixes, a passing line is dimmed, and a count closes the list
+(`3 ok · 1 to fix`). Under `NO_COLOR`, `TERM=dumb`, `--json` or a pipe the output is the plain
+lines above, unchanged, so scripts read the same text.
 
 | Check | Fails when | Fix |
 |---|---|---|

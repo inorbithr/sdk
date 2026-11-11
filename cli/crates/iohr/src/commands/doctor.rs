@@ -8,6 +8,7 @@ use crate::context::{self, Ctx};
 use crate::error::Error;
 use crate::health::{self, Finding, Fixed, Probes};
 use crate::output::Out;
+use crate::ui::{CheckRow, Mark, Paint};
 
 pub(crate) async fn run(g: &Global, env: &Env, fix: bool, out: Out) -> Result<(), Error> {
     let dir = context::config_dir(g)?;
@@ -34,7 +35,13 @@ pub(crate) async fn run(g: &Global, env: &Env, fix: bool, out: Out) -> Result<()
             })).collect::<Vec<_>>(),
         }));
     } else {
-        Out::raw(text(&findings, &fixed).as_bytes());
+        let paint = Paint::stdout(out.json);
+        let shown = if paint.color() {
+            paint.checks(&rows(&findings, &fixed))
+        } else {
+            text(&findings, &fixed)
+        };
+        Out::raw(shown.as_bytes());
     }
     if findings.iter().any(Finding::failing) {
         return Err(Error::Findings(format!(
@@ -53,6 +60,38 @@ async fn signed_in(g: &Global, env: &Env) -> Option<bool> {
         Err(Error::NotSignedIn(_)) => Some(false),
         Err(_) => None,
     }
+}
+
+/// The findings as rows for a person: a failing check gets its fix under it, a check the safe
+/// fix mended says so. The same facts as [`text`], which scripts read.
+fn rows(findings: &[Finding], fixed: &[(&'static str, Fixed)]) -> Vec<CheckRow> {
+    findings
+        .iter()
+        .map(|f| {
+            let mut notes = Vec::new();
+            if f.failing() {
+                if fixed.contains(&(f.id, Fixed::Still)) {
+                    notes.push(("tried", "the safe fix; still failing".to_owned()));
+                } else {
+                    if let Some(o) = &f.offer {
+                        notes.push(("fix", o.clone()));
+                    }
+                    if f.safe.is_some() {
+                        let label = if notes.is_empty() { "fix" } else { "or" };
+                        notes.push((label, "iohr doctor --fix".to_owned()));
+                    }
+                }
+            } else if fixed.contains(&(f.id, Fixed::Yes)) {
+                notes.push(("fixed", "by the safe fix, just now".to_owned()));
+            }
+            CheckRow {
+                mark: if f.failing() { Mark::Fail } else { Mark::Ok },
+                id: f.id.to_owned(),
+                what: f.what.clone(),
+                notes,
+            }
+        })
+        .collect()
 }
 
 fn text(findings: &[Finding], fixed: &[(&'static str, Fixed)]) -> String {
@@ -81,4 +120,49 @@ fn text(findings: &[Finding], fixed: &[(&'static str, Fixed)]) -> String {
         }
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Finding, Fixed, Mark, rows};
+    use crate::health::SafeFix;
+
+    fn finding(id: &'static str, status: &'static str, offer: Option<&str>, safe: bool) -> Finding {
+        Finding {
+            id,
+            status,
+            what: format!("{id} is {status}"),
+            offer: offer.map(str::to_owned),
+            safe: safe.then_some(SafeFix::StartBridge),
+        }
+    }
+
+    #[test]
+    fn a_row_carries_the_fix_the_safe_fix_or_what_the_safe_fix_did() {
+        let found = [
+            finding("auth", "signed_out", Some("iohr login"), false),
+            finding("bridge", "down", Some("open the app"), true),
+            finding("disk", "low", None, true),
+            finding("config", "ok", None, false),
+        ];
+        let r = rows(&found, &[("disk", Fixed::Still), ("config", Fixed::Yes)]);
+        assert_eq!(r[0].mark, Mark::Fail);
+        assert_eq!(r[0].notes, vec![("fix", "iohr login".to_owned())]);
+        assert_eq!(
+            r[1].notes,
+            vec![
+                ("fix", "open the app".to_owned()),
+                ("or", "iohr doctor --fix".to_owned())
+            ]
+        );
+        assert_eq!(
+            r[2].notes,
+            vec![("tried", "the safe fix; still failing".to_owned())]
+        );
+        assert_eq!(r[3].mark, Mark::Ok);
+        assert_eq!(
+            r[3].notes,
+            vec![("fixed", "by the safe fix, just now".to_owned())]
+        );
+    }
 }

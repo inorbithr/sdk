@@ -39,6 +39,7 @@ pub(crate) mod palette {
     pub(crate) const CYAN: Rgb = (125, 211, 252);
     pub(crate) const DIM: Rgb = (139, 144, 163);
     pub(crate) const AMBER: Rgb = (251, 191, 36);
+    pub(crate) const RED: Rgb = (248, 113, 113);
 }
 
 /// The xterm 256-colour index nearest to `rgb`: the 6x6x6 cube or the grey ramp, whichever
@@ -135,6 +136,9 @@ impl Look {
     }
     pub(crate) fn amber(self) -> Style {
         self.style(palette::AMBER, 214)
+    }
+    pub(crate) fn red(self) -> Style {
+        self.style(palette::RED, 203)
     }
     fn badge(self) -> Style {
         let s = Style::new().force_styling(self.fancy).black().bold();

@@ -113,6 +113,12 @@ impl Paint {
         }
     }
 
+    /// Whether output is coloured: the drawn look is for a person, plain lines for the rest.
+    #[must_use]
+    pub(crate) const fn color(self) -> bool {
+        self.color
+    }
+
     /// Whether a person is reading stdout (next-step hints are printed only then).
     #[must_use]
     pub(crate) const fn tty(self) -> bool {
@@ -295,6 +301,101 @@ impl Mark {
             "failed" => Self::Fail,
             _ => Self::Warn,
         }
+    }
+
+    /// The glyph a person reads at a glance: a check, a bang, a cross.
+    #[must_use]
+    pub(crate) const fn glyph(self) -> &'static str {
+        match self {
+            Self::Ok => CHECK,
+            Self::Warn => BANG,
+            Self::Fail => CROSS,
+        }
+    }
+
+    /// Its colour from the shared palette: green, amber, red.
+    fn style(self, look: Look) -> console::Style {
+        match self {
+            Self::Ok => look.green(),
+            Self::Warn => look.amber(),
+            Self::Fail => look.red(),
+        }
+    }
+}
+
+/// One row of a list of checks (`iohr doctor`): how it ended, its name, what was found, and
+/// the lines under it as a label and a text (`fix`, `or`, `fixed`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CheckRow {
+    pub(crate) mark: Mark,
+    pub(crate) id: String,
+    pub(crate) what: String,
+    pub(crate) notes: Vec<(&'static str, String)>,
+}
+
+impl Paint {
+    /// `text` in a mark's colour, or as it is with no colour.
+    #[must_use]
+    pub(crate) fn tone(self, mark: Mark, text: &str) -> String {
+        if self.color {
+            mark.style(Look::detect(true)).apply_to(text).to_string()
+        } else {
+            text.to_owned()
+        }
+    }
+
+    /// A list of checks drawn for a person: each row's mark in its colour, the names in one
+    /// column, a passing finding dimmed so the problems stand out, the lines under a row
+    /// indented under its text, then a count (`3 ok · 1 to fix`). No box, no rule: the
+    /// colours and the column carry it. Commands call this only with colour on; their plain
+    /// lines stay what scripts read.
+    #[must_use]
+    pub(crate) fn checks(self, rows: &[CheckRow]) -> String {
+        use std::fmt::Write as _;
+        let look = Look::detect(self.color);
+        let width = rows.iter().map(|r| r.id.chars().count()).max().unwrap_or(0);
+        let label_width = rows
+            .iter()
+            .flat_map(|r| r.notes.iter().map(|(l, _)| l.chars().count()))
+            .max()
+            .unwrap_or(0);
+        let mut s = String::new();
+        for r in rows {
+            let what = if r.mark == Mark::Ok {
+                look.dim().apply_to(r.what.as_str()).to_string()
+            } else {
+                r.what.clone()
+            };
+            let _ = writeln!(
+                s,
+                "  {} {:<width$}  {what}",
+                r.mark.style(look).bold().apply_to(r.mark.glyph()),
+                r.id,
+            );
+            for (label, text) in &r.notes {
+                let _ = writeln!(
+                    s,
+                    "    {:width$}  {}  {text}",
+                    "",
+                    look.dim().apply_to(format!("{label:<label_width$}")),
+                );
+            }
+        }
+        let count = |m: Mark| rows.iter().filter(|r| r.mark == m).count();
+        let mut parts = Vec::new();
+        for (m, word) in [
+            (Mark::Ok, "ok"),
+            (Mark::Warn, "to check"),
+            (Mark::Fail, "to fix"),
+        ] {
+            let n = count(m);
+            if n > 0 || m == Mark::Ok {
+                parts.push(m.style(look).apply_to(format!("{n} {word}")).to_string());
+            }
+        }
+        let sep = look.dim().apply_to(" \u{b7} ").to_string();
+        let _ = writeln!(s, "\n  {}", parts.join(&sep));
+        s
     }
 }
 
@@ -1615,6 +1716,51 @@ mod tests {
         assert_eq!(strip(&Marks.active_symbol()), "\u{2713}");
         assert_eq!(strip(&Marks.warning_symbol()), "!");
         assert_eq!(strip(&Marks.error_symbol()), "\u{2717}");
+    }
+
+    fn check_rows() -> Vec<super::CheckRow> {
+        use super::{CheckRow, Mark};
+        vec![
+            CheckRow {
+                mark: Mark::Fail,
+                id: "auth".into(),
+                what: "signed out".into(),
+                notes: vec![("fix", "iohr login".into())],
+            },
+            CheckRow {
+                mark: Mark::Ok,
+                id: "config".into(),
+                what: "reads".into(),
+                notes: vec![],
+            },
+        ]
+    }
+
+    #[test]
+    fn checks_line_up_names_hang_the_fix_under_its_row_and_count_what_needs_doing() {
+        let out =
+            Paint::from_parts(true, false, None, Some("xterm-256color")).checks(&check_rows());
+        assert!(out.contains('\u{1b}'), "a person gets colour: {out:?}");
+        let lines: Vec<String> = strip(&out).lines().map(str::to_owned).collect();
+        assert_eq!(lines[0], "  \u{2717} auth    signed out");
+        assert_eq!(lines[1], "            fix  iohr login");
+        assert_eq!(lines[2], "  \u{2713} config  reads");
+        assert_eq!(lines[3], "");
+        assert_eq!(lines[4], "  1 ok \u{b7} 1 to fix");
+    }
+
+    #[test]
+    fn a_tone_is_colour_for_a_person_and_the_same_text_for_a_pipe() {
+        use super::Mark;
+        let tty = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let toned = tty.tone(Mark::Fail, "down");
+        assert_ne!(toned, "down");
+        assert_eq!(strip(&toned), "down");
+        assert_eq!(Paint::plain().tone(Mark::Fail, "down"), "down");
+        assert_eq!(
+            Paint::from_parts(true, false, Some("1"), None).tone(Mark::Ok, "up"),
+            "up"
+        );
     }
 
     fn strip(s: &str) -> String {
