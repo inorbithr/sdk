@@ -1,7 +1,9 @@
 # The agent template as data (PRD 0088.1, ADR 0221): a small agent loop with the three limits a
 # team asks about first: a budget (steps, tool calls, tokens), an allow-list of tools and an
-# approval step for any tool that changes something. Python on uv and TypeScript on Node, each
-# on its standard library alone. The model is a scripted stub, labelled as one, so the project
+# approval step for any tool that changes something. One variant for each language the SDK
+# ships (Python, TypeScript, Go, Rust, Java, C#, Swift, Dart), each on its standard library alone:
+# an agent loop needs no package, so there is no agent SDK to pin and no dependency to audit
+# (the lockfiles that exist hold the test tools only). The model is a scripted stub, labelled as one, so the project
 # runs and tests offline and holds no API key; swap in your provider behind `Model.next`. The
 # enterprise floor (CI, signed and attested release, SBOM, dependency updates, secret scan)
 # comes from `floor`.
@@ -66,3 +68,154 @@ LAYOUT = '''- `src/agent.ts`: the loop, the budget and the stop reasons. Node ru
 - `src/main.ts`: runs one task and prints the outcome.
 - `tests/agent.test.ts`: the passes-on-init test.
 - `package-lock.json`: the lockfile.'''
+
+# Go: the standard library alone (`go.mod` has no requirement), module go 1.26.
+[[variants]]
+id = "go"
+label = "Go 1.26 or newer (standard library only)"
+status = "live"
+needs = ["go"]
+toolchain = ["go", "version"]
+agent_allow = ["go build", "go test", "go vet", "go mod tidy"]
+smoke = "test"
+test = ["go", "test", "./..."]
+[variants.vars]
+SOURCE = "agent.go, tools.go, model.go, main.go, agent_test.go"
+IGNORE = "/@@NAME@@"
+RUN_TEST = "`go test ./...`"
+README_TEST = "go vet ./... && go test ./..."
+RUN = "go run ."
+TOOLCHAIN_MINOR = "1.26"
+LAYOUT = '''- `agent.go`: the loop, the budget and the stop reasons.
+- `tools.go`: your tools, the allow-list and which tools need approval.
+- `model.go`: the scripted stub model; replace it with your provider.
+- `main.go`: runs one task and prints the outcome.
+- `agent_test.go`: the passes-on-init test.
+- `go.mod`: the module (no dependency).'''
+
+# Rust: the standard library alone, edition 2024, `unwrap` denied by a clippy lint. `Cargo.lock`
+# is committed so `--locked` builds are reproducible.
+[[variants]]
+id = "rust"
+label = "Rust 1.88 or newer (standard library only)"
+status = "live"
+needs = ["cargo"]
+toolchain = ["rustc", "--version"]
+agent_allow = ["cargo build", "cargo test", "cargo fmt", "cargo clippy"]
+smoke = "test"
+test = ["cargo", "test", "--quiet", "--locked"]
+[variants.vars]
+SOURCE = "src/, tests in tests/"
+IGNORE = "target/"
+RUN_TEST = "`cargo test --locked`"
+README_TEST = "cargo test --locked"
+RUN = "cargo run --quiet"
+TOOLCHAIN_MINOR = "1.88"
+LAYOUT = '''- `src/lib.rs`: the loop, the budget and the stop reasons.
+- `src/tools.rs`: your tools, the allow-list and which tools need approval.
+- `src/model.rs`: the scripted stub model; replace it with your provider.
+- `src/main.rs`: runs one task and prints the outcome.
+- `tests/agent.rs`: the passes-on-init test.
+- `Cargo.lock`: the lockfile (no dependency).'''
+
+# Java: the JDK alone at run time; JUnit 6.1.3 (junit.org, Maven Central
+# org.junit.jupiter:junit-jupiter) pinned exactly for the test, run by Maven's surefire.
+[[variants]]
+id = "java"
+label = "Java 17 or newer with Maven (JDK only, JUnit for the test)"
+status = "live"
+needs = ["mvn", "java"]
+toolchain = ["java", "-version"]
+agent_allow = ["mvn test", "mvn package", "mvn -q test", "mvn verify"]
+smoke = "test"
+test = ["mvn", "--batch-mode", "--no-transfer-progress", "--quiet", "test"]
+[variants.vars]
+SOURCE = "src/main/java/, tests in src/test/java/"
+IGNORE = "target/"
+RUN_TEST = "`mvn test`"
+README_TEST = "mvn test"
+RUN = "mvn -q compile exec:java"
+TOOLCHAIN_MINOR = "17"
+LAYOUT = '''- `src/main/java/app/Agent.java`: the loop, the budget and the stop reasons.
+- `src/main/java/app/Tools.java`: your tools, the allow-list and which tools need approval.
+- `src/main/java/app/ScriptedModel.java`: the scripted stub model; replace it with your provider.
+- `src/main/java/app/Main.java`: runs one task and prints the outcome.
+- `src/test/java/app/AgentTest.java`: the passes-on-init test.
+- `pom.xml`: the build, with the test library pinned to an exact version.'''
+
+# C#: the .NET 10 SDK alone at run time; the test uses xunit 2.9.3 and xunit.runner.visualstudio
+# 3.1.5 (the same as the mcp-server variant), pinned exactly, with NuGet lock files committed
+# (`packages.lock.json`).
+[[variants]]
+id = "csharp"
+label = ".NET 10 SDK (base class library only)"
+status = "live"
+needs = ["dotnet"]
+toolchain = ["dotnet", "--version"]
+agent_allow = ["dotnet test", "dotnet build", "dotnet run", "dotnet restore"]
+smoke = "test"
+test = ["dotnet", "test", "--nologo", "--verbosity", "quiet"]
+[variants.vars]
+SOURCE = "src/App/, tests in tests/App.Tests/"
+IGNORE = "bin/\nobj/"
+RUN_TEST = "`dotnet test`"
+README_TEST = "dotnet test"
+RUN = "dotnet run --project src/App"
+TOOLCHAIN_MINOR = "10.0"
+LAYOUT = '''- `src/App/Agent.cs`: the loop, the budget and the stop reasons.
+- `src/App/Tools.cs`: your tools, the allow-list and which tools need approval.
+- `src/App/ScriptedModel.cs`: the scripted stub model; replace it with your provider.
+- `src/App/Program.cs`: runs one task and prints the outcome.
+- `tests/App.Tests/AgentTests.cs`: the passes-on-init test.
+- `App.slnx`: the solution, so `dotnet test` at the root finds both projects.'''
+
+# Swift: the standard library and Foundation alone; the test uses swift-testing, which ships with
+# the toolchain (Swift 6.1 or newer), so `Package.swift` has no dependency and there is no
+# `Package.resolved`.
+[[variants]]
+id = "swift"
+label = "Swift 6.1 or newer on SwiftPM (standard library only)"
+status = "live"
+needs = ["swift"]
+toolchain = ["swift", "--version"]
+agent_allow = ["swift test", "swift build", "swift run", "swift package resolve"]
+smoke = "test"
+test = ["swift", "test"]
+[variants.vars]
+SOURCE = "Sources/, tests in Tests/AppTests/"
+IGNORE = ".build/\n.swiftpm/"
+RUN_TEST = "`swift test`"
+README_TEST = "swift test"
+RUN = "swift run @@NAME@@"
+TOOLCHAIN_MINOR = "6.1"
+LAYOUT = '''- `Sources/AgentKit/Agent.swift`: the loop, the budget and the stop reasons.
+- `Sources/AgentKit/Tools.swift`: your tools, the allow-list and which tools need approval.
+- `Sources/AgentKit/ScriptedModel.swift`: the scripted stub model; replace it with your provider.
+- `Sources/App/main.swift`: runs one task and prints the outcome.
+- `Tests/AppTests/AgentTests.swift`: the passes-on-init test.
+- `Package.swift`: the package (no dependency).'''
+
+# Dart: the Dart SDK alone at run time; `test` 1.25.15 (pub.dev/packages/test, the Dart team's
+# test runner) pinned exactly for the test, `pubspec.lock` committed.
+[[variants]]
+id = "dart"
+label = "Dart 3.7 or newer on pub (standard library only)"
+status = "live"
+needs = ["dart"]
+toolchain = ["dart", "--version"]
+agent_allow = ["dart test", "dart run", "dart pub get", "dart analyze", "dart format"]
+smoke = "test"
+test = ["dart", "test"]
+[variants.vars]
+SOURCE = "lib/, bin/, tests in test/"
+IGNORE = ".dart_tool/\nbuild/"
+RUN_TEST = "`dart test`"
+README_TEST = "dart test"
+RUN = "dart run bin/main.dart"
+TOOLCHAIN_MINOR = "3.7"
+LAYOUT = '''- `lib/agent.dart`: the loop, the budget and the stop reasons.
+- `lib/tools.dart`: your tools, the allow-list and which tools need approval.
+- `lib/scripted_model.dart`: the scripted stub model; replace it with your provider.
+- `bin/main.dart`: runs one task and prints the outcome.
+- `test/agent_test.dart`: the passes-on-init test.
+- `pubspec.yaml`, `pubspec.lock`: the test library pinned to an exact version.'''

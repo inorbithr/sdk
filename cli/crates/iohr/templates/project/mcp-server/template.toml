@@ -171,7 +171,8 @@ TOOLCHAIN_MINOR = "10.0"
 LAYOUT = '''- `src/App/Tools.cs`: one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
 - `src/App/Program.cs`: starts the server over stdio, the way a host does.
 - `tests/App.Tests/ServerTests.cs`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
-- `src/App/App.csproj`: the SDK pinned to an exact version (`packages.lock.json` beside it).'''
+- `src/App/App.csproj`: the SDK pinned to an exact version (`packages.lock.json` beside it).
+- `App.slnx`: the solution, so `dotnet test` at the root finds both projects.'''
 
 # Swift: the official Swift SDK, github.com/modelcontextprotocol/swift-sdk release 0.12.1 (the
 # modelcontextprotocol organisation's repository; Swift 6.0+, package tools 6.1; checked
