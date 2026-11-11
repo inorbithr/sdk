@@ -7,6 +7,8 @@ extend-ignore-re = ["00f067aa0ba902b7", "\\[[0-9a-f]{7,12}\\]\\(https://github\\
 hr = "hr"
 # The gzip crate (flate2).
 flate = "flate"
+# Comment-thread id prefix (thr_1) in the canvas tests.
+thr = "thr"
 
 [files]
 extend-exclude = ["LICENSE", "CODE_OF_CONDUCT.md", "spec/*.json", "**/generated/**", "**/CHANGELOG.md", "cli/crates/iohr/tests/data/host-action/vectors/", "cli/crates/iohr/tests/data/ask-claude.jsonl"]

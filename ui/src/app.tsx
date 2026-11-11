@@ -1,15 +1,21 @@
 import {
   ArrowLeftRight,
   Atom,
+  FileText,
   House,
   LayoutGrid,
+  ListChecks,
   Orbit,
   PanelRight,
+  PenTool,
   Puzzle,
+  Radar,
   Settings as SettingsIcon,
   Wrench,
 } from "lucide-react";
 import { lazy, type MouseEvent, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
+import { CANVAS, canvasRoute } from "./canvas/canvas-route.ts";
+import { Decisions } from "./decisions/page.tsx";
 import {
   applyLayout,
   applySpan,
@@ -37,6 +43,7 @@ import { Home } from "./home.tsx";
 import { accountMenu, accountName } from "./lib/accounts-core.ts";
 import { useAccounts } from "./lib/accounts-store.ts";
 import { updateArrangement as updateArr, useArrangement } from "./lib/arrange-store.ts";
+import { DECISIONS, decisionsRoute } from "./lib/decisions-route.ts";
 import { useDock } from "./lib/dock-store.ts";
 import { type Listing, loadExtensions, type Panel } from "./lib/extensions.ts";
 import { entryOf, isDown, whyClosed } from "./lib/features-core.ts";
@@ -47,6 +54,8 @@ import { add as addOrbit, HOME, remove as removeOrbit } from "./lib/orbits-core.
 import { updateOrbits, useOrbits } from "./lib/orbits-store.ts";
 import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
+import { PLANNER, plannerRoute } from "./lib/planner-route.ts";
+import { SENSORS, sensorsRoute } from "./lib/sensors-view.ts";
 import { useSession } from "./lib/session-store.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
 import { useRead } from "./lib/settings-data.ts";
@@ -54,6 +63,7 @@ import { BINDINGS } from "./lib/shortcut-tables.ts";
 import { useSidebar } from "./lib/sidebar-store.ts";
 import { useShortcuts } from "./lib/use-shortcuts.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
+import { PlannerPage } from "./planner/planner-page.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
 import { Settings } from "./settings.tsx";
 import { HelpOverlay, keysShown, Palette, type PaletteItem } from "./shortcuts-view.tsx";
@@ -61,6 +71,10 @@ import { HelpOverlay, keysShown, Palette, type PaletteItem } from "./shortcuts-v
 // The Workload page (3D orbit, room, tree): its own chunk, so three loads only on /workload.
 const Workload = lazy(() => import("./workload.tsx"));
 const WORKLOAD = "/workload";
+
+const Canvas = lazy(() => import("./canvas/canvas-page.tsx"));
+
+const SensorsPage = lazy(() => import("./sensors/sensors-page.tsx"));
 
 // The page `iohr ui serve` serves, drawn in the shell frame from the Mac app (frame/frame.tsx, RFC 0217 C5): the
 // sidebar lists Home and the installed extensions that declare a panel, the page header holds the Extensions menu,
@@ -98,8 +112,26 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
+  const inDecisions = decisionsRoute(window.location.pathname) !== null;
+  const inPlanner = plannerRoute(window.location.pathname) !== null;
+  const inCanvas = canvasRoute(window.location.pathname) !== null;
+  const inSensors = sensorsRoute(window.location.pathname);
   const inWorkload = window.location.pathname === WORKLOAD;
-  const pageKey = inSettings ? "settings" : inWorkload ? "workload" : routed === null ? HOME : `ext:${routed}`;
+  const pageKey = inSettings
+    ? "settings"
+    : inDecisions
+      ? "decisions"
+      : inPlanner
+        ? "planner"
+        : inCanvas
+          ? "canvas"
+          : inSensors
+            ? "sensors"
+            : inWorkload
+              ? "workload"
+              : routed === null
+                ? HOME
+                : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -212,6 +244,10 @@ export function App() {
 
   const pages = [
     { key: HOME, title: "Home" },
+    { key: "decisions", title: "Decisions" },
+    { key: "planner", title: "Planner" },
+    { key: "canvas", title: "Canvas" },
+    { key: "sensors", title: "Sensors" },
     { key: "workload", title: "Workload" },
     { key: "settings", title: "Settings" },
     ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
@@ -222,8 +258,24 @@ export function App() {
       window.location.assign("/");
       return;
     }
+    if (key === "decisions") {
+      window.location.assign(DECISIONS);
+      return;
+    }
+    if (key === "planner") {
+      window.location.assign(PLANNER);
+      return;
+    }
+    if (key === "sensors") {
+      window.location.assign(SENSORS);
+      return;
+    }
     if (key === "settings") {
       window.location.assign(SETTINGS);
+      return;
+    }
+    if (key === "canvas") {
+      window.location.assign(CANVAS);
       return;
     }
     if (key === "workload") {
@@ -299,11 +351,23 @@ export function App() {
 
   const title = (
     <h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
-      <span className={cn((chosen || inSettings || inWorkload) && "text-muted-foreground")}>InOrbit</span>
-      {chosen || inSettings || inWorkload ? (
+      <span className={cn((chosen || inSettings || inDecisions || inWorkload || inCanvas) && "text-muted-foreground")}>
+        InOrbit
+      </span>
+      {chosen || inSettings || inDecisions || inWorkload || inCanvas ? (
         <>
           <span className="text-muted-foreground">/</span>
-          <span className="truncate">{inSettings ? "Settings" : inWorkload ? "Workload" : chosen?.title}</span>
+          <span className="truncate">
+            {inDecisions
+              ? "Decisions"
+              : inSettings
+                ? "Settings"
+                : inCanvas
+                  ? "Canvas"
+                  : inWorkload
+                    ? "Workload"
+                    : chosen?.title}
+          </span>
         </>
       ) : null}
     </h1>
@@ -405,9 +469,21 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings && !inWorkload}
+          active={
+            routed === null && !inSettings && !inDecisions && !inPlanner && !inSensors && !inWorkload && !inCanvas
+          }
           onClick={() => window.location.assign("/")}
         />
+        <NavItem
+          rail={rail}
+          label="Decisions"
+          icon={<FileText />}
+          active={inDecisions}
+          onClick={() => window.location.assign(DECISIONS)}
+        />
+        <NavItem rail={rail} label="Planner" icon={<ListChecks />} active={inPlanner} onClick={() => goTo("planner")} />
+        <NavItem rail={rail} label="Canvas" icon={<PenTool />} active={inCanvas} onClick={() => goTo("canvas")} />
+        <NavItem rail={rail} label="Sensors" icon={<Radar />} active={inSensors} onClick={() => goTo("sensors")} />
         <NavItem rail={rail} label="Workload" icon={<Atom />} active={inWorkload} onClick={() => goTo("workload")} />
       </ul>
       <section aria-label="Extensions" className={cn("flex flex-col gap-0.5", rail && "items-center")}>
@@ -496,7 +572,11 @@ export function App() {
               {reason}
             </p>
           ) : null}
-          {inWorkload ? (
+          {inDecisions ? (
+            <Decisions session={account.session} />
+          ) : inPlanner ? (
+            <PlannerPage />
+          ) : inWorkload ? (
             <Suspense fallback={<p className="text-muted-foreground text-sm">Loading the workload…</p>}>
               <Workload />
             </Suspense>
@@ -510,6 +590,14 @@ export function App() {
               listing={listing}
               onEdit={setEditing}
             />
+          ) : inCanvas ? (
+            <Suspense fallback={<p className="text-muted-foreground text-sm">Opening the canvas…</p>}>
+              <Canvas />
+            </Suspense>
+          ) : inSensors ? (
+            <Suspense fallback={<p className="notice">Loading Sensors…</p>}>
+              <SensorsPage session={account.session} onSignIn={account.signIn} />
+            </Suspense>
           ) : (routed !== null && extensionsDown) || (routed === null && homeDown) ? (
             <section className="notice" role="status" data-maintenance-notice>
               <h2 className="mb-1 text-base font-semibold">
