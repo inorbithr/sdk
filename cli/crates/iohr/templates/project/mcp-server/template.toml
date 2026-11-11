@@ -118,3 +118,30 @@ LAYOUT = '''- `src/server.rs`: the server, one tool (`word_count`) and one resou
 - `src/main.rs`: starts the server over stdio, the way a host does.
 - `tests/server.rs`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
 - `Cargo.toml`: the SDK pinned to an exact version. `Cargo.lock`: the lockfile; CI builds with `--locked`.'''
+
+# Java: the official SDK, io.modelcontextprotocol.sdk:mcp 2.1.0 (the modelcontextprotocol/java-sdk
+# release on Maven Central; its `mcp` artifact brings mcp-core and the Jackson 3 mapper). This is
+# the latest stable release; it speaks up to 2025-11-25, so this variant tests the `initialize`
+# handshake. 2026-07-28 (server/discover, ttlMs, cacheScope) is in 2.2.0-M1 and -M2, milestones
+# that are not pinned here: the test gains those checks when 2.2 is released. Maven resolves the
+# exact version; there is no lockfile in Maven.
+[[variants]]
+id = "java"
+label = "Java 17 or newer with Maven, official io.modelcontextprotocol.sdk:mcp 2.1.0"
+status = "live"
+needs = ["mvn", "java"]
+toolchain = ["java", "-version"]
+agent_allow = ["mvn test", "mvn package", "mvn -q test", "mvn verify"]
+smoke = "test"
+test = ["mvn", "--batch-mode", "--no-transfer-progress", "--quiet", "test"]
+[variants.vars]
+SOURCE = "src/main/java/, tests in src/test/java/"
+IGNORE = "target/"
+RUN_TEST = "`mvn test`"
+README_TEST = "mvn test"
+RUN = "mvn -q compile exec:java"
+TOOLCHAIN_MINOR = "17"
+LAYOUT = '''- `src/main/java/app/Server.java`: the server, one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `src/main/java/app/Main.java`: starts the server over stdio, the way a host does.
+- `src/test/java/app/ServerTest.java`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
+- `pom.xml`: the SDK pinned to an exact version.'''
