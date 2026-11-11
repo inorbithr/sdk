@@ -25,9 +25,11 @@ runs:
           echo "already installed: ${want[*]}"
           exit 0
         fi
+        # A dead archive must fail fast, not hang the job: bound each connection.
+        opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
         for attempt in 1 2 3 4; do
-          if sudo apt-get update -o Acquire::Retries=3 \
-            && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 "${missing[@]}"; then
+          if sudo apt-get update "${opts[@]}" \
+            && sudo apt-get install -y --no-install-recommends "${opts[@]}" "${missing[@]}"; then
             exit 0
           fi
           [ "$attempt" -eq 4 ] && break

@@ -568,6 +568,7 @@ jobs:
       # and the runner image has none. macOS ships one.
       - if: runner.os == 'Linux'
         uses: ./.github/actions/apt-install # zizmor: ignore[self-repository]
+        timeout-minutes: 10
         with:
           packages: zsh
       - run: mise run cli:check
@@ -580,6 +581,7 @@ jobs:
       # A Secret Service for the Linux credential-store test; packages from the runner image's archive.
       - if: runner.os == 'Linux'
         uses: ./.github/actions/apt-install # zizmor: ignore[self-repository]
+        timeout-minutes: 10
         with:
           packages: gnome-keyring dbus
       - if: runner.os == 'Linux'
