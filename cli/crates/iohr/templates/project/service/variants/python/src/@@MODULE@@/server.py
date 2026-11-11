@@ -54,13 +54,15 @@ def make_handler(svc: Service):
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("traceparent", span.header())
             self.end_headers()
-            self.wfile.write(payload)
+            # Record before the body goes out: this server runs a thread per request, so
+            # a caller that has the whole response must also find its log lines and count.
             ms = span.millis()
             fields = {"trace_id": span.trace_id, "route": route, "status": status, "duration_ms": ms}
             extra = {"parent_span_id": span.parent_id} if span.parent_id else {}
             svc.log.info("span", span_id=span.span_id, name=f"GET {route}", **fields, **extra)
             svc.log.info("request", method="GET", **fields)
             svc.metrics.inc(route, status)
+            self.wfile.write(payload)
 
     return Handler
 
