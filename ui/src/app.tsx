@@ -6,6 +6,7 @@ import {
   Orbit,
   PanelRight,
   Puzzle,
+  Radar,
   Settings as SettingsIcon,
   Wrench,
 } from "lucide-react";
@@ -47,6 +48,7 @@ import { add as addOrbit, HOME, remove as removeOrbit } from "./lib/orbits-core.
 import { updateOrbits, useOrbits } from "./lib/orbits-store.ts";
 import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
+import { SENSORS, sensorsRoute } from "./lib/sensors-view.ts";
 import { useSession } from "./lib/session-store.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
 import { useRead } from "./lib/settings-data.ts";
@@ -61,6 +63,8 @@ import { HelpOverlay, keysShown, Palette, type PaletteItem } from "./shortcuts-v
 // The Workload page (3D orbit, room, tree): its own chunk, so three loads only on /workload.
 const Workload = lazy(() => import("./workload.tsx"));
 const WORKLOAD = "/workload";
+
+const SensorsPage = lazy(() => import("./sensors/sensors-page.tsx"));
 
 // The page `iohr ui serve` serves, drawn in the shell frame from the Mac app (frame/frame.tsx, RFC 0217 C5): the
 // sidebar lists Home and the installed extensions that declare a panel, the page header holds the Extensions menu,
@@ -98,8 +102,17 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
+  const inSensors = sensorsRoute(window.location.pathname);
   const inWorkload = window.location.pathname === WORKLOAD;
-  const pageKey = inSettings ? "settings" : inWorkload ? "workload" : routed === null ? HOME : `ext:${routed}`;
+  const pageKey = inSettings
+    ? "settings"
+    : inSensors
+      ? "sensors"
+      : inWorkload
+        ? "workload"
+        : routed === null
+          ? HOME
+          : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -212,6 +225,7 @@ export function App() {
 
   const pages = [
     { key: HOME, title: "Home" },
+    { key: "sensors", title: "Sensors" },
     { key: "workload", title: "Workload" },
     { key: "settings", title: "Settings" },
     ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
@@ -220,6 +234,10 @@ export function App() {
     if (key === pageKey) return;
     if (key === HOME) {
       window.location.assign("/");
+      return;
+    }
+    if (key === "sensors") {
+      window.location.assign(SENSORS);
       return;
     }
     if (key === "settings") {
@@ -405,9 +423,10 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings && !inWorkload}
+          active={routed === null && !inSettings && !inSensors && !inWorkload}
           onClick={() => window.location.assign("/")}
         />
+        <NavItem rail={rail} label="Sensors" icon={<Radar />} active={inSensors} onClick={() => goTo("sensors")} />
         <NavItem rail={rail} label="Workload" icon={<Atom />} active={inWorkload} onClick={() => goTo("workload")} />
       </ul>
       <section aria-label="Extensions" className={cn("flex flex-col gap-0.5", rail && "items-center")}>
@@ -510,6 +529,10 @@ export function App() {
               listing={listing}
               onEdit={setEditing}
             />
+          ) : inSensors ? (
+            <Suspense fallback={<p className="notice">Loading Sensors…</p>}>
+              <SensorsPage session={account.session} onSignIn={account.signIn} />
+            </Suspense>
           ) : (routed !== null && extensionsDown) || (routed === null && homeDown) ? (
             <section className="notice" role="status" data-maintenance-notice>
               <h2 className="mb-1 text-base font-semibold">
