@@ -145,3 +145,30 @@ LAYOUT = '''- `src/main/java/app/Server.java`: the server, one tool (`word_count
 - `src/main/java/app/Main.java`: starts the server over stdio, the way a host does.
 - `src/test/java/app/ServerTest.java`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
 - `pom.xml`: the SDK pinned to an exact version.'''
+
+# C#: the official C# SDK, NuGet `ModelContextProtocol` 2.4.0 (its README: "The official C# SDK for
+# the Model Context Protocol", repository modelcontextprotocol/csharp-sdk; checked 2026-11-11 on
+# api.nuget.org), pinned with an exact range and a lock file. It speaks 2026-07-28 and still
+# answers `initialize`; both are in the test. The SDK gives no `maxLength` for a string unless
+# the parameter says [MaxLength] (it does) and does not refuse unknown arguments, so the tool
+# does (the test covers it).
+[[variants]]
+id = "csharp"
+label = ".NET 10 SDK, official ModelContextProtocol 2.4.0"
+status = "live"
+needs = ["dotnet"]
+toolchain = ["dotnet", "--version"]
+agent_allow = ["dotnet test", "dotnet build", "dotnet run", "dotnet restore"]
+smoke = "test"
+test = ["dotnet", "test", "--nologo", "--verbosity", "quiet"]
+[variants.vars]
+SOURCE = "src/App/, tests in tests/App.Tests/"
+IGNORE = "bin/\nobj/"
+RUN_TEST = "`dotnet test`"
+README_TEST = "dotnet test"
+RUN = "dotnet run --project src/App"
+TOOLCHAIN_MINOR = "10.0"
+LAYOUT = '''- `src/App/Tools.cs`: one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `src/App/Program.cs`: starts the server over stdio, the way a host does.
+- `tests/App.Tests/ServerTests.cs`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
+- `src/App/App.csproj`: the SDK pinned to an exact version (`packages.lock.json` beside it).'''
