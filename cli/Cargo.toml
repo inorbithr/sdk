@@ -62,6 +62,10 @@ sha2 = "0.11"
 serde_json = "1"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+# The page's live socket (`iohr ui serve`, `/api/live`): the server side of the handshake, over a
+# stream the guards already read; the same version the SDK uses upstream.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tokio = { version = "1", features = ["rt", "macros", "time", "io-std", "io-util", "fs", "net", "sync", "process", "signal"] }
 toml = "1"
 toml_edit = "0.25"
