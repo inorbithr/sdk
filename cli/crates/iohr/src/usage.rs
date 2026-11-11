@@ -339,8 +339,13 @@ fn ask_line(command: &str, said: &str) -> String {
         .chars()
         .take(ASK_ERROR_CHARS)
         .collect();
+    let stop = if said.ends_with(['.', '!', '?']) {
+        ""
+    } else {
+        "."
+    };
     let question =
-        format!("I ran `{command}` and iohr said: {said} What command should I run instead?");
+        format!("I ran `{command}` and iohr said: {said}{stop} What command should I run instead?");
     format!("iohr ask {}", quote(&question))
 }
 

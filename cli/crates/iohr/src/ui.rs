@@ -500,6 +500,13 @@ impl Paint {
     /// exactly [`table_text`], the bytes scripts read.
     #[must_use]
     pub(crate) fn table(self, header: &[&str], rows: &[Vec<String>]) -> String {
+        let width = usize::from(console::Term::stdout().size().1).max(40);
+        self.table_within(header, rows, width)
+    }
+
+    /// [`Paint::table`] for a terminal `width` columns wide: with colour, the widest columns
+    /// are cut (ending in `…`) until the indented table fits. With no colour, nothing is cut.
+    fn table_within(self, header: &[&str], rows: &[Vec<String>], width: usize) -> String {
         if !self.color {
             return table_text(header, rows);
         }
@@ -524,6 +531,7 @@ impl Paint {
                     .collect()
             })
             .collect();
+        let rows = fit_cells(&head, &rows, width.saturating_sub(2));
         indent(&table_text(&head, &rows))
     }
 
@@ -1034,6 +1042,45 @@ fn run_keyed(
 
 fn plain(line: &str) {
     let _ = writeln!(io::stderr().lock(), "{line}");
+}
+
+/// The narrowest a column is cut to when a table is fitted to the terminal.
+const FIT_MIN: usize = 12;
+
+/// `rows` with their widest columns cut, each cell ending in `…`, until the table (columns
+/// two apart) is no wider than `room`. A column is never cut below [`FIT_MIN`] or its header,
+/// so a table with many columns may still be wider.
+fn fit_cells(header: &[&str], rows: &[Vec<String>], room: usize) -> Vec<Vec<String>> {
+    let shown = console::measure_text_width;
+    let mut width: Vec<usize> = header.iter().map(|h| shown(h)).collect();
+    for row in rows {
+        for (w, cell) in width.iter_mut().zip(row) {
+            *w = (*w).max(shown(cell));
+        }
+    }
+    let floor: Vec<usize> = header.iter().map(|h| shown(h).max(FIT_MIN)).collect();
+    let total = |w: &[usize]| w.iter().sum::<usize>() + 2 * w.len().saturating_sub(1);
+    while total(&width) > room {
+        let Some((i, &w)) = width
+            .iter()
+            .enumerate()
+            .filter(|(i, w)| **w > floor[*i])
+            .max_by_key(|(_, w)| **w)
+        else {
+            break;
+        };
+        let next = width.iter().filter(|v| **v < w).max().copied().unwrap_or(0);
+        let over = total(&width) - room;
+        width[i] = floor[i].max(next).max(w.saturating_sub(over));
+    }
+    rows.iter()
+        .map(|row| {
+            row.iter()
+                .zip(width.iter().chain(std::iter::repeat(&usize::MAX)))
+                .map(|(cell, w)| console::truncate_str(cell, *w, "\u{2026}").into_owned())
+                .collect()
+        })
+        .collect()
 }
 
 /// The width of the terminal on stderr, 80 when it is not known.
@@ -2226,6 +2273,31 @@ mod tests {
         ]);
         assert_eq!(strip(&shown), "  state  \u{2717} failed\n  name   laptop\n");
         assert!(shown.contains(&p.dim("state")), "keys are dim");
+    }
+
+    #[test]
+    fn a_drawn_table_cuts_its_widest_column_to_fit_the_terminal_and_plain_keeps_every_byte() {
+        let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let rows = vec![vec![
+            "t1".to_owned(),
+            "a:read ".repeat(30),
+            "active".to_owned(),
+        ]];
+        let header = ["ID", "SCOPES", "STATE"];
+        let text = p.table_within(&header, &rows, 60);
+        for line in text.lines() {
+            assert!(console::measure_text_width(line) <= 60, "{line:?} fits");
+        }
+        assert!(strip(&text).contains('\u{2026}'), "the cut is shown");
+        assert!(
+            strip(&text).contains("active"),
+            "the narrow columns stay whole"
+        );
+        let plain = Paint::from_parts(false, false, None, None);
+        assert_eq!(
+            plain.table_within(&header, &rows, 60),
+            crate::output::table_text(&header, &rows)
+        );
     }
 
     #[test]
