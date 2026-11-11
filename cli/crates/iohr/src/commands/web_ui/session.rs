@@ -20,15 +20,18 @@
 //! `GET /api/session` is the state, `POST /api/session/login` starts the sign-in in the
 //! background (the person's browser opens, as with `iohr login --web`; the page asks again
 //! until it settles), `POST /api/session/logout` ends it as `iohr logout` does, and
-//! `GET /api/proxy/v1/...` forwards one read to the API with the signed-in credential.
+//! `/api/proxy/v1/...` forwards one call (a read, a write with a JSON body, or a
+//! server-sent event stream) to the API with the signed-in credential (`forward`).
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
 
-use inorbithr::Method;
+use std::time::{Duration, Instant};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
+
 use iohr_auth::Kind;
 
+use super::forward::Limits;
 use super::{Reply, Request, decoded_path, percent_decode, same_bytes};
 use crate::Env;
 use crate::cli::{Global, How, Login};
@@ -78,10 +81,18 @@ pub(super) struct Access {
     env: Env,
     phase: Mutex<Phase>,
     loaded: Mutex<Option<(Instant, Arc<Session>)>>,
+    limits: Limits,
+    streams: Arc<Semaphore>,
+    closed: watch::Sender<bool>,
 }
 
 impl Access {
-    pub(super) fn new(global: Global, env: Env, port: u16) -> std::io::Result<Self> {
+    pub(super) fn new(
+        global: Global,
+        env: Env,
+        port: u16,
+        limits: Limits,
+    ) -> std::io::Result<Self> {
         Ok(Self {
             launch: Mutex::new(super::random_hex()?),
             record: Mutex::new(None),
@@ -91,7 +102,29 @@ impl Access {
             env,
             phase: Mutex::new(Phase::Idle),
             loaded: Mutex::new(None),
+            streams: Arc::new(Semaphore::new(limits.max_streams)),
+            closed: watch::channel(false).0,
+            limits,
         })
+    }
+
+    pub(super) fn limits(&self) -> Limits {
+        self.limits
+    }
+
+    /// One of the serve's stream slots, or `None` when they are all taken.
+    pub(super) fn stream_permit(&self) -> Option<OwnedSemaphorePermit> {
+        Arc::clone(&self.streams).try_acquire_owned().ok()
+    }
+
+    /// Fires when the serve stops, so open streams end.
+    pub(super) fn closing(&self) -> watch::Receiver<bool> {
+        self.closed.subscribe()
+    }
+
+    /// Ends every open stream.
+    pub(super) fn close(&self) {
+        self.closed.send_replace(true);
     }
 
     /// The secret `iohr ui open` puts in the first address; never printed by `serve`. It
@@ -189,7 +222,7 @@ impl Access {
 
     /// The signed-in session, loaded the way every command loads it, kept for
     /// [`SESSION_TTL`].
-    async fn current(&self) -> Result<Arc<Session>, Error> {
+    pub(super) async fn current(&self) -> Result<Arc<Session>, Error> {
         {
             let held = self.loaded.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some((at, s)) = held.as_ref()
@@ -202,6 +235,18 @@ impl Access {
         *self.loaded.lock().unwrap_or_else(PoisonError::into_inner) =
             Some((Instant::now(), Arc::clone(&fresh)));
         Ok(fresh)
+    }
+
+    /// A client for one page socket: the session's credential, every stream over one
+    /// upstream `/v1/ws` (`Streams::Socket`).
+    pub(super) fn socket_api(&self, s: &Session) -> Result<crate::context::Api, Error> {
+        crate::context::Api::with_streams(
+            self.global.base_url(),
+            Arc::clone(&s.credential),
+            false,
+            None,
+            inorbithr::Streams::Socket,
+        )
     }
 
     /// `GET /api/session`: whether this machine is signed in, as whom, and how the
@@ -281,48 +326,6 @@ impl Access {
             Err(e) => Reply::problem("400 Bad Request", &safe(&e)),
         }
     }
-
-    /// `GET /api/proxy/v1/...`: one read of the API with the signed-in credential. The
-    /// path must be under `/v1/` with plain segments; the answer's status and JSON body
-    /// pass on, and nothing of the credential does.
-    pub(super) async fn proxy(&self, request: &Request) -> Reply {
-        let Some((path, query)) = forwarded(&request.target) else {
-            return Reply::error("400 Bad Request");
-        };
-        let s = match self.current().await {
-            Ok(s) => s,
-            Err(Error::NotSignedIn(_)) => {
-                return Reply::problem("401 Unauthorized", "not signed in");
-            }
-            Err(e) => return Reply::problem("502 Bad Gateway", &safe(&e)),
-        };
-        let pairs: Vec<(&str, &str)> = query
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
-        match s.api.send(Method::Get, &path, &pairs, None).await {
-            Ok(raw) => {
-                let json = raw
-                    .headers
-                    .get("content-type")
-                    .is_some_and(|c| c.contains("json"));
-                Reply {
-                    status: status_line(raw.status),
-                    content_type: if json {
-                        "application/json"
-                    } else {
-                        "text/plain; charset=utf-8"
-                    },
-                    body: raw.body,
-                    ..Reply::error("200 OK")
-                }
-            }
-            Err(e) => {
-                let status = e.status().map_or("502 Bad Gateway", status_line);
-                Reply::problem(status, &safe(&Error::from(e)))
-            }
-        }
-    }
 }
 
 /// An error's text as the page may see it: the runner's redaction (`crate::attach::scrub`:
@@ -335,7 +338,7 @@ pub(super) fn safe(error: &dyn std::fmt::Display) -> String {
 
 /// The API path and query a `/api/proxy/...` target names, or `None` when it is not a plain
 /// read under `/v1/`.
-fn forwarded(target: &str) -> Option<(String, Vec<(String, String)>)> {
+pub(super) fn forwarded(target: &str) -> Option<(String, Vec<(String, String)>)> {
     let path = decoded_path(target)?;
     let path = path.strip_prefix("/api/proxy")?;
     let plain = path.starts_with("/v1/")
@@ -372,15 +375,23 @@ fn forwarded(target: &str) -> Option<(String, Vec<(String, String)>)> {
 }
 
 /// The status line for an API status the page may see; any other is a bad gateway.
-fn status_line(status: u16) -> &'static str {
+pub(super) fn status_line(status: u16) -> &'static str {
     match status {
         200 => "200 OK",
+        201 => "201 Created",
+        202 => "202 Accepted",
         204 => "204 No Content",
         400 => "400 Bad Request",
         401 => "401 Unauthorized",
         403 => "403 Forbidden",
         404 => "404 Not Found",
+        405 => "405 Method Not Allowed",
         409 => "409 Conflict",
+        410 => "410 Gone",
+        412 => "412 Precondition Failed",
+        413 => "413 Payload Too Large",
+        415 => "415 Unsupported Media Type",
+        422 => "422 Unprocessable Entity",
         429 => "429 Too Many Requests",
         503 => "503 Service Unavailable",
         504 => "504 Gateway Timeout",

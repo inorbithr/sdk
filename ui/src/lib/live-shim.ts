@@ -92,7 +92,7 @@ export async function apiSend(
   method: "POST" | "PATCH" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
-): Promise<{ ok: true } | { ok: false; reason: string }> {
+): Promise<{ ok: true } | { ok: false; reason: string; status?: number }> {
   const url = proxyPath(path);
   const token = startToken();
   if (url === null || token === null) return { ok: false, reason: "This page has no start token or path." };
@@ -112,8 +112,114 @@ export async function apiSend(
     } catch {
       // the status line says it
     }
-    return { ok: false, reason };
+    return { ok: false, reason, status: res.status };
   } catch {
     return { ok: false, reason: "The local `iohr ui serve` did not answer." };
   }
+}
+
+// The signal and picture streams of the sensors page: callback form with Last-Event-ID resume.
+type StreamOpts<T> = {
+  query?: Record<string, string>;
+  method?: "GET" | "POST";
+  body?: unknown;
+  signal?: AbortSignal;
+  onState?: (s: LiveState, why?: string) => void;
+  _t?: T;
+};
+
+/** Parses server-sent frames out of text chunks; keeps the unfinished tail. */
+export function parseFrames(buf: string): {
+  frames: { event: string; id: string | null; data: string }[];
+  rest: string;
+} {
+  const parts = buf.replace(/\r\n/g, "\n").split("\n\n");
+  const rest = parts.pop() ?? "";
+  const frames: { event: string; id: string | null; data: string }[] = [];
+  for (const p of parts) {
+    let event = "message";
+    let id: string | null = null;
+    const data: string[] = [];
+    for (const line of p.split("\n")) {
+      if (line.startsWith(":")) continue;
+      const i = line.indexOf(":");
+      const k = i < 0 ? line : line.slice(0, i);
+      const v = i < 0 ? "" : line.slice(i + 1).replace(/^ /, "");
+      if (k === "event") event = v;
+      else if (k === "id") id = v;
+      else if (k === "data") data.push(v);
+    }
+    if (data.length > 0) frames.push({ event, id, data: data.join("\n") });
+  }
+  return { frames, rest };
+}
+
+/** Follows a server-sent stream; reconnects with backoff and Last-Event-ID. Returns the stop function. */
+export function apiStream<T = unknown>(
+  path: string,
+  onEvent: (data: T, meta: { event: string; id: string | null }) => void,
+  opts: StreamOpts<T> = {},
+): () => void {
+  const url = proxyPath(path, opts.query ?? {});
+  const token = startToken();
+  const ctl = new AbortController();
+  opts.signal?.addEventListener("abort", () => ctl.abort());
+  let stopped = false;
+  let lastId: string | null = null;
+  const state = (s: LiveState, why?: string) => {
+    if (!stopped) opts.onState?.(s, why);
+  };
+  if (url === null || token === null) {
+    state("off", "This page may not follow that stream.");
+    return () => {};
+  }
+  void (async () => {
+    let attempt = 0;
+    state("connecting");
+    while (!stopped) {
+      try {
+        const headers: Record<string, string> = { "x-iohr-token": token, accept: "text/event-stream" };
+        if (lastId !== null) headers["last-event-id"] = lastId;
+        const res = await fetch(url, {
+          method: opts.method ?? "GET",
+          headers,
+          body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+          cache: "no-store",
+          signal: ctl.signal,
+        });
+        if (!res.ok || res.body === null) throw new Error(`HTTP ${res.status}`);
+        attempt = 0;
+        state("live");
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const { frames, rest } = parseFrames(buf);
+          buf = rest;
+          for (const f of frames) {
+            if (f.id !== null) lastId = f.id;
+            try {
+              onEvent(JSON.parse(f.data) as T, { event: f.event, id: f.id });
+            } catch {
+              // a frame that is not JSON is skipped
+            }
+          }
+        }
+      } catch (e) {
+        if (stopped) return;
+        state("reconnecting", e instanceof Error ? e.message : "stream failed");
+      }
+      if (stopped) return;
+      attempt += 1;
+      if (attempt > 6) state("off", "The stream did not come back.");
+      await new Promise((r) => setTimeout(r, Math.min(15000, 500 * 2 ** Math.min(attempt, 5))));
+    }
+  })();
+  return () => {
+    stopped = true;
+    ctl.abort();
+  };
 }
