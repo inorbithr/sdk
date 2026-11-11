@@ -1,6 +1,7 @@
 import {
   ArrowLeftRight,
   Atom,
+  FileText,
   House,
   LayoutGrid,
   ListChecks,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { lazy, type MouseEvent, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { CANVAS, canvasRoute } from "./canvas/canvas-route.ts";
+import { Decisions } from "./decisions/page.tsx";
 import {
   applyLayout,
   applySpan,
@@ -41,6 +43,7 @@ import { Home } from "./home.tsx";
 import { accountMenu, accountName } from "./lib/accounts-core.ts";
 import { useAccounts } from "./lib/accounts-store.ts";
 import { updateArrangement as updateArr, useArrangement } from "./lib/arrange-store.ts";
+import { DECISIONS, decisionsRoute } from "./lib/decisions-route.ts";
 import { useDock } from "./lib/dock-store.ts";
 import { type Listing, loadExtensions, type Panel } from "./lib/extensions.ts";
 import { entryOf, isDown, whyClosed } from "./lib/features-core.ts";
@@ -109,23 +112,26 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
+  const inDecisions = decisionsRoute(window.location.pathname) !== null;
   const inPlanner = plannerRoute(window.location.pathname) !== null;
   const inCanvas = canvasRoute(window.location.pathname) !== null;
   const inSensors = sensorsRoute(window.location.pathname);
   const inWorkload = window.location.pathname === WORKLOAD;
   const pageKey = inSettings
     ? "settings"
-    : inPlanner
-      ? "planner"
-      : inCanvas
-        ? "canvas"
-        : inSensors
-          ? "sensors"
-          : inWorkload
-            ? "workload"
-            : routed === null
-              ? HOME
-              : `ext:${routed}`;
+    : inDecisions
+      ? "decisions"
+      : inPlanner
+        ? "planner"
+        : inCanvas
+          ? "canvas"
+          : inSensors
+            ? "sensors"
+            : inWorkload
+              ? "workload"
+              : routed === null
+                ? HOME
+                : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -238,6 +244,7 @@ export function App() {
 
   const pages = [
     { key: HOME, title: "Home" },
+    { key: "decisions", title: "Decisions" },
     { key: "planner", title: "Planner" },
     { key: "canvas", title: "Canvas" },
     { key: "sensors", title: "Sensors" },
@@ -249,6 +256,10 @@ export function App() {
     if (key === pageKey) return;
     if (key === HOME) {
       window.location.assign("/");
+      return;
+    }
+    if (key === "decisions") {
+      window.location.assign(DECISIONS);
       return;
     }
     if (key === "planner") {
@@ -340,12 +351,22 @@ export function App() {
 
   const title = (
     <h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
-      <span className={cn((chosen || inSettings || inWorkload || inCanvas) && "text-muted-foreground")}>InOrbit</span>
-      {chosen || inSettings || inWorkload || inCanvas ? (
+      <span className={cn((chosen || inSettings || inDecisions || inWorkload || inCanvas) && "text-muted-foreground")}>
+        InOrbit
+      </span>
+      {chosen || inSettings || inDecisions || inWorkload || inCanvas ? (
         <>
           <span className="text-muted-foreground">/</span>
           <span className="truncate">
-            {inSettings ? "Settings" : inCanvas ? "Canvas" : inWorkload ? "Workload" : chosen?.title}
+            {inDecisions
+              ? "Decisions"
+              : inSettings
+                ? "Settings"
+                : inCanvas
+                  ? "Canvas"
+                  : inWorkload
+                    ? "Workload"
+                    : chosen?.title}
           </span>
         </>
       ) : null}
@@ -448,8 +469,17 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings && !inPlanner && !inSensors && !inWorkload && !inCanvas}
+          active={
+            routed === null && !inSettings && !inDecisions && !inPlanner && !inSensors && !inWorkload && !inCanvas
+          }
           onClick={() => window.location.assign("/")}
+        />
+        <NavItem
+          rail={rail}
+          label="Decisions"
+          icon={<FileText />}
+          active={inDecisions}
+          onClick={() => window.location.assign(DECISIONS)}
         />
         <NavItem rail={rail} label="Planner" icon={<ListChecks />} active={inPlanner} onClick={() => goTo("planner")} />
         <NavItem rail={rail} label="Canvas" icon={<PenTool />} active={inCanvas} onClick={() => goTo("canvas")} />
@@ -542,7 +572,9 @@ export function App() {
               {reason}
             </p>
           ) : null}
-          {inPlanner ? (
+          {inDecisions ? (
+            <Decisions session={account.session} />
+          ) : inPlanner ? (
             <PlannerPage />
           ) : inWorkload ? (
             <Suspense fallback={<p className="text-muted-foreground text-sm">Loading the workload…</p>}>
