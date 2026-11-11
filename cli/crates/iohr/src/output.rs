@@ -2,7 +2,7 @@ use std::io::{self, Write as _};
 
 use serde::Serialize;
 
-use crate::ui::Paint;
+use crate::ui::{Listed, Paint};
 
 /// Where results go: tables or JSON on stdout, notes on stderr.
 #[derive(Debug, Clone, Copy)]
@@ -21,6 +21,12 @@ impl Out {
     /// ([`Paint::table`]).
     pub(crate) fn table(header: &[&str], rows: &[Vec<String>]) {
         Self::raw(Paint::stdout(false).table(header, rows).as_bytes());
+    }
+
+    /// Prints a list: the table, then on a terminal a count and the next command, or one
+    /// line when it is empty. Plain output is the table alone ([`Paint::list`]).
+    pub(crate) fn list(header: &[&str], rows: &[Vec<String>], what: &Listed<'_>) {
+        Self::raw(Paint::stdout(false).list(header, rows, what).as_bytes());
     }
 
     /// Prints `key  value` pairs: drawn on a terminal, plain otherwise ([`Paint::pairs`]).

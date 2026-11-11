@@ -27,7 +27,7 @@ use crate::memory::store::{self, Entry, Kind, Remembered, Scope, Store};
 use crate::memory::{self, check, drift, recall};
 use crate::output::Out;
 use crate::roles;
-use crate::ui::{CheckRow, Mark, Paint, Ui};
+use crate::ui::{CheckRow, Listed, Mark, Paint, Ui};
 
 use super::{day, pages, str_of};
 
@@ -418,7 +418,7 @@ async fn recall_cmd(
             .iter()
             .map(|h| local_cells(&h.entry, Some(h.score)))
             .collect();
-        Out::table(&LOCAL_HEAD, &rows);
+        Out::list(&LOCAL_HEAD, &rows, &Listed::new("memory", "memories"));
     }
     Ok(())
 }
@@ -437,7 +437,11 @@ async fn list(g: &Global, env: &Env, w: &Where, limit: usize, out: Out) -> Resul
             Out::note("nothing kept");
         } else {
             let rows: Vec<Vec<String>> = all.iter().map(remote_cells).collect();
-            Out::table(&LOCAL_HEAD, &rows);
+            Out::list(
+                &LOCAL_HEAD,
+                &rows,
+                &Listed::new("memory", "memories").next("keep one", "iohr memory remember"),
+            );
         }
         return Ok(());
     }
@@ -450,7 +454,11 @@ async fn list(g: &Global, env: &Env, w: &Where, limit: usize, out: Out) -> Resul
         Out::note("nothing kept");
     } else {
         let rows: Vec<Vec<String>> = entries.iter().map(|e| local_cells(e, None)).collect();
-        Out::table(&LOCAL_HEAD, &rows);
+        Out::list(
+            &LOCAL_HEAD,
+            &rows,
+            &Listed::new("memory", "memories").next("keep one", "iohr memory remember"),
+        );
     }
     Ok(())
 }

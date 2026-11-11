@@ -15,7 +15,7 @@ use crate::ext::oci::{DEFAULT_REGISTRY, Digest, OciError, Registry, Source};
 use crate::ext::trust::{Policy, TrustedKey};
 use crate::output::Out;
 use crate::prompt;
-use crate::ui::{CheckRow, Mark, Paint};
+use crate::ui::{CheckRow, Listed, Mark, Paint};
 
 impl From<ExtError> for Error {
     fn from(e: ExtError) -> Self {
@@ -746,7 +746,7 @@ fn list(store: &Store, out: Out) -> Result<(), Error> {
     } else if rows.is_empty() {
         Out::note("No extensions installed. `iohr ext install agent` installs the InOrbit agent.");
     } else {
-        Out::table(
+        Out::list(
             &[
                 "NAME",
                 "VERSION",
@@ -756,6 +756,7 @@ fn list(store: &Store, out: Out) -> Result<(), Error> {
                 "SIGNER",
             ],
             &rows,
+            &Listed::new("extension", "extensions").next("find more", "iohr ext search"),
         );
     }
     Ok(())

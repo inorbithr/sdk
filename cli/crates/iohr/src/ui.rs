@@ -324,6 +324,33 @@ impl Mark {
     }
 }
 
+/// What a list holds, for the line under it on a terminal ([`Paint::list`]): the noun in
+/// the singular and plural, and the command to run next (a label and the command).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Listed<'a> {
+    one: &'a str,
+    many: &'a str,
+    next: Option<(&'a str, &'a str)>,
+}
+
+impl<'a> Listed<'a> {
+    pub(crate) const fn new(one: &'a str, many: &'a str) -> Self {
+        Self {
+            one,
+            many,
+            next: None,
+        }
+    }
+
+    /// The command to run next, shown after the count, and alone when the list is empty.
+    pub(crate) const fn next(self, label: &'a str, command: &'a str) -> Self {
+        Self {
+            next: Some((label, command)),
+            ..self
+        }
+    }
+}
+
 /// One row of a list of checks (`iohr doctor`): how it ended, its name, what was found, and
 /// the lines under it as a label and a text (`fix`, `or`, `fixed`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -498,6 +525,39 @@ impl Paint {
             })
             .collect();
         indent(&table_text(&head, &rows))
+    }
+
+    /// A list with its footer: with colour, [`Paint::table`] and under it the count and the
+    /// next command (`2 tokens · new one: iohr token create`); with no rows, one line in
+    /// place of the header (`No tokens yet. Next: iohr token create`). With no colour,
+    /// exactly [`table_text`], a header-only line when empty, as scripts have always read.
+    #[must_use]
+    pub(crate) fn list(self, header: &[&str], rows: &[Vec<String>], what: &Listed<'_>) -> String {
+        if !self.color {
+            return table_text(header, rows);
+        }
+        if rows.is_empty() {
+            let none = format!("No {} yet.", what.many);
+            return match what.next {
+                Some((_, command)) => format!(
+                    "  {} {}\n",
+                    self.dim(&format!("{none} Next:")),
+                    self.name(command)
+                ),
+                None => format!("  {}\n", self.dim(&none)),
+            };
+        }
+        let n = rows.len();
+        let count = format!("{n} {}", if n == 1 { what.one } else { what.many });
+        let footer = match what.next {
+            Some((label, command)) => format!(
+                "{} {}",
+                self.dim(&format!("{count} \u{b7} {label}:")),
+                self.name(command)
+            ),
+            None => self.dim(&count),
+        };
+        format!("{}\n  {footer}\n", self.table(header, rows))
     }
 
     /// `key  value` lines: with colour, keys dim in one column and a `status` or `state`
@@ -2166,6 +2226,47 @@ mod tests {
         ]);
         assert_eq!(strip(&shown), "  state  \u{2717} failed\n  name   laptop\n");
         assert!(shown.contains(&p.dim("state")), "keys are dim");
+    }
+
+    #[test]
+    fn a_drawn_list_ends_with_its_count_and_next_command() {
+        let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let tokens = super::Listed::new("token", "tokens").next("new one", "iohr token create");
+        let text = p.list(&["ID", "NAME", "STATE"], &token_rows(), &tokens);
+        let lines: Vec<String> = text.lines().map(strip).collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[3], "  2 tokens \u{b7} new one: iohr token create");
+        assert!(
+            text.contains(&p.name("iohr token create")),
+            "the command stands out"
+        );
+        let one = p.list(&["ID", "NAME", "STATE"], &token_rows()[..1], &tokens);
+        assert!(strip(&one).ends_with("  1 token \u{b7} new one: iohr token create\n"));
+        let bare = p.list(
+            &["ID"],
+            &token_rows(),
+            &super::Listed::new("token", "tokens"),
+        );
+        assert!(strip(&bare).ends_with("\n  2 tokens\n"));
+    }
+
+    #[test]
+    fn an_empty_list_says_so_on_a_terminal_and_keeps_its_header_line_in_plain_output() {
+        let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let tokens = super::Listed::new("token", "tokens").next("new one", "iohr token create");
+        assert_eq!(
+            strip(&p.list(&["ID", "NAME"], &[], &tokens)),
+            "  No tokens yet. Next: iohr token create\n"
+        );
+        let grants = super::Listed::new("grant", "grants");
+        assert_eq!(strip(&p.list(&["ID"], &[], &grants)), "  No grants yet.\n");
+        let plain = Paint::plain();
+        assert_eq!(plain.list(&["ID", "NAME"], &[], &tokens), "ID  NAME\n");
+        assert_eq!(
+            plain.list(&["ID", "NAME", "STATE"], &token_rows(), &tokens),
+            plain.table(&["ID", "NAME", "STATE"], &token_rows()),
+            "plain output is the table alone"
+        );
     }
 
     #[test]
