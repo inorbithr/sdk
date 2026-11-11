@@ -3,6 +3,7 @@ import {
   Atom,
   House,
   LayoutGrid,
+  ListChecks,
   Orbit,
   PanelRight,
   PenTool,
@@ -50,6 +51,7 @@ import { add as addOrbit, HOME, remove as removeOrbit } from "./lib/orbits-core.
 import { updateOrbits, useOrbits } from "./lib/orbits-store.ts";
 import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
+import { PLANNER, plannerRoute } from "./lib/planner-route.ts";
 import { SENSORS, sensorsRoute } from "./lib/sensors-view.ts";
 import { useSession } from "./lib/session-store.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
@@ -58,6 +60,7 @@ import { BINDINGS } from "./lib/shortcut-tables.ts";
 import { useSidebar } from "./lib/sidebar-store.ts";
 import { useShortcuts } from "./lib/use-shortcuts.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
+import { PlannerPage } from "./planner/planner-page.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
 import { Settings } from "./settings.tsx";
 import { HelpOverlay, keysShown, Palette, type PaletteItem } from "./shortcuts-view.tsx";
@@ -106,20 +109,23 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
+  const inPlanner = plannerRoute(window.location.pathname) !== null;
   const inCanvas = canvasRoute(window.location.pathname) !== null;
   const inSensors = sensorsRoute(window.location.pathname);
   const inWorkload = window.location.pathname === WORKLOAD;
   const pageKey = inSettings
     ? "settings"
-    : inCanvas
-      ? "canvas"
-      : inSensors
-        ? "sensors"
-        : inWorkload
-          ? "workload"
-          : routed === null
-            ? HOME
-            : `ext:${routed}`;
+    : inPlanner
+      ? "planner"
+      : inCanvas
+        ? "canvas"
+        : inSensors
+          ? "sensors"
+          : inWorkload
+            ? "workload"
+            : routed === null
+              ? HOME
+              : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -232,6 +238,7 @@ export function App() {
 
   const pages = [
     { key: HOME, title: "Home" },
+    { key: "planner", title: "Planner" },
     { key: "canvas", title: "Canvas" },
     { key: "sensors", title: "Sensors" },
     { key: "workload", title: "Workload" },
@@ -242,6 +249,10 @@ export function App() {
     if (key === pageKey) return;
     if (key === HOME) {
       window.location.assign("/");
+      return;
+    }
+    if (key === "planner") {
+      window.location.assign(PLANNER);
       return;
     }
     if (key === "sensors") {
@@ -437,9 +448,10 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings && !inSensors && !inWorkload && !inCanvas}
+          active={routed === null && !inSettings && !inPlanner && !inSensors && !inWorkload && !inCanvas}
           onClick={() => window.location.assign("/")}
         />
+        <NavItem rail={rail} label="Planner" icon={<ListChecks />} active={inPlanner} onClick={() => goTo("planner")} />
         <NavItem rail={rail} label="Canvas" icon={<PenTool />} active={inCanvas} onClick={() => goTo("canvas")} />
         <NavItem rail={rail} label="Sensors" icon={<Radar />} active={inSensors} onClick={() => goTo("sensors")} />
         <NavItem rail={rail} label="Workload" icon={<Atom />} active={inWorkload} onClick={() => goTo("workload")} />
@@ -530,7 +542,9 @@ export function App() {
               {reason}
             </p>
           ) : null}
-          {inWorkload ? (
+          {inPlanner ? (
+            <PlannerPage />
+          ) : inWorkload ? (
             <Suspense fallback={<p className="text-muted-foreground text-sm">Loading the workload…</p>}>
               <Workload />
             </Suspense>
