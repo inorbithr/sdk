@@ -249,6 +249,22 @@ pub(crate) struct Ui {
     fancy: bool,
 }
 
+thread_local! {
+    /// Whether the questions are closed on this thread: `init` closes them once the person has
+    /// pressed Create (no general question after it), see [`Ui::close_questions`].
+    static CLOSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Closes the questions until it is dropped. See [`Ui::close_questions`].
+#[derive(Debug)]
+pub(crate) struct Closed(());
+
+impl Drop for Closed {
+    fn drop(&mut self) {
+        CLOSED.with(|c| c.set(false));
+    }
+}
+
 /// The marks a finished step wears: a green check, a yellow bang, a red cross. cliclack's own
 /// diamonds and squares say nothing a person can read at a glance (the owner's ask: "success if
 /// it's success"). The theme sets only the log symbols: prompts keep theirs.
@@ -867,6 +883,21 @@ pub(crate) fn bar_lines_in(
 }
 
 impl Ui {
+    /// Closes the questions: while the guard lives, a question put to a terminal is a bug (a
+    /// panic in a debug build, which the tests run). `init` holds it from Create to the end: the flow only acts and prints
+    /// progress after that, every answer having been taken before the review.
+    pub(crate) fn close_questions() -> Closed {
+        CLOSED.with(|c| c.set(true));
+        Closed(())
+    }
+
+    /// Every prompt calls this before it draws anything.
+    fn asking(self) {
+        if self.fancy && CLOSED.with(std::cell::Cell::get) {
+            debug_assert!(false, "a question was asked after Create");
+        }
+    }
+
     /// The look for this run: drawn only when [`fancy_for`] says so.
     #[must_use]
     pub(crate) fn detect(json: bool) -> Self {
@@ -1013,6 +1044,7 @@ impl Ui {
         initial: &str,
         back: bool,
     ) -> Result<Nav<String>, Error> {
+        self.asking();
         if !self.fancy {
             return Err(Error::Usage(format!(
                 "{prompt}: there is no terminal to ask on; pass the choice as a flag"
@@ -1146,6 +1178,7 @@ impl Ui {
         check: impl Fn(&str) -> Result<(), String>,
         back: bool,
     ) -> Result<Nav<String>, Error> {
+        self.asking();
         if !self.fancy {
             return Err(Error::Usage(format!(
                 "{prompt}: there is no terminal to ask on; pass it as an argument"
@@ -1185,6 +1218,7 @@ impl Ui {
         items: &[(String, String)],
         initial: &[String],
     ) -> Result<Vec<String>, Error> {
+        self.asking();
         if !self.fancy {
             return Err(Error::Usage(format!(
                 "{prompt}: there is no terminal to ask on; pass it with --set"
@@ -1223,6 +1257,7 @@ impl Ui {
     ///
     /// The person cancelled.
     pub(crate) fn confirm(self, prompt: &str, default: bool) -> Result<bool, Error> {
+        self.asking();
         if !self.fancy {
             return Ok(default);
         }
@@ -1445,6 +1480,19 @@ mod tests {
 
     use super::{Ui, wrapped};
     use console::Key;
+
+    #[test]
+    #[should_panic(expected = "a question was asked after Create")]
+    fn a_question_after_create_is_a_bug() {
+        let _closed = Ui::close_questions();
+        let _ = Ui { fancy: true }.confirm("Install it?", false);
+    }
+
+    #[test]
+    fn questions_open_again_when_the_latch_drops() {
+        drop(Ui::close_questions());
+        assert!(!super::CLOSED.get());
+    }
 
     use super::{Choice, Look, Marks, Paint, bar_lines, fancy_for, run_keyed};
     use super::{ask_template, back_row, ticked_rows, yes_no_rows};
