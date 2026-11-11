@@ -58,7 +58,7 @@ test("the maintenance menu shows each page's state, offers Bring everything onli
   const calm = rows(maintenanceMenu({}, mact));
   assert.deepEqual(
     calm.filter((x) => x.id.startsWith("maintenance:") && !["all", "undo"].includes(x.id.slice(12))).map((x) => x.hint),
-    ["online", "online"],
+    ["online", "online", "online"],
   );
   assert.ok(calm.find((x) => x.id === "maintenance:all")?.disabled);
   assert.equal(
@@ -80,6 +80,6 @@ test("the maintenance menu shows each page's state, offers Bring everything onli
   assert.equal(r.find((x) => x.id === "maintenance:home")?.hint, "Moving the data");
   assert.equal(r.find((x) => x.id === "maintenance:home")?.checked, true);
   for (const a of r) a.run?.();
-  assert.deepEqual(ran, ["back home", "edit extensions", "all", "undo"]);
+  assert.deepEqual(ran, ["back home", "edit planner", "edit extensions", "all", "undo"]);
   assert.equal(r.find((x) => x.id === "maintenance:undo")?.label, "Undo: Put Home in maintenance");
 });
