@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { cn } from "./frame/cn.ts";
-import { apiGet } from "./lib/api.ts";
-import { apiSend, type LiveState, useLive } from "./lib/live-shim.ts";
+import { apiGet, apiSend } from "./lib/api.ts";
+import { type LiveState, useLive } from "./lib/live.ts";
 import { moonOffset, moonRadius, planetAt, planetRadius, sceneExtent } from "./lib/orbit-layout.ts";
 import { applyFrame, emptyPicture, type Picture } from "./lib/picture.ts";
 import { actionsFor, type WorkAction } from "./lib/workload-actions.ts";
@@ -41,7 +41,7 @@ const LIVE_WORD: Record<LiveState, string> = {
   connecting: "Connecting",
   live: "Live",
   reconnecting: "Reconnecting",
-  off: "Not live",
+  offline: "Not live",
 };
 
 function useAgents(): { agents: ReturnType<typeof agentsOf>; note: string | null } {
@@ -190,8 +190,12 @@ function NodePanel({
     setBusy(true);
     const r = await apiSend(a.method, a.path);
     setBusy(false);
-    setSay(r.ok ? `${a.label}: sent.` : `${a.label} failed: ${r.reason}`);
-    if (r.ok) onDone(`${a.label} sent for ${n.label}.`);
+    setSay(
+      r.state === "ok"
+        ? `${a.label}: sent.`
+        : `${a.label} failed: ${r.state === "error" ? r.reason : "You are signed out."}`,
+    );
+    if (r.state === "ok") onDone(`${a.label} sent for ${n.label}.`);
   };
   return (
     <aside aria-label="Selected" className="rounded-md border p-3 text-sm">
@@ -249,10 +253,11 @@ export default function Workload() {
   const webgl = useMemo(() => hasWebGL(), []);
   const { agents, note } = useAgents();
   const live = useLive<unknown, Picture>("/v1/coordinator/picture/events", {
-    reduce: applyFrame,
+    reduce: (p, e) => applyFrame(p ?? emptyPicture(), e),
     initial: emptyPicture(),
   });
-  const map = useMemo(() => buildMap(live.value, agents), [live.value, agents]);
+  const picture = live.value ?? emptyPicture();
+  const map = useMemo(() => buildMap(picture, agents), [picture, agents]);
   const counts = layerCounts(map);
   const held = useMemo(() => blocked(map), [map]);
   const planets = useMemo(() => {
@@ -318,7 +323,7 @@ export default function Workload() {
         </ul>
         <span className="text-muted-foreground ml-auto text-[12px]" role="status">
           {LIVE_WORD[live.state]}
-          {live.value.tier === "redacted" ? " · redacted" : ""}
+          {picture.tier === "redacted" ? " · redacted" : ""}
           {live.reason && live.state !== "live" ? ` · ${live.reason}` : ""}
         </span>
       </header>

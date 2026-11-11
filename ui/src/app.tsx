@@ -6,12 +6,14 @@ import {
   ListChecks,
   Orbit,
   PanelRight,
+  PenTool,
   Puzzle,
   Radar,
   Settings as SettingsIcon,
   Wrench,
 } from "lucide-react";
 import { lazy, type MouseEvent, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
+import { CANVAS, canvasRoute } from "./canvas/canvas-route.ts";
 import {
   applyLayout,
   applySpan,
@@ -67,6 +69,8 @@ import { HelpOverlay, keysShown, Palette, type PaletteItem } from "./shortcuts-v
 const Workload = lazy(() => import("./workload.tsx"));
 const WORKLOAD = "/workload";
 
+const Canvas = lazy(() => import("./canvas/canvas-page.tsx"));
+
 const SensorsPage = lazy(() => import("./sensors/sensors-page.tsx"));
 
 // The page `iohr ui serve` serves, drawn in the shell frame from the Mac app (frame/frame.tsx, RFC 0217 C5): the
@@ -106,19 +110,22 @@ export function App() {
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
   const inPlanner = plannerRoute(window.location.pathname) !== null;
+  const inCanvas = canvasRoute(window.location.pathname) !== null;
   const inSensors = sensorsRoute(window.location.pathname);
   const inWorkload = window.location.pathname === WORKLOAD;
   const pageKey = inSettings
     ? "settings"
     : inPlanner
       ? "planner"
-      : inSensors
-        ? "sensors"
-        : inWorkload
-          ? "workload"
-          : routed === null
-            ? HOME
-            : `ext:${routed}`;
+      : inCanvas
+        ? "canvas"
+        : inSensors
+          ? "sensors"
+          : inWorkload
+            ? "workload"
+            : routed === null
+              ? HOME
+              : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -232,6 +239,7 @@ export function App() {
   const pages = [
     { key: HOME, title: "Home" },
     { key: "planner", title: "Planner" },
+    { key: "canvas", title: "Canvas" },
     { key: "sensors", title: "Sensors" },
     { key: "workload", title: "Workload" },
     { key: "settings", title: "Settings" },
@@ -253,6 +261,10 @@ export function App() {
     }
     if (key === "settings") {
       window.location.assign(SETTINGS);
+      return;
+    }
+    if (key === "canvas") {
+      window.location.assign(CANVAS);
       return;
     }
     if (key === "workload") {
@@ -328,11 +340,13 @@ export function App() {
 
   const title = (
     <h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
-      <span className={cn((chosen || inSettings || inWorkload) && "text-muted-foreground")}>InOrbit</span>
-      {chosen || inSettings || inWorkload ? (
+      <span className={cn((chosen || inSettings || inWorkload || inCanvas) && "text-muted-foreground")}>InOrbit</span>
+      {chosen || inSettings || inWorkload || inCanvas ? (
         <>
           <span className="text-muted-foreground">/</span>
-          <span className="truncate">{inSettings ? "Settings" : inWorkload ? "Workload" : chosen?.title}</span>
+          <span className="truncate">
+            {inSettings ? "Settings" : inCanvas ? "Canvas" : inWorkload ? "Workload" : chosen?.title}
+          </span>
         </>
       ) : null}
     </h1>
@@ -434,10 +448,11 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings && !inPlanner && !inSensors && !inWorkload}
+          active={routed === null && !inSettings && !inPlanner && !inSensors && !inWorkload && !inCanvas}
           onClick={() => window.location.assign("/")}
         />
         <NavItem rail={rail} label="Planner" icon={<ListChecks />} active={inPlanner} onClick={() => goTo("planner")} />
+        <NavItem rail={rail} label="Canvas" icon={<PenTool />} active={inCanvas} onClick={() => goTo("canvas")} />
         <NavItem rail={rail} label="Sensors" icon={<Radar />} active={inSensors} onClick={() => goTo("sensors")} />
         <NavItem rail={rail} label="Workload" icon={<Atom />} active={inWorkload} onClick={() => goTo("workload")} />
       </ul>
@@ -543,6 +558,10 @@ export function App() {
               listing={listing}
               onEdit={setEditing}
             />
+          ) : inCanvas ? (
+            <Suspense fallback={<p className="text-muted-foreground text-sm">Opening the canvas…</p>}>
+              <Canvas />
+            </Suspense>
           ) : inSensors ? (
             <Suspense fallback={<p className="notice">Loading Sensors…</p>}>
               <SensorsPage session={account.session} onSignIn={account.signIn} />
