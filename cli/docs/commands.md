@@ -147,6 +147,10 @@ then also names what it found, from the local checks only (it never asks the Key
 Operate. `-h` prints one line per command and `--help` the long text. The help is coloured
 on a terminal, and plain under `NO_COLOR`, `--json` or a pipe.
 
+The root help ends with three examples, a `Get started: iohr login, then iohr doctor` line
+and every [exit code](#exit-codes). `--sign-in` and the `--via-*` attribution flags show
+only in `--help`, not in `-h`.
+
 ## Usage errors
 
 A usage error (exit 2) helps instead of only refusing. It:
