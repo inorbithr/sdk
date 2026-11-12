@@ -220,8 +220,9 @@ impl ClaudeExec {
     }
 
     /// The turn's command: its model's `cargo` builds into its repository's shared
-    /// directory, not into a `target/` of the job's checkout (RFC 0189). `checkout` is
-    /// relative to the working directory.
+    /// directory, not into a `target/` of the job's checkout (RFC 0189), and its `mise`
+    /// reads the checkout's own configuration (`env::trusted`). `checkout` is relative to
+    /// the working directory; anything else gets neither.
     ///
     /// Under the OS sandbox (SR-35) the command is the sandbox tool with `claude` after it;
     /// an unconfined runner that may not run unconfined gets an error, never a command.
@@ -245,6 +246,10 @@ impl ClaudeExec {
             }
         };
         cmd.current_dir(&self.workdir);
+        if let Some(dir) = &own {
+            let (k, v) = env::trusted(dir);
+            cmd.env(k, v);
+        }
         if let Some(t) = target {
             cmd.env(hygiene::TARGET_VAR, t);
         }
@@ -844,10 +849,15 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             env.lines().any(|l| l == want),
             "{want} not in the child's environment"
         );
+        let trust = format!("MISE_TRUSTED_CONFIG_PATHS={}", checkout.display());
+        assert!(
+            env.lines().any(|l| l == trust),
+            "{trust} not in the child's environment"
+        );
     }
 
     /// A pack with no checkout, or one that climbs out of the working directory, gets no
-    /// shared directory.
+    /// shared directory and no mise trust.
     #[tokio::test]
     async fn a_turn_with_no_worktree_gets_no_shared_build_directory() {
         for checkout in ["", "../x"] {
@@ -859,6 +869,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             assert_eq!(f.outcome, "replied", "{}", f.detail);
             let env = std::fs::read_to_string(dir.path().join("env.txt")).unwrap();
             assert!(!env.contains("CARGO_TARGET_DIR"), "{checkout:?}");
+            assert!(!env.contains("MISE_TRUSTED_CONFIG_PATHS"), "{checkout:?}");
         }
     }
 
