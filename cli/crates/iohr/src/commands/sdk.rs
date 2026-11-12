@@ -13,8 +13,9 @@ use crate::Env;
 use crate::cli::{Global, SdkCheck, SdkConfig, SdkExamples, SdkGenerate};
 use crate::context::{Ctx, Session, session_for};
 use crate::error::Error;
-use crate::lock::Lock;
+use crate::lock::{Drift, Lock};
 use crate::output::Out;
+use crate::ui::{CheckRow, Mark, Paint};
 
 /// `iohr sdk generate`: from profiles (`--profile`), from files (`--from`), or both.
 pub(crate) async fn generate(
@@ -77,6 +78,11 @@ pub(crate) async fn check(g: &Global, env: &Env, args: &SdkCheck, out: Out) -> R
             "files_changed": files_changed,
             "ok": drift.is_empty() && files_changed.is_empty(),
         }));
+    } else if Paint::stdout(false).color() {
+        let rows = check_rows(lock.profiles.keys(), &drift, &files_changed);
+        let n = lock.profiles.len();
+        let checked = format!("{n} profile{} checked", if n == 1 { "" } else { "s" });
+        Out::raw(Paint::stdout(false).findings(&rows, &checked).as_bytes());
     } else {
         for d in &drift {
             let mut lines = vec![format!(
@@ -109,13 +115,62 @@ pub(crate) async fn check(g: &Global, env: &Env, args: &SdkCheck, out: Out) -> R
             if drift.len() == 1 { "" } else { "s" },
         )));
     }
-    if !out.json {
+    // The drawn card already said every profile is current.
+    if !out.json && !Paint::stdout(false).color() {
         Out::note(&format!(
             "{}: every profile's cut is the one the surface was generated from.",
             args.lock.display()
         ));
     }
     Ok(())
+}
+
+/// `sdk check` for a person: a row per profile, a moved one with the operations it gained
+/// and lost and the command that brings the surface back; then each file that differs.
+fn check_rows<'a>(
+    profiles: impl Iterator<Item = &'a String>,
+    drift: &[Drift],
+    files_changed: &[String],
+) -> Vec<CheckRow> {
+    let fix = || {
+        (
+            "fix",
+            "iohr sdk generate, then commit the result".to_owned(),
+        )
+    };
+    let mut rows: Vec<CheckRow> = profiles
+        .map(|p| match drift.iter().find(|d| &d.profile == p) {
+            None => CheckRow {
+                mark: Mark::Ok,
+                id: p.clone(),
+                what: "the cut the surface was generated from".into(),
+                notes: vec![],
+            },
+            Some(d) => {
+                let mut notes: Vec<(&'static str, String)> = Vec::new();
+                notes.extend(d.added.iter().map(|l| ("+", l.clone())));
+                notes.extend(d.removed.iter().map(|l| ("-", l.clone())));
+                notes.push(fix());
+                CheckRow {
+                    mark: Mark::Fail,
+                    id: p.clone(),
+                    what: format!("the cut moved ({} -> {})", short(&d.was), short(&d.now)),
+                    notes,
+                }
+            }
+        })
+        .collect();
+    rows.extend(files_changed.iter().map(|f| CheckRow {
+        mark: Mark::Fail,
+        id: f.clone(),
+        what: "differs from what generate writes".into(),
+        notes: if drift.is_empty() {
+            vec![fix()]
+        } else {
+            vec![]
+        },
+    }));
+    rows
 }
 
 /// The document a profile sees now: `GET /v1/openapi.json`, with `?account=` for a
@@ -320,5 +375,31 @@ pub(crate) fn config(g: &Global, args: &SdkConfig) -> Result<(), Error> {
             Ok(())
         }
         Err(invalid) => Err(Error::Failed(invalid.to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Drift, check_rows};
+    use crate::ui::Mark;
+
+    #[test]
+    fn a_moved_profile_lists_what_it_gained_and_lost_and_how_to_bring_it_back() {
+        let profiles = ["ci".to_owned(), "team".to_owned()];
+        let drift = [Drift {
+            profile: "team".into(),
+            was: "a".repeat(64),
+            now: "b".repeat(64),
+            added: vec!["GET /v1/new".into()],
+            removed: vec!["GET /v1/old".into()],
+        }];
+        let r = check_rows(profiles.iter(), &drift, &["src/a.rs".to_owned()]);
+        assert_eq!(r[0].mark, Mark::Ok);
+        assert_eq!(r[1].mark, Mark::Fail);
+        assert_eq!(r[1].notes[0], ("+", "GET /v1/new".to_owned()));
+        assert_eq!(r[1].notes[1], ("-", "GET /v1/old".to_owned()));
+        assert_eq!(r[1].notes[2].0, "fix");
+        assert_eq!(r[2].id, "src/a.rs");
+        assert!(r[2].notes.is_empty(), "the fix is said once");
     }
 }

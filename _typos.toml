@@ -1,12 +1,14 @@
 [default]
-# Short commit hashes in release-please changelog links (ba33bdf) are not words.
-extend-ignore-re = ["\\[[0-9a-f]{7,12}\\]\\(https://github\\.com/[^)]*/commit/[0-9a-f]{40}\\)"]
+# The W3C traceparent example span id, in the service templates' tests; short commit hashes in release-please changelog links (ba33bdf) are not words.
+extend-ignore-re = ["00f067aa0ba902b7", "\\[[0-9a-f]{7,12}\\]\\(https://github\\.com/[^)]*/commit/[0-9a-f]{40}\\)"]
 
 [default.extend-words]
 # Croatian and product words that appear in docs.
 hr = "hr"
 # The gzip crate (flate2).
 flate = "flate"
+# Comment-thread id prefix (thr_1) in the canvas tests.
+thr = "thr"
 
 [default.extend-identifiers]
 # A pydantic-core function name.

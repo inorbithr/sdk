@@ -239,6 +239,7 @@ async fn pages_the_crawler_kept_are_read_without_asking_the_site() {
             "<h1>Pricing</h1><p>The Picker costs $1,299.00 per month.</p>",
         ),
     ] {
+        iohr::kb::ensure_crawl_dir(&root).unwrap();
         let file = iohr::kb::fetch::cache_path(&dir, &format!("{}{p}", server.uri()));
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(
@@ -373,6 +374,7 @@ async fn a_rendered_page_that_has_no_text_is_counted_as_a_shell() {
     let root = tmp.path().join("proj");
     let dir = root.join(".inorbit/crawl/acme.test");
     let url = format!("{}/app", server.uri());
+    iohr::kb::ensure_crawl_dir(&root).unwrap();
     let file = iohr::kb::fetch::cache_path(&dir, &url);
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     std::fs::write(

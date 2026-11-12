@@ -364,7 +364,9 @@ pub(crate) async fn sync_command(
     };
     let name = name_of(&dir)?;
     let env_name = g.environment_name().to_owned();
-    let state = super::project::state_root()?.join(&name);
+    let state = crate::project::place::Layout::of(&dir)
+        .state()
+        .ok_or_else(|| Error::Failed("cannot find the home folder".into()))?;
     let queued = space::queued(&state, &env_name);
     let flagged = a
         .visibility

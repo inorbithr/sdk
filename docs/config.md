@@ -386,6 +386,10 @@ sync = false
 
 [panel]                             # the floating panel (section 4.8)
 mouse = "menu"
+chat = "on"
+
+[doctor]                            # `iohr doctor` and the `?` card (section 4.9)
+auto_fix = false
 ```
 
 Rules:
@@ -818,16 +822,39 @@ running the command is the explicit choice.
 
 ### 4.8 The panel table
 
-The floating panel (`iohr`, `iohr panel`) has one setting.
+The floating panel (`iohr`, `iohr panel`) has two settings.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
 | `mouse` | `menu`: the panel takes mouse reports only while a view is open (a click on a row opens it, a click outside closes it, the wheel moves the selection) and the shell keeps normal drag-to-select the rest of the time; `always`: also at rest, where a click on the pill opens the menu and every other click goes through to the program; `off`: no mouse reports at all | `menu` | `iohr`, `iohr panel`; `IOHR_PANEL_MOUSE` overrides it |
+| `chat` | `on`: the framed chat box (RFC 0212) at the bottom of the terminal, four rows reserved with a scroll region, where `?` and `??` take one Enter and the answer shows a progress row and a Stop button; `hidden`: the box starts folded to a corner chip; `off`: no box and no chip, the panel as it was | `on` | `iohr`, `iohr panel` around zsh (other shells have no box); `IOHR_PANEL_CHAT` overrides it |
 
 The key that opens the menu is not a setting: the pill shows the one that works in your terminal
 (`^G` in Terminal.app, iTerm2, VS Code, Ghostty, WezTerm and Hyper, whose default makes Option+i a
 dead key; `⌥i` elsewhere), and both always work, unless `[ask] menu_key = "ctrl-g"` takes Ctrl-G
 for the `?` menu.
+
+The chat box has its own keys. `Ctrl-]` hides and shows it (also `^G` then `c` in the menu, a click on
+`hide`, and a click on the corner chip while it is hidden). It is never stuck hidden: `Ctrl-]`, the
+chip, the menu entry, `[panel] chat = "off"` or a new shell each bring the rows back. `Ctrl-]` is
+zsh's find-character key, so the panel rebinds it only inside itself and only while the box is on.
+While the box or its chip shows, the panel takes mouse reports for them (the box's buttons need
+them), so drag-to-select needs Option (Terminal.app, iTerm2) or Shift; with `chat = "off"` the
+`mouse` setting alone decides, as before.
+
+### 4.9 The doctor table
+
+`iohr doctor` checks this machine for the known problems and says how to fix each. It has one
+setting.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `auto_fix` | `true`: the safe fixes run on their own whenever `iohr doctor` runs, and the `?` card tells you what it found and what it did; `false`: a fix is shown, never run | `false` | `iohr doctor`, `iohr ask` (`?`, `??`) |
+
+A safe fix only restarts something that is already down (today: the MCP bridge's launchd job).
+Every other fix (signing in again, freeing disk, repairing `config.toml`) is shown and never
+run. `iohr doctor --fix` runs the safe fixes once without the setting. The file is read, never
+written by `iohr`: you edit it.
 
 ## 5. Credentials
 

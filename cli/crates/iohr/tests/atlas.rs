@@ -69,6 +69,8 @@ fn project() -> (tempfile::TempDir, PathBuf) {
         &[
             "project",
             "init",
+            "--template",
+            "blank",
             "made",
             "--dir",
             dir.to_str().unwrap(),
@@ -597,6 +599,8 @@ async fn a_refused_import_never_fails_init_and_says_it_once() {
         &[
             "project",
             "init",
+            "--template",
+            "blank",
             "made",
             "--dir",
             dir.to_str().unwrap(),
