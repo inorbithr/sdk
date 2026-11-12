@@ -40,7 +40,7 @@ public final class ClientCredentials implements TokenProvider, Observable {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final String keyId;
-    private final String secret;
+    private final transient String secret;
     private final Path secretFile;
     private final List<String> scopes;
     private final URI tokenUrl;
@@ -222,6 +222,6 @@ public final class ClientCredentials implements TokenProvider, Observable {
     /** Never the secret. */
     @Override
     public String toString() {
-        return "ClientCredentials(" + keyId + ", secret: <redacted>)";
+        return "ClientCredentials(" + keyId + ", secret: " + Redaction.MARKER + ")";
     }
 }

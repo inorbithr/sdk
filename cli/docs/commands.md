@@ -76,7 +76,7 @@ ends its `--help` with real examples.
 | `iohr tunnel` | A loopback SSH pipe into an environment's edge | [below](#iohr-tunnel) |
 | `iohr browser install [--print]` | Install InOrbit Trails, the browser extension | [below](#iohr-browser-install) |
 | `iohr doctor [--fix]` | Check this machine for the known problems (signed out, MCP bridge down, low disk, unreadable `config.toml`), say how to fix each, exit 1 on a failure. `--fix`, or `[doctor] auto_fix = true`, runs the safe fixes (restart a stopped bridge); the `?` card shows what it found | [below](#iohr-doctor) |
-| `iohr upgrade [--check]` | Update `iohr` the way it was installed | [Upgrade](install.md#upgrade) |
+| `iohr upgrade [--check] [--no-extensions] [--yes]` | Update `iohr` the way it was installed, then every installed extension; `--no-extensions` leaves extensions alone | [Upgrade](install.md#upgrade) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell | |
 | `iohr help [COMMAND]` | The help | [below](#the-help) |
 

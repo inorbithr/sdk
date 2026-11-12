@@ -19,7 +19,7 @@ final class TokenCache {
     private final Object lock = new Object();
     private final Supplier<Token> fetch;
     private volatile BiConsumer<String, String> listener;
-    private Token token;
+    private transient Token token;
     private Instant issued;
     private Instant notBefore = Instant.MIN;
 

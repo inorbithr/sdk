@@ -466,12 +466,11 @@ pub enum Command {
     /// `brew upgrade inorbithr/tap/iohr` (and says `brew trust inorbithr/tap` when
     /// Homebrew refuses the tap); a copy from the install script is downloaded, checked
     /// against the release's checksums and attestations and replaced in place; anything
-    /// else gets the command to run. `--check` only reports. Needs no sign-in.
-    Upgrade {
-        /// Only say whether a newer release exists and what would run; change nothing.
-        #[arg(long)]
-        check: bool,
-    },
+    /// else gets the command to run. Then every installed extension is upgraded to its
+    /// newest release, one at a time: one that fails does not stop the others, and one
+    /// whose release declares new privileges is left for a person unless --yes (or a
+    /// terminal) confirms them. `--check` only reports. Needs no sign-in.
+    Upgrade(UpgradeArgs),
     /// Sign a built iohr the way releases are signed (the preview install, `cli:preview-install`).
     ///
     /// Signs the binary at PATH with this Mac's Apple Development or Developer ID
@@ -681,6 +680,21 @@ pub enum LabCommand {
     /// front matter, status logs, and the redaction rules on public documents. Reads
     /// only the files named, makes no network call, needs no sign-in.
     Check(LabCheck),
+}
+
+/// The flags of `iohr upgrade`.
+#[derive(Debug, Args)]
+pub struct UpgradeArgs {
+    /// Only say whether a newer release exists and what would run; change nothing.
+    #[arg(long)]
+    pub check: bool,
+    /// Upgrade iohr only, not the installed extensions.
+    #[arg(long)]
+    pub no_extensions: bool,
+    /// Confirm the new privileges of an extension release without asking (needed
+    /// without a terminal).
+    #[arg(long, short = 'y')]
+    pub yes: bool,
 }
 
 #[derive(Debug, Args)]

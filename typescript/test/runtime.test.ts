@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import { inspect } from "node:util";
+import { bearer } from "../src/auth.js";
 import { CODES, codeForStatus } from "../src/errors.js";
 import {
   ApiError,
@@ -10,6 +13,7 @@ import {
   codegen,
   RawResponse,
   StaticToken,
+  TooLargeError,
 } from "../src/index.js";
 import { backoffMs, retryAfter, retryAfterMs } from "../src/retry.js";
 import { parseTimestamp } from "../src/timestamp.js";
@@ -98,6 +102,12 @@ describe("client", () => {
       new Client({ token: "t", baseUrl: "http://127.0.0.1:8080" }).baseUrl,
       "http://127.0.0.1:8080",
     );
+    for (const host of ["127.example.com", "127.0.0.1.example.com", "localhost.example"]) {
+      assert.throws(() => new Client({ token: "t", baseUrl: `http://${host}` }), ConfigError, host);
+    }
+    for (const host of ["127.1.2.3", "localhost:1", "[::1]:8080"]) {
+      assert.doesNotThrow(() => new Client({ token: "t", baseUrl: `http://${host}` }), host);
+    }
   });
 
   it("reads a named profile's variables and nothing else", () => {
@@ -133,6 +143,31 @@ describe("credentials", () => {
     }
   });
 
+  it("never print a token they hand out", async () => {
+    const tokens = [await new StaticToken("tok3n").token(), bearer("tok3n", 1_900_000_000_000)];
+    for (const t of tokens) {
+      assert.equal(t.access, "tok3n");
+      for (const text of [
+        JSON.stringify(t),
+        JSON.stringify({ token: t, list: [t] }),
+        JSON.stringify({ ...t }),
+        String(t),
+        `${t}`,
+        inspect(t),
+        inspect({ token: t }, { depth: 5 }),
+        inspect(t, { showHidden: true }),
+        Object.keys(t).join(","),
+      ]) {
+        assert.doesNotMatch(text, /tok3n/);
+      }
+      assert.equal((JSON.parse(JSON.stringify(t)) as { access: string }).access, "<redacted>");
+    }
+    assert.equal(
+      (JSON.parse(JSON.stringify(tokens[1])) as { expiresAt: number }).expiresAt,
+      1_900_000_000_000,
+    );
+  });
+
   it("make one exchange however many calls wait for it", async () => {
     let exchanges = 0;
     const fetch: typeof globalThis.fetch = async () => {
@@ -147,6 +182,45 @@ describe("credentials", () => {
     cc.invalidate();
     await cc.token();
     assert.equal(exchanges, 2);
+  });
+});
+
+describe("answers", () => {
+  it("refuse a chunked body past 16 MiB while it streams", async () => {
+    let sent = 0;
+    let closed = false;
+    const chunk = Buffer.alloc(64 * 1024, 0x20);
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.on("close", () => {
+        closed = true;
+      });
+      // 64 MiB at most, so a missing cap fails the test rather than hanging it.
+      const pump = (): void => {
+        while (!closed && sent < 64 * 1024 * 1024) {
+          sent += chunk.length;
+          if (!res.write(chunk)) {
+            res.once("drain", pump);
+            return;
+          }
+        }
+        res.end();
+      };
+      pump();
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const client = new Client({ token: "t", baseUrl: `http://127.0.0.1:${port}` });
+      await assert.rejects(
+        client.request({ name: "me", method: "GET", path: "/v1/me" }),
+        (e) => e instanceof TooLargeError,
+      );
+      assert.ok(sent < 32 * 1024 * 1024, `the server sent ${sent} bytes`);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((r) => server.close(r));
+    }
   });
 });
 
