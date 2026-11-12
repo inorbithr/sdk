@@ -71,6 +71,20 @@ fn on_path(program: &str) -> bool {
     })
 }
 
+/// Whether the program is on the PATH and starts: a version-manager shim (mise's `dotnet`)
+/// is a file on the PATH that refuses to run outside a folder that sets a version, and a
+/// language whose toolchain does not run is skipped like one that is missing, never faked.
+fn toolchain_runs(program: &str) -> bool {
+    on_path(program)
+        && (program != "dotnet"
+            || Command::new("dotnet")
+                .arg("--version")
+                .current_dir(std::env::temp_dir())
+                .stdin(Stdio::null())
+                .output()
+                .is_ok_and(|o| o.status.success()))
+}
+
 /// Whether the package registry a variant installs from answers (TCP connect, 5 s).
 fn registry_reachable(lang: &str) -> bool {
     use std::net::ToSocketAddrs;
@@ -248,8 +262,17 @@ fn the_enterprise_floor_is_written_on_every_template_but_blank() {
         ("service", "go"),
         ("service", "python"),
         ("service", "rust"),
+        ("service", "java"),
+        ("service", "csharp"),
+        ("service", "dart"),
+        ("service", "swift"),
         ("cli", "go"),
         ("cli", "rust"),
+        ("cli", "typescript"),
+        ("cli", "java"),
+        ("cli", "csharp"),
+        ("cli", "dart"),
+        ("cli", "swift"),
         ("agent", "python"),
         ("agent", "typescript"),
         ("agent", "go"),
@@ -460,9 +483,22 @@ fn every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here(
         ("service", "python", &["python3"]),
         ("service", "typescript", &["node"]),
         ("service", "rust", &["cargo"]),
+        ("service", "java", &["javac", "java"]),
+        ("service", "csharp", &["dotnet"]),
+        ("service", "dart", &["dart"]),
+        ("service", "swift", &["swift"]),
         ("cli", "go", &["go"]),
         ("cli", "python", &["python3"]),
         ("cli", "rust", &["cargo"]),
+        ("cli", "typescript", &["node"]),
+        ("cli", "java", &["javac", "java"]),
+        ("cli", "csharp", &["dotnet"]),
+        ("cli", "dart", &["dart"]),
+        ("cli", "swift", &["swift"]),
+        ("blank", "java", &["javac", "java"]),
+        ("blank", "csharp", &["dotnet"]),
+        ("blank", "dart", &["dart"]),
+        ("blank", "swift", &["swift"]),
         ("agent", "python", &["uv"]),
         ("agent", "typescript", &["node"]),
         ("agent", "go", &["go"]),
@@ -487,7 +523,7 @@ fn every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here(
     ];
     let mut ran = 0;
     for (template, lang, needs) in table {
-        if !needs.iter().all(|p| on_path(p)) {
+        if !needs.iter().all(|p| toolchain_runs(p)) {
             continue;
         }
         // An MCP server's smoke installs the official SDK from its registry (a cold cache in

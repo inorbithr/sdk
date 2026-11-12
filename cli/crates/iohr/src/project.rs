@@ -1504,7 +1504,7 @@ mod tests {
     fn the_blank_template_is_a_plain_project_and_its_smoke_test_is_its_own_test() {
         let tpl =
             template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
-        assert_eq!(tpl.live_variants().len(), 5);
+        assert_eq!(tpl.live_variants().len(), 9);
         for v in tpl.live_variants() {
             let (files, runner) = rendered_in("blank", "my-shop", &v.id);
             let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
