@@ -17,6 +17,8 @@ use crate::output::Out;
 use crate::prompt;
 use crate::ui::{CheckRow, Listed, Mark, Paint};
 
+pub(crate) mod upgrades;
+
 impl From<ExtError> for Error {
     fn from(e: ExtError) -> Self {
         match e {
@@ -226,7 +228,28 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
         ExtCommand::List => list(&store, out),
         ExtCommand::Packages => crate::commands::ext_packages::packages(g, env, &store, out).await,
         ExtCommand::Upgrade { name, lock, yes } => {
-            upgrade(g, env, &store, name, lock.as_deref(), yes, out).await
+            let rows = upgrades::all(g, env, &store, name, lock.as_deref(), yes).await?;
+            if rows.is_empty() {
+                Out::note("No extensions installed.");
+            }
+            if out.json {
+                Out::print_json(&upgrades::json(&rows));
+            }
+            let failed = upgrades::failures(&rows);
+            if failed > 0 {
+                return Err(Error::Failed(format!(
+                    "{failed} extension(s) failed to upgrade; the others were upgraded"
+                )));
+            }
+            // A refusal is left for a person; asked for here, it still exits 2.
+            match rows
+                .iter()
+                .find(|r| r.status == upgrades::Status::Refused)
+                .and_then(|r| r.detail.clone())
+            {
+                Some(why) => Err(Error::Usage(why)),
+                None => Ok(()),
+            }
         }
         ExtCommand::Remove { name, lock } => {
             check_name(&name)?;
@@ -689,6 +712,12 @@ fn report(f: &Fetched, entry: &Entry, out: Out) {
         }));
         return;
     }
+    installed_note(f, entry);
+}
+
+/// What an install or upgrade says on stderr.
+fn installed_note(f: &Fetched, entry: &Entry) {
+    let m = &f.manifest;
     Out::note(&format!(
         "Installed {} {} ({}).\n  signed by   {}\n  built from  {}\n  may ask for {}\n  privileges  {}\nRun it as `iohr {} ...`.",
         m.name,
@@ -758,84 +787,6 @@ fn list(store: &Store, out: Out) -> Result<(), Error> {
             &rows,
             &Listed::new("extension", "extensions").next("find more", "iohr ext search"),
         );
-    }
-    Ok(())
-}
-
-async fn upgrade(
-    g: &Global,
-    env: &Env,
-    store: &Store,
-    name: Option<String>,
-    lock: Option<&Path>,
-    yes: bool,
-    out: Out,
-) -> Result<(), Error> {
-    let installed = store.lock()?;
-    let names: Vec<String> = match name {
-        Some(n) => {
-            if !installed.entries.contains_key(&n) {
-                return Err(Error::Usage(format!(
-                    "{n} is not installed; `iohr ext install {n}` installs it"
-                )));
-            }
-            vec![n]
-        }
-        None => installed.entries.keys().cloned().collect(),
-    };
-    if names.is_empty() {
-        Out::note("No extensions installed.");
-        return Ok(());
-    }
-    let (registry, policy) = setup(g, env)?;
-    for n in names {
-        let current = &installed.entries[&n];
-        let latest = newest(&registry, &n).await?;
-        let newer = match (check_version(&latest), check_version(&current.version)) {
-            (Ok(l), Ok(c)) => l > c,
-            _ => false,
-        };
-        if !newer {
-            Out::note(&format!("{n} {} is the newest.", current.version));
-            continue;
-        }
-        let before = store
-            .installed(&n)?
-            .map(|(_, r, _)| r.manifest.scopes)
-            .unwrap_or_default();
-        let f = fetch(&registry, &policy, &n, &Want::Version(latest)).await?;
-        let added: Vec<&String> = f
-            .manifest
-            .scopes
-            .iter()
-            .filter(|s| !before.contains(s))
-            .collect();
-        let more = current.unconfirmed(&f.manifest.privileges);
-        confirm_privileges(
-            &format!("{n} {}", f.manifest.version),
-            &more,
-            true,
-            yes,
-            terminal().as_mut().map(|a| a as &mut Ask),
-        )?;
-        let entry = keep(store, &registry, &f, lock, None)?;
-        report(&f, &entry, out);
-        if !more.is_empty() {
-            Out::note(&format!(
-                "  new privileges {} (its system service holds these)",
-                more.join(", ")
-            ));
-        }
-        if !added.is_empty() {
-            Out::note(&format!(
-                "  new scopes  {} (it may now ask for these)",
-                added
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
     }
     Ok(())
 }

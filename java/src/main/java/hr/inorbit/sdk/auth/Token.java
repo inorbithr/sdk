@@ -1,13 +1,19 @@
 package hr.inorbit.sdk.auth;
 
+import com.fasterxml.jackson.annotation.JsonValue;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** A bearer token and, when known, when it stops working. {@link #toString()} never shows it. */
+/**
+ * A bearer token and, when known, when it stops working. Neither {@link #toString()} nor its JSON
+ * form shows it.
+ */
 public final class Token {
 
-    private final String access;
+    private final transient String access;
     private final Instant expiresAt;
 
     /**
@@ -42,6 +48,17 @@ public final class Token {
     /** Never the token. */
     @Override
     public String toString() {
-        return "Token[<redacted>]";
+        return "Token[" + Redaction.MARKER + "]";
+    }
+
+    /** The JSON form: the marker in place of the token, and when it expires when known. */
+    @JsonValue
+    private Map<String, Object> json() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("access", Redaction.MARKER);
+        if (expiresAt != null) {
+            m.put("expires_at", expiresAt.toString());
+        }
+        return m;
     }
 }
