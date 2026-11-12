@@ -2138,6 +2138,120 @@ async fn sign_in_io_calls_the_coordinator_with_a_minted_token_and_guards_the_sec
     );
 }
 
+const REVOKE_ID: &str = "rnr_01M5Z0WF3MRKDQ75T7F72E3F9N";
+
+/// A server that lists `REVOKE_ID` as enrolled and, in the coordinator's list, as
+/// `status`; DELETE answers `{}`.
+async fn revoke_server(dir: &Path, status: &str) -> MockServer {
+    let server = MockServer::start().await;
+    login(&server, dir, &token_with(&["identity:read"])).await;
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": [
+            {"runner_id": REVOKE_ID, "label": "mac", "public_key": "k", "revoked_at": ""}
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": [
+            {"runner_id": REVOKE_ID, "name": "mac", "os": "macos", "status": status,
+             "last_seen_at": "2026-10-12T08:00:00Z"}
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path_regex(r"^/v1/approvals/runners/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&server)
+        .await;
+    server
+}
+
+async fn deletes(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "DELETE")
+        .map(|r| r.url.path().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn revoke_refuses_a_bad_id_and_an_unknown_runner_without_a_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = revoke_server(dir.path(), "offline").await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "revoke", "run_1"],
+    ));
+    assert_ne!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(text(&o).contains("rnr_"), "{}", text(&o));
+    let other = "rnr_01M5Z0WF3MRKDQ75T7F72E3F9P";
+    let o = run(&mut iohr(&server, dir.path(), &["runner", "revoke", other]));
+    assert_ne!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(
+        text(&o).contains("not a runner of this account"),
+        "{}",
+        text(&o)
+    );
+    assert_eq!(deletes(&server).await, Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn revoke_refuses_an_online_runner_unless_forced() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = revoke_server(dir.path(), "online").await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "revoke", REVOKE_ID],
+    ));
+    assert_ne!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(text(&o).contains("--force-online"), "{}", text(&o));
+    assert_eq!(deletes(&server).await, Vec::<String>::new());
+    let args = ["runner", "revoke", REVOKE_ID, "--force-online"];
+    let o = run(&mut iohr(&server, dir.path(), &args));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert_eq!(
+        deletes(&server).await,
+        vec![format!("/v1/approvals/runners/{REVOKE_ID}")]
+    );
+}
+
+#[tokio::test]
+async fn revoke_sends_the_delete_and_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = revoke_server(dir.path(), "offline").await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "revoke", REVOKE_ID],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let said = text(&o);
+    assert!(
+        said.contains(&format!("revoked {REVOKE_ID} (mac)")),
+        "{said}"
+    );
+    assert!(said.contains("macos"), "{said}");
+    assert_eq!(
+        deletes(&server).await,
+        vec![format!("/v1/approvals/runners/{REVOKE_ID}")]
+    );
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "revoke", REVOKE_ID, "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v, json!({}));
+}
+
 // ---- the session host (RFC 0213)
 
 /// The one socket a host made below `data`, if it is there.
@@ -2147,6 +2261,29 @@ fn session_socket(data: &Path) -> Option<std::path::PathBuf> {
         .filter_map(Result::ok)
         .map(|e| e.path().join("sock"))
         .find(|p| p.exists())
+}
+
+/// How many sessions the host counts, asked on its socket (`status`): none while no host
+/// answers. A shell that was started is in the count only once it has joined, not when the
+/// socket first appears.
+fn host_sessions(data: &Path) -> usize {
+    use std::io::{BufRead as _, BufReader};
+    let Some(sock) = session_socket(data) else {
+        return 0;
+    };
+    let Ok(mut s) = std::os::unix::net::UnixStream::connect(sock) else {
+        return 0;
+    };
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+    if writeln!(s, "status").is_err() {
+        return 0;
+    }
+    let mut line = String::new();
+    let _ = BufReader::new(s).read_line(&mut line);
+    line.split("sessions=")
+        .nth(1)
+        .and_then(|n| n.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 /// What the shell and the host wrote, for a failure message.
@@ -2305,6 +2442,12 @@ async fn a_killed_shell_takes_the_host_with_it() {
     })
     .await;
     assert!(beats_at_least(&server, 1).await >= 1);
+    // Kill only a shell the host has counted: one killed before it joined leaves a host nobody
+    // joined, which waits out its first-join window (30 s) and not the pipe's close.
+    wait_until("the shell to join", || {
+        host_sessions(&dir.path().join("data")) >= 1
+    })
+    .await;
     // SIGKILL: the shell cannot say goodbye; the kernel closes its end of the pipe.
     shell.kill().unwrap();
     shell.wait().unwrap();

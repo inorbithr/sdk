@@ -7,7 +7,7 @@
 # (`golden/`), the exit codes, and a version line that carries a commit. A variant is `live`
 # only when that test passes.
 id = "cli"
-description = "A command line with text and JSON output, exit codes and a version with the commit (Go, Rust or Python)"
+description = "A command line with text and JSON output, exit codes and a version with the commit"
 status = "live"
 extends = "floor"
 kind = "cli"

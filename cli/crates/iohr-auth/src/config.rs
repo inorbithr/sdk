@@ -904,23 +904,52 @@ fn storage_str(s: Storage) -> &'static str {
     }
 }
 
-/// Writes `bytes` to `dir/name` through a temporary file and a rename, with the
-/// directory mode 0700 and the file mode 0600 on Unix.
+/// Writes `bytes` to `dir/name` through a new temporary file and a rename, with the
+/// directory mode 0700 and the file mode 0600 on Unix. The temporary file has a random
+/// name ([`temp_path`]) and is made by [`create_new_private`], so it is never one that
+/// was there before (a link included) and never has a wider mode, even for a moment.
 ///
 /// # Errors
-/// The directory or the file could not be written.
+/// The directory or the file could not be made, written or renamed; the temporary file
+/// is removed again.
 pub fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
     create_private_dir(dir)?;
-    let tmp = dir.join(format!(".{name}.tmp"));
-    {
-        let mut f = private_file(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
+    let tmp = temp_path(dir, name);
+    let written = create_new_private(&tmp, 0o600)
+        .and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()))
+        .and_then(|()| fs::rename(&tmp, dir.join(name)));
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
     }
-    fs::rename(&tmp, dir.join(name))
+    written
 }
 
-/// Creates `dir` (and its parents) with mode 0700 on Unix.
+/// A path in `dir` for a temporary file that becomes `name`: `.<name>.<random>.tmp`.
+#[must_use]
+pub fn temp_path(dir: &Path, name: &str) -> PathBuf {
+    let mut r = [0u8; 8];
+    // A failed draw still leaves a name `create_new_private` refuses if it is taken.
+    let _ = getrandom::fill(&mut r);
+    dir.join(format!(".{name}.{:016x}.tmp", u64::from_le_bytes(r)))
+}
+
+/// Creates the file `path` for writing, refusing one that is already there (a link
+/// included, so nothing is written through it), with `mode` on Unix set as it is made.
+///
+/// # Errors
+/// The file exists or could not be created.
+pub fn create_new_private(path: &Path, mode: u32) -> io::Result<fs::File> {
+    let mut o = fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, mode);
+    #[cfg(not(unix))]
+    let _ = mode;
+    o.open(path)
+}
+
+/// Creates `dir` (and its parents) with mode 0700 on Unix; a `dir` that is already there
+/// with a group or world bit is made 0700 too, when this user may change it.
 ///
 /// # Errors
 /// The directory could not be created.
@@ -929,15 +958,21 @@ pub fn create_private_dir(dir: &Path) -> io::Result<()> {
     b.recursive(true);
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
-    b.create(dir)
-}
-
-fn private_file(path: &Path) -> io::Result<fs::File> {
-    let mut o = fs::OpenOptions::new();
-    o.write(true).create(true).truncate(true);
+    b.create(dir)?;
     #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
-    o.open(path)
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = fs::metadata(dir)?.permissions().mode();
+        if mode & 0o077 != 0 {
+            match fs::set_permissions(dir, fs::Permissions::from_mode(0o700)) {
+                // Another user's directory: its owner decides, and a caller that must
+                // not use it checks the owner itself (`runner::private`).
+                Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {}
+                other => other?,
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1298,5 +1333,57 @@ mirror_note = "kept"
         let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&dir), 0o700);
         assert_eq!(mode(&dir.join("config.toml")), 0o600);
+    }
+
+    /// A file or link already at a temporary name is never opened: the new file is
+    /// made fresh, mode 0600 from the start, and what was there is left alone.
+    #[cfg(unix)]
+    #[test]
+    fn a_private_write_never_writes_through_what_is_there() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let d = tempfile::tempdir().unwrap();
+        let elsewhere = d.path().join("elsewhere");
+        std::fs::write(&elsewhere, "kept").unwrap();
+        let link = d.path().join("link");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        assert!(super::create_new_private(&link, 0o600).is_err());
+        assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "kept");
+
+        let a = super::temp_path(d.path(), "x");
+        assert_ne!(a, super::temp_path(d.path(), "x"));
+        let f = super::create_new_private(&a, 0o600).unwrap();
+        assert_eq!(f.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(super::create_new_private(&a, 0o600).is_err());
+
+        let dir = d.path().join("cfg");
+        super::write_private(&dir, "token", b"one").unwrap();
+        super::write_private(&dir, "token", b"two").unwrap();
+        let p = dir.join("token");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "two");
+        assert_eq!(
+            std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["token"], "a temporary file was left behind");
+    }
+
+    /// A private directory that is already there with a wider mode is made 0700.
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_private_directory_is_tightened() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("cfg");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        super::create_private_dir(&dir).unwrap();
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
     }
 }

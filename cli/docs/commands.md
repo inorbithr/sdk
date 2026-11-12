@@ -62,7 +62,7 @@ ends its `--help` with real examples.
 | `iohr theme list \| show NAME` | The terminal themes of the InOrbit app (`inorbit`, `solarized-dark`, `nord`, `light`), the one that is on, and a theme's colours, font and cursor; local, no sign-in | [The terminal theme](terminal-theme.md) |
 | `iohr theme install NAME [--terminal] [--prompt] [--replace-prompt]` | Writes the Terminal.app profile `~/.inorbit/term/themes/NAME.terminal` and remembers the theme; `--terminal` opens the profile, `--prompt` turns on the zsh prompt, `--replace-prompt` replaces a prompt you set yourself | [The terminal theme](terminal-theme.md) |
 | `iohr theme off` | Turns the prompt off and forgets the chosen theme; an imported profile stays | [The terminal theme](terminal-theme.md) |
-| `iohr runner register \| run \| status \| config show \| gate-report \| run-key \| api-key \| personal-use` | This machine as a coordinator runner | [Runner](runner.md) |
+| `iohr runner register \| run \| status \| revoke \| config show \| gate-report \| run-key \| api-key \| personal-use` | This machine as a coordinator runner | [Runner](runner.md) |
 | `iohr session [DIR]`, `iohr stop [DIR]` | Open and stop a project's session | [Sessions](session-and-panel.md) |
 | `iohr coordinator ...` | The coordinator's jobs, asks and plans | [below](#iohr-coordinator) |
 | `iohr memory ...` | Memory kept as local files | [Memory](roles-and-memory.md#memory) |

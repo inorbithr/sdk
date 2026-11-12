@@ -31,7 +31,8 @@ What a bank or a regulated company asks of such a mechanism:
    mirror. Those commands talk to that registry, the token service its challenge names
    and the storage host a blob download redirects to; `GET` only, HTTPS only (plain HTTP
    to this machine for tests, as SR-07). A private mirror's credential comes from
-   `IOHR_EXT_REGISTRY_AUTH` and is sent to that registry and its token service only.
+   `IOHR_EXT_REGISTRY_AUTH` and is sent to that registry only, and to its token service
+   when that service is on the registry's own origin; another one is asked anonymously.
    There is still no telemetry. SR-16 is otherwise unchanged.
 2. **The artifact** is the contract of RFC 0028: an OCI image index per version at
    `<registry>/<name>:<version>`, one manifest per platform, config media type

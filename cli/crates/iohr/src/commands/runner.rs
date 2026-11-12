@@ -108,7 +108,10 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
     // `run-key` calls only the approvals API, which checks the person account itself.
     if !matches!(
         cmd,
-        RunnerCommand::Status { .. } | RunnerCommand::RunKey { .. } | RunnerCommand::ApiKey(_)
+        RunnerCommand::Status { .. }
+            | RunnerCommand::RunKey { .. }
+            | RunnerCommand::ApiKey(_)
+            | RunnerCommand::Revoke { .. }
     ) {
         require_scopes(&s)?;
     }
@@ -220,7 +223,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 Some(id) => {
                     show_runner(&r, out, "registered");
                     Out::note(&format!(
-                        "the service made a new runner rather than refreshing {id}: revoke {id} once this one runs"
+                        "the service made a new runner rather than refreshing {id}: revoke {id} once this one runs (`iohr runner revoke {id}`)"
                     ));
                 }
                 None => {
@@ -294,6 +297,68 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     }
                 )),
                 None => Out::note("this machine: claude was not found on PATH"),
+            }
+            Ok(())
+        }
+        RunnerCommand::Revoke {
+            runner_id,
+            force_online,
+            account,
+        } => {
+            if !crate::runner::host_action::is_runner_id(&runner_id) {
+                return Err(Error::Usage(
+                    "a runner id is rnr_ and 26 capital letters or digits: see `iohr runner status`"
+                        .into(),
+                ));
+            }
+            let account = resolve_account(&s, account.account)?;
+            let svc = HttpService::new(&s.api, account, None);
+            let enrolled = svc.approval_runners().await?;
+            let field = |v: &serde_json::Value, k: &str| {
+                v.get(k)
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let Some(found) = enrolled.iter().find(|r| field(r, "runner_id") == runner_id) else {
+                return Err(Error::Failed(format!(
+                    "{runner_id} is not a runner of this account: nothing revoked"
+                )));
+            };
+            if !field(found, "revoked_at").is_empty() {
+                return Err(Error::Failed(format!("{runner_id} is already revoked")));
+            }
+            // The coordinator's list knows the name, system, status and last seen; it is
+            // read as far as this person may (a refusal there does not stop a revoke).
+            let live = svc
+                .list_runners(false)
+                .await
+                .ok()
+                .and_then(|l| l.into_iter().find(|r| r.runner_id == runner_id));
+            let name = live
+                .as_ref()
+                .map(|r| r.name.clone())
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| field(found, "label"));
+            if !out.json {
+                let mut rows = vec![("runner", runner_id.clone()), ("name", name.clone())];
+                if let Some(r) = &live {
+                    rows.push(("os", r.os.clone()));
+                    rows.push(("status", r.status.clone()));
+                    rows.push(("last seen", crate::commands::day(&r.last_seen_at)));
+                }
+                Out::pairs(&rows);
+            }
+            if live.as_ref().is_some_and(|r| r.status == "online") && !force_online {
+                return Err(Error::Failed(format!(
+                    "{runner_id} ({name}) is online: revoking it stops its work; add --force-online to do it"
+                )));
+            }
+            let answer = svc.revoke_runner(&runner_id).await?;
+            if out.json {
+                Out::print_json(&answer);
+            } else {
+                Out::note(&format!("revoked {runner_id} ({name})"));
             }
             Ok(())
         }
