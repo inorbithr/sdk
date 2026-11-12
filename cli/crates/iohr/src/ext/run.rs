@@ -216,6 +216,7 @@ pub(crate) const PANEL_LINE_WINDOW: std::time::Duration = std::time::Duration::f
 /// How long a stopped panel's process group has between SIGTERM and SIGKILL.
 pub(crate) const PANEL_STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 /// The longest first line read: `iohr-panel 65535` and its newline fit with room.
+#[cfg(unix)]
 const PANEL_LINE_MAX: usize = 32;
 
 /// A panel extension started for `iohr ui serve` (RFC 0217, question 3): the port it
@@ -250,6 +251,7 @@ impl StartedPanel {
 
 /// The port in a panel's first line: exactly `iohr-panel <port>` and a newline, the port
 /// in 1024-65535 with no sign or leading zero. Anything else is `None`.
+#[cfg(unix)]
 pub(crate) fn panel_port(line: &[u8]) -> Option<u16> {
     let digits = line.strip_suffix(b"\n")?.strip_prefix(b"iohr-panel ")?;
     if digits.is_empty()
@@ -265,6 +267,7 @@ pub(crate) fn panel_port(line: &[u8]) -> Option<u16> {
 
 /// Reads one line from a panel's standard output, a byte at a time so nothing after it
 /// is read, and closes the pipe: a panel writes its logs to standard error.
+#[cfg(unix)]
 async fn first_line(mut out: tokio::process::ChildStdout) -> Result<u16, String> {
     use tokio::io::AsyncReadExt as _;
     let mut line = Vec::with_capacity(PANEL_LINE_MAX);
@@ -583,7 +586,7 @@ pub(crate) async fn serve<M: Minter>(
     finish(status, tasks).await
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::panel_port;
 

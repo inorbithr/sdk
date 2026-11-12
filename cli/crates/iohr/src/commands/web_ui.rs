@@ -1966,6 +1966,7 @@ mod tests {
 
     /// Gives installed `name` a real program: it writes its pid to `pid`, prints `line`
     /// and sleeps, and the record's digest is the script's, so the trust check passes.
+    #[cfg(unix)]
     fn program(store: &Path, name: &str, line: &str, pid: &Path) {
         use std::os::unix::fs::PermissionsExt as _;
         let digest = Digest::of(name.as_bytes());
@@ -1985,6 +1986,7 @@ mod tests {
     }
 
     /// Whether the process `pid` names (written by [`program`]) is still there.
+    #[cfg(unix)]
     fn alive(pid: &Path) -> bool {
         let pid = std::fs::read_to_string(pid).expect("pid");
         std::process::Command::new("kill")
