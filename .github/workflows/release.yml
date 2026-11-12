@@ -135,7 +135,7 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.python_tag || inputs.typescript_tag) || github.sha }}
       # The toolchains examples.toml runs; Swift is Xcode's, already on the runner.
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install_args: "go rust node pnpm python uv dotnet java maven"
           # This job holds statuses: write and produces the evidence the publish jobs rely
@@ -192,7 +192,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.go_tag }}
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install_args: "go go:github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod cyclonedx"
           cache: false
@@ -231,7 +231,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.rust_tag }}
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install_args: "rust cargo-binstall cargo:cargo-cyclonedx cyclonedx"
           cache: false
@@ -280,7 +280,7 @@ jobs:
         env:
           TAG: ${{ needs.release-please.outputs.ts_tag || inputs.typescript_tag }}
         run: '[[ "$TAG" =~ ^typescript/v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] || { echo "not a typescript release tag: $TAG" >&2; exit 1; }'
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install_args: "node pnpm cyclonedx"
           cache: false
@@ -331,7 +331,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.py_tag }}
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install_args: "python uv cyclonedx"
           cache: false
@@ -437,7 +437,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.iohr_tag }}
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install_args: "rust cargo-binstall cargo:cargo-cyclonedx cyclonedx"
           cache: false
@@ -513,7 +513,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.iohr_tag }}
       # Only mise itself: the installers need nothing but the runner's shell.
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install: false
           cache: false
@@ -540,7 +540,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.iohr_tag }}
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install: false
           cache: false
@@ -580,7 +580,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.iohr_tag }}
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install: false
           cache: false
@@ -614,7 +614,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.iohr_tag }}
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install: false
           cache: false
@@ -651,7 +651,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.iohr_tag }}
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install_args: "uv"
           cache: false
