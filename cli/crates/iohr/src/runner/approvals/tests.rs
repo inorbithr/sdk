@@ -531,7 +531,7 @@ async fn an_extension_action_this_runner_cannot_carry_out_is_refused_and_nothing
 
 #[tokio::test]
 async fn a_replayed_nonce_runs_nothing() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = state_dir(dir.path(), "acct").unwrap().join("seen");
     let w = world();
     let first = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
@@ -828,7 +828,7 @@ fn the_state_directory_is_one_per_account_and_never_a_path() {
 
 #[test]
 fn a_malformed_seen_line_is_an_error_not_a_skip() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = dir.path().join("seen");
     let ok = format!("{ID1} device-0 n1\n");
     for (text, why) in [
@@ -862,7 +862,7 @@ fn a_malformed_seen_line_is_an_error_not_a_skip() {
 
 #[test]
 fn recording_into_a_malformed_seen_file_writes_nothing() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = dir.path().join("seen");
     let mut seen = Seen::load(&path).unwrap();
     std::fs::write(&path, "garbage\n").unwrap();
@@ -879,7 +879,7 @@ fn recording_into_a_malformed_seen_file_writes_nothing() {
 #[test]
 fn the_trust_root_and_the_seen_file_must_be_the_user_s_and_not_writable_by_others() {
     use std::os::unix::fs::PermissionsExt as _;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let w = world();
     let keys = dir.path().join("device-keys");
     let seen = dir.path().join("seen");
@@ -926,7 +926,7 @@ fn the_trust_root_and_the_seen_file_must_be_the_user_s_and_not_writable_by_other
 
 #[tokio::test]
 async fn the_decision_is_recorded_before_started_is_reported() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = state_dir(dir.path(), "acct").unwrap().join("seen");
     let w = world();
     let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
@@ -959,7 +959,7 @@ fn asks_with(w: &World, path: &std::path::Path) -> Asks<Fake> {
 
 #[tokio::test]
 async fn a_record_that_cannot_be_written_runs_nothing_and_says_so() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = dir.path().join("seen");
     let w = world();
     let mut seen = Seen::load(&path).unwrap();
@@ -977,7 +977,7 @@ async fn a_record_that_cannot_be_written_runs_nothing_and_says_so() {
 
 #[test]
 fn two_handles_on_one_seen_file_record_a_decision_once() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = dir.path().join("seen");
     let mut one = Seen::load(&path).unwrap();
     let mut two = Seen::load(&path).unwrap();
@@ -992,7 +992,7 @@ fn two_handles_on_one_seen_file_record_a_decision_once() {
 
 #[tokio::test]
 async fn a_replay_the_load_missed_is_caught_under_the_lock() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = dir.path().join("seen");
     let w = world();
     // Loaded empty; another process records the same decision before this one acts.
