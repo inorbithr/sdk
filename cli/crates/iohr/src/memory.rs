@@ -24,10 +24,11 @@ use std::path::{Path, PathBuf};
 
 pub use store::{Entry, Kind, Remembered, Scope, Store};
 
-/// The project root for `from`: the nearest folder up that has `.inorbit/`, `atlas/` or a
-/// `.git`. The home folder's own `.inorbit/` is the person's global state, not a project: it
-/// counts only when it is also a git repository. The walk stops at the home folder: a folder
-/// above it is never the person's project.
+/// The project root for `from`, the one rule for memory, the notes and `IO.md` files: the
+/// nearest folder up with `inorbit.toml`, `.inorbit/` or `atlas/`; failing that the nearest
+/// with a `.git`. The home folder's own `.inorbit/` is the person's global state, not a
+/// project: it counts only when it is also a git repository. The walk stops at the home
+/// folder: a folder above it is never the person's project.
 #[must_use]
 pub fn find_root(from: &Path) -> Option<PathBuf> {
     let home = etcetera::home_dir()
@@ -37,12 +38,26 @@ pub fn find_root(from: &Path) -> Option<PathBuf> {
 }
 
 /// [`find_root`] with the home folder given, canonical.
-fn find_root_below(from: &Path, home: Option<&Path>) -> Option<PathBuf> {
+pub(crate) fn find_root_below(from: &Path, home: Option<&Path>) -> Option<PathBuf> {
+    walk_up(from, home, |d, is_home| {
+        !is_home
+            && (d.join("inorbit.toml").is_file()
+                || d.join(".inorbit").is_dir()
+                || d.join("atlas").is_dir())
+    })
+    .or_else(|| walk_up(from, home, |d, _| d.join(".git").exists()))
+}
+
+/// The one walk up from `from` to the home folder (inclusive): the first folder `marker`
+/// accepts, given whether it is the home folder. Nothing at or above home after home.
+fn walk_up(
+    from: &Path,
+    home: Option<&Path>,
+    marker: impl Fn(&Path, bool) -> bool,
+) -> Option<PathBuf> {
     for d in from.ancestors() {
         let is_home = home.is_some_and(|h| h == d || d.canonicalize().is_ok_and(|c| c == h));
-        if d.join(".git").exists()
-            || (!is_home && (d.join(".inorbit").is_dir() || d.join("atlas").is_dir()))
-        {
+        if marker(d, is_home) {
             return Some(d.to_path_buf());
         }
         if is_home {

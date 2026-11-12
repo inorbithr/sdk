@@ -1,6 +1,6 @@
 //! What closes a `?` card: the full disclosure now and then, one short hint the rest of
-//! the time (PRD 0187). The header's "AI answer" label is on every card; only the footer
-//! varies, and the state it needs is one small file in the config directory.
+//! the time (PRD 0187). The header (Io, with the agent and the model at the right) is on every card; only
+//! the footer varies, and the state it needs is one small file in the config directory.
 //!
 //! The decision is pure ([`decide`], with the clock passed in); [`load`] and [`store`] are the
 //! file. Nothing here reads a question or an answer.
@@ -17,11 +17,7 @@ const FILE: &str = "ask-card.json";
 const FULL_EVERY: u64 = 24 * 60 * 60;
 
 /// The short hints, shown in turn.
-pub(crate) const HINTS: [&str; 3] = [
-    "`??` follows up.",
-    "`iohr ask --help` for flags.",
-    "`[ask] model` in config picks the model.",
-];
+pub(crate) const HINTS: [&str; 2] = ["`??` follows up.", "`iohr ask --help` for flags."];
 
 /// `[ask] hints`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -198,8 +194,8 @@ mod tests {
         let seen: Vec<_> = (1..=4)
             .map(|i| step(&mut s, Mode::Sometimes, N, T0 + i))
             .collect();
-        assert_eq!(seen[2], Footer::Short(Some(HINTS[2])));
-        assert_eq!(seen[3], Footer::Short(Some(HINTS[0])), "back to the first");
+        assert_eq!(seen[2], Footer::Short(Some(HINTS[0])), "back to the first");
+        assert_eq!(seen[3], Footer::Short(Some(HINTS[1])));
     }
 
     #[test]
@@ -282,6 +278,12 @@ mod tests {
         assert_eq!(next(d.path(), Mode::Sometimes, N, T0 + 3), Footer::Full);
         // A folder that cannot exist is not an error.
         let _ = next(Path::new("/proc/none/x"), Mode::Sometimes, N, T0);
+    }
+
+    #[test]
+    fn no_hint_says_the_model_is_set_in_config() {
+        // The card's header already names the agent and the model.
+        assert!(HINTS.iter().all(|h| !h.contains("model")));
     }
 
     #[test]

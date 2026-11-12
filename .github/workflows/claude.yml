@@ -1,8 +1,8 @@
-# @claude in an issue or pull request comment. Only the repository's owner, org members and
-# collaborators can trigger it (author_association below, and the action checks write access),
-# never bots, and never on a pull request from a fork: a fork's code and its .claude/ settings
-# must not run next to the API key (ADR 0005). Opening or assigning an issue does not trigger
-# it: anyone can open an issue on a public repository.
+# @claude in a pull request's conversation, review or review comment. Only the repository's
+# owner, org members and collaborators can trigger it (author_association below, and the action
+# checks write access), never bots, and never on a pull request from a fork: a fork's code and
+# its .claude/ settings must not run next to the API key (ADR 0005). Issues do not trigger it,
+# neither a comment on one nor opening or assigning one: Claude works on pull requests only.
 # Claude may read, edit and push; it does not run the repository's code here. CI does.
 # It runs on the maintainer's Claude subscription (CLAUDE_CODE_OAUTH_TOKEN, made with
 # `claude setup-token`), so it shares that plan's usage limits.
@@ -11,7 +11,8 @@ name: claude
 on:
   # zizmor flags every issue_comment trigger, because on a public repository anyone can comment
   # and the run holds secrets. It is kept because @claude in a pull request's conversation is
-  # how it is asked, and it is safe here: the job `if` below admits only OWNER, MEMBER and
+  # how it is asked (GitHub sends those as issue_comment), and it is safe here: the job `if`
+  # below admits only comments on pull requests, never on issues, by OWNER, MEMBER and
   # COLLABORATOR authors, pull requests from forks are refused in the first step, the checkout
   # is the default branch without credentials, and Claude may only read, edit and run
   # read-only git, so no code from the comment or a pull request is run.
@@ -32,7 +33,8 @@ jobs:
   claude:
     name: claude
     if: >-
-      ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&
+      (((github.event_name == 'issue_comment' && github.event.issue.pull_request) ||
+          github.event_name == 'pull_request_review_comment') &&
         contains(github.event.comment.body, '@claude') &&
         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request_review' &&
@@ -43,7 +45,7 @@ jobs:
     permissions:
       contents: write # push Claude's commits to the pull request branch
       pull-requests: write # comment on and update the pull request
-      issues: write # reply to the @claude comment on an issue
+      issues: write # reply in the pull request's conversation (GitHub's issue comments API)
       id-token: write # the action trades an OIDC token for its GitHub App token
       actions: read # read CI results on the pull request
     steps:
@@ -64,7 +66,7 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-      - uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.264
+      - uses: anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: >-

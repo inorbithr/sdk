@@ -1,0 +1,12 @@
+# Dependency updates, weekly, for the packages and for the actions the workflows pin.
+version: 2
+updates:
+  - package-ecosystem: "@@DEPENDABOT_ECOSYSTEM@@"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

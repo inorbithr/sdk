@@ -1,7 +1,8 @@
-use std::fmt::Write as _;
 use std::io::{self, Write as _};
 
 use serde::Serialize;
+
+use crate::ui::{Listed, Paint};
 
 /// Where results go: tables or JSON on stdout, notes on stderr.
 #[derive(Debug, Clone, Copy)]
@@ -16,19 +17,21 @@ impl Out {
         Self::raw(format!("{text}\n").as_bytes());
     }
 
-    /// Prints rows under a header, columns aligned.
+    /// Prints rows under a header, columns aligned: drawn on a terminal, plain otherwise
+    /// ([`Paint::table`]).
     pub(crate) fn table(header: &[&str], rows: &[Vec<String>]) {
-        Self::raw(table_text(header, rows).as_bytes());
+        Self::raw(Paint::stdout(false).table(header, rows).as_bytes());
     }
 
-    /// Prints `key  value` pairs.
+    /// Prints a list: the table, then on a terminal a count and the next command, or one
+    /// line when it is empty. Plain output is the table alone ([`Paint::list`]).
+    pub(crate) fn list(header: &[&str], rows: &[Vec<String>], what: &Listed<'_>) {
+        Self::raw(Paint::stdout(false).list(header, rows, what).as_bytes());
+    }
+
+    /// Prints `key  value` pairs: drawn on a terminal, plain otherwise ([`Paint::pairs`]).
     pub(crate) fn pairs(pairs: &[(&str, String)]) {
-        let w = pairs.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
-        let mut text = String::new();
-        for (k, v) in pairs {
-            let _ = writeln!(text, "{k:w$}  {v}");
-        }
-        Self::raw(text.as_bytes());
+        Self::raw(Paint::stdout(false).pairs(pairs).as_bytes());
     }
 
     /// Writes bytes to stdout as they are. A closed pipe (`| head`) is not an error.

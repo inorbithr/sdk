@@ -790,6 +790,8 @@ fn project_init_and_atlas_init_create_the_local_memory_with_no_network() {
         &[
             "project",
             "init",
+            "--template",
+            "blank",
             "made",
             "--dir",
             dir.to_str().unwrap(),
@@ -803,7 +805,13 @@ fn project_init_and_atlas_init_create_the_local_memory_with_no_network() {
     assert!(seeds > 0, "the roles' seed memories are written locally");
     assert!(!dir.join("atlas/memory").exists());
     // The seeds read back through the same commands, and a clean `check` has no dangling ref.
-    let o = iohr(h.path(), &dir, None, &["memory", "list", "--json"]);
+    // `list` shows 50 by default and the roles now seed more than that.
+    let o = iohr(
+        h.path(),
+        &dir,
+        None,
+        &["memory", "list", "--json", "--limit", "500"],
+    );
     assert_eq!(ids(&json(&o)).len(), seeds, "{}", text(&o));
     let o = iohr(h.path(), &dir, None, &["memory", "check", "--json"]);
     let v = json(&o);

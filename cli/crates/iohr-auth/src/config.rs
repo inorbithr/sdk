@@ -51,6 +51,12 @@ pub struct Config {
     /// `iohr memory` settings (`[memory]`); read, never written: a person edits it.
     #[serde(default, skip_serializing_if = "MemoryConfig::is_empty")]
     pub memory: MemoryConfig,
+    /// `iohr` panel settings (`[panel]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "PanelConfig::is_empty")]
+    pub panel: PanelConfig,
+    /// `iohr doctor` settings (`[doctor]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "DoctorConfig::is_empty")]
+    pub doctor: DoctorConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -133,7 +139,7 @@ impl ExtConfig {
 }
 
 /// The `[project]` table: defaults for `iohr project init`. A `--template` flag wins over it;
-/// the built-in default (`demo`) applies when it is unset. Checked where it is used.
+/// the built-in default (`coordinated`) applies when it is unset. Checked where it is used.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ProjectConfig {
@@ -145,13 +151,27 @@ pub struct ProjectConfig {
     /// default is `./NAME` in the folder you are in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
+    /// The model the agent of `iohr project init` builds with (`--agent-model`, or
+    /// `IOHR_INIT_AGENT_MODEL`, wins over it). Unset: `sonnet` for Claude.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_model: Option<String>,
+    /// The most turns that agent may take (`--agent-turns` wins over it). Unset: 150.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_turns: Option<u32>,
+    /// The most seconds that agent may run (`--agent-timeout` wins over it). Unset: 1800.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_timeout: Option<u64>,
 }
 
 impl ProjectConfig {
     /// Whether nothing is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.template.is_none() && self.root.is_none()
+        self.template.is_none()
+            && self.root.is_none()
+            && self.agent_model.is_none()
+            && self.agent_turns.is_none()
+            && self.agent_timeout.is_none()
     }
 }
 
@@ -190,6 +210,26 @@ pub struct AskConfig {
     /// default, on an empty line), `ctrl-g`, `alt-enter`, or `off`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub menu_key: Option<String>,
+    /// What happens when Io wants to run a command or open a file no rule decides (PRD
+    /// 0197): `manual` (or `prompt`: ask at the terminal; the default at one), `plan`, `auto`
+    /// (the modes of `mode`), `rules` (follow the rules only; the default without a terminal)
+    /// or `deny` (no commands offered). `--permissions` wins over it, and `mode` beats it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<String>,
+    /// How Io works (PRD 0197): `manual` (ask before each command; the default at a terminal),
+    /// `plan` (read and propose a plan, change nothing) or `auto` (run commands no rule
+    /// decides without asking; deny rules and the secret list still win). `--mode` (or
+    /// `IOHR_ASK_MODE`) wins over it, and it beats `permissions`. The zsh hook starts its
+    /// shift+tab switch from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// Folders `iohr ask` may always read besides the one it is asked in, the way Claude Code's
+    /// `--add-dir` adds them: a leading `~/` is your home folder. Each must exist, be listable
+    /// and hold no secrets, or the question is refused; secret files inside stay blocked.
+    /// `--read` (alias `--add-dir`) and `IOHR_ASK_READ` (an OS path list) add to it, never
+    /// replace it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read: Option<Vec<String>>,
 }
 
 impl AskConfig {
@@ -203,6 +243,34 @@ impl AskConfig {
             && self.thinking.is_none()
             && self.hints.is_none()
             && self.menu_key.is_none()
+            && self.mode.is_none()
+            && self.permissions.is_none()
+            && self.read.is_none()
+    }
+}
+
+/// The `[doctor]` table: whether `iohr doctor` and the `?` card may repair a local problem
+/// themselves. Off when unset: a fix is offered, never run, until the person says yes here.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct DoctorConfig {
+    /// Run the safe fixes (the ones that only restart something already down) without asking.
+    /// Every other fix stays an offer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_fix: Option<bool>,
+}
+
+impl DoctorConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.auto_fix.is_none()
+    }
+
+    /// Whether the safe fixes run on their own (`auto_fix = true`).
+    #[must_use]
+    pub fn auto_fix_on(&self) -> bool {
+        self.auto_fix == Some(true)
     }
 }
 
@@ -264,6 +332,32 @@ impl MemoryConfig {
     }
 }
 
+/// The `[panel]` table: the floating panel bare `iohr` puts over the top right corner of the
+/// terminal (`docs/config.md` section 4.8).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct PanelConfig {
+    /// When the panel reads the mouse: `menu` (only while the menu is open, so the terminal
+    /// keeps selecting text with a drag; the default), `always` (a click on the pill opens
+    /// the menu; the terminal selects text with Option or Shift held) or `off` (keys only).
+    /// `IOHR_PANEL_MOUSE` overrides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mouse: Option<String>,
+    /// The chat box at the bottom of the panel's terminal (RFC 0212): `on` (shown, the
+    /// default), `hidden` (loaded, but a corner chip until Option+h brings it back) or `off`
+    /// (never drawn, `?` stays the shell's). `IOHR_PANEL_CHAT` overrides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat: Option<String>,
+}
+
+impl PanelConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.mouse.is_none() && self.chat.is_none()
+    }
+}
+
 /// The `[runner]` table: how `iohr runner` registers and runs on this machine. Read at
 /// start and again on SIGHUP by `iohr runner run`; command-line flags win over it. Every
 /// key is optional; an unset key falls back to the profile's table, then to the default.
@@ -322,6 +416,28 @@ pub struct RunnerConfig {
     /// `target:sweep` or `target:guard` in. Unset, the runner refuses every sweep.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub core_checkout: Option<String>,
+    /// Which sign-in Claude turns may run on: `api` (default; an Anthropic API key the
+    /// runner keeps in the credential store), `plan` (your own Claude plan only, which
+    /// is for personal use only; the stored key is not used) or `any` (either). Set
+    /// here only: the account's policy can narrow a runner, never widen it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_auth: Option<String>,
+    /// The same for Codex turns: `any` (default), `plan` or `api`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_auth: Option<String>,
+    /// Whether git may use this machine's own `gh` sign-in for a job when the platform
+    /// says its GitHub App is not installed for the account (or mints no runner tokens).
+    /// Unset or false, such a job is refused instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_host_git_credentials: Option<bool>,
+    /// Days a job checkout, a mirror or a shared build directory may sit unused before
+    /// the runner removes it (`iohr runner prune`, and the runner while it is idle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_keep_days: Option<u32>,
+    /// The most the checkouts, mirrors and build directories together may take, in GB;
+    /// over it, the oldest unused go first. Unset, no cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_max_gb: Option<u64>,
 }
 
 impl RunnerConfig {
@@ -341,6 +457,11 @@ impl RunnerConfig {
             && self.upgrade_sign_identity.is_none()
             && self.user_units.is_none()
             && self.core_checkout.is_none()
+            && self.claude_auth.is_none()
+            && self.codex_auth.is_none()
+            && self.allow_host_git_credentials.is_none()
+            && self.workspace_keep_days.is_none()
+            && self.workspace_max_gb.is_none()
     }
 }
 
@@ -755,7 +876,10 @@ fn storage_str(s: Storage) -> &'static str {
 
 /// Writes `bytes` to `dir/name` through a temporary file and a rename, with the
 /// directory mode 0700 and the file mode 0600 on Unix.
-pub(crate) fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
+///
+/// # Errors
+/// The directory or the file could not be written.
+pub fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
     create_private_dir(dir)?;
     let tmp = dir.join(format!(".{name}.tmp"));
     {
@@ -823,22 +947,46 @@ mod tests {
     }
 
     #[test]
+    fn the_ask_read_folders_are_read_and_a_table_with_only_them_is_not_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[ask]\nread = [\"~/notes\", \"/srv/docs\"]\n",
+        )
+        .unwrap();
+        let c = Config::load(dir.path()).unwrap();
+        assert_eq!(
+            c.ask.read.as_deref(),
+            Some(&["~/notes".to_owned(), "/srv/docs".to_owned()][..])
+        );
+        assert!(!c.ask.is_empty());
+        assert!(Config::default().ask.read.is_none());
+        assert!(Config::default().ask.is_empty());
+    }
+
+    #[test]
     fn the_project_table_is_read_and_a_save_keeps_it() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("config.toml"),
-            "[project]   # my default\ntemplate = \"coordinated\"\nroot = \"~/code\"\n",
+            "[project]   # my default\ntemplate = \"coordinated\"\nroot = \"~/code\"\nagent_model = \"opus\"\nagent_turns = 90\nagent_timeout = 900\n",
         )
         .unwrap();
         let mut c = Config::load(dir.path()).unwrap();
         assert_eq!(c.project.template.as_deref(), Some("coordinated"));
         assert_eq!(c.project.root.as_deref(), Some("~/code"));
+        assert_eq!(c.project.agent_model.as_deref(), Some("opus"));
+        assert_eq!(
+            (c.project.agent_turns, c.project.agent_timeout),
+            (Some(90), Some(900))
+        );
         c.default = Some(name("work"));
         c.save(dir.path()).unwrap();
         let saved = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         assert!(saved.contains("[project]   # my default"), "{saved}");
         assert!(saved.contains("template = \"coordinated\""), "{saved}");
         assert!(saved.contains("root = \"~/code\""), "{saved}");
+        assert!(saved.contains("agent_turns = 90"), "{saved}");
     }
 
     #[test]

@@ -14,8 +14,10 @@ It was made from the `coordinated` template by `iohr project init` (or `iohr pro
 
 ## Wire it up
 
-1. Find your plan: `iohr coordinator --help` lists what the coordinator offers; the plan id
-   starts with `plan_`. Put it in `coordination.toml` under `[plan]`.
+1. Your plan: `iohr project init` made it (or found the one it made before) and wrote its id
+   under `[plan]` in `coordination.toml`. If you were signed out it is empty: sign in, then
+   `iohr coordinator plan create @@NAME@@ --external-id project:@@NAME@@` and put the `plan_...`
+   id there. `iohr coordinator plan show PLAN` lists its items and notes.
 2. File the example ask (it queues work for the coordinator's planner, it runs nothing here):
 
 ```sh
@@ -25,6 +27,22 @@ iohr coordinator asks list --state open
 ```
 
 The same `--external-id` returns the same ask, so filing it twice is harmless.
+
+## Build through the Planner
+
+Every build step is a Planner item, so the plan shows what ran, who holds it and how it ended:
+
+```sh
+iohr coordinator item run PLAN build --title "Build @@NAME@@" -- cargo build   # or any command
+iohr coordinator item add PLAN docs --title "Write the docs"                   # an item to do
+iohr coordinator item claim PLAN docs                                          # take it
+iohr coordinator item note PLAN docs "outline done"
+iohr coordinator item done PLAN docs --note "published"                        # or: item fail
+```
+
+`item run` adds the item when it is missing, claims it, runs the command, then notes and
+marks it done, or notes the failure and puts it back to `proposed` (the Planner has no
+failed status). A step already `done` is skipped, so a build can resume.
 
 ## Run it
 

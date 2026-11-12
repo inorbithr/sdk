@@ -4,12 +4,15 @@
 /// Windows (without it Winsock cannot load and a loopback connect fails with os error
 /// 10106), the temp variables for downloads and scratch files. Nothing that could hold a
 /// credential is passed on. `IOHR_NO_BROWSER` is always set: a test never opens a real
-/// tab on the developer's machine.
+/// tab on the developer's machine, and the toolchain lookup is off.
 pub(crate) fn kept_env() -> Vec<(String, std::ffi::OsString)> {
     ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"]
         .into_iter()
         .filter_map(|k| std::env::var_os(k).map(|v| (k.to_owned(), v)))
         .chain([("IOHR_NO_BROWSER".to_owned(), "1".into())])
+        // `init` looks up the latest stable of each language on the internet; a test never
+        // does (the ones about that lookup set it again, to a local server).
+        .chain([("IOHR_TOOLCHAIN_UPSTREAM".to_owned(), "off".into())])
         .collect()
 }
 

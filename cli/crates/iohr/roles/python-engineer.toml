@@ -1,7 +1,7 @@
 name = "python-engineer"
 parent = "base-engineer"
 title = "Python engineer"
-version = 1
+version = 2
 language = "python"
 domain = ["python", "asyncio", "pip", "mypy", "ruff"]
 aliases = ["python"]
@@ -78,3 +78,9 @@ place = "recall"
 section = "Distributed systems"
 text = "Put a timeout on every remote call and retry in one layer, with a limit and backoff with jitter."
 cites = ["https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"]
+
+[[line]]
+place = "recall"
+section = "Dependency currency"
+text = "Python tools for the dependency check (the steps are in the security role's supply-chain lines): PyPI's JSON API at /pypi/<project>/json gives info.version, yanked files and known vulnerabilities; the PyPA advisory database (OSV format) feeds pip-audit, which audits an environment or -r a requirements file, exits 1 when it finds a vulnerability, and with --require-hashes makes the audit repeatable."
+cites = ["https://docs.pypi.org/api/json/", "https://github.com/pypa/advisory-database", "https://github.com/pypa/pip-audit"]

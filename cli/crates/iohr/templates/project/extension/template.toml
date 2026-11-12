@@ -1,0 +1,192 @@
+# The extension template as data (PRD 0088.1): a private macOS service that heartbeats and
+# serves a tiny local panel, in Python, TypeScript, Go or Rust, with the enterprise floor
+# (CI, signed and attested release, SBOM, dependency updates, secret scan). Its own floor files
+# differ from the generic ones in two places: the release is the extension release of
+# `iohr ext init` (the OCI artifact, signed and attested the way `iohr ext install` verifies),
+# and the CI runs the self-test with a STATE and CACHE of its own.
+#
+# Every template is a folder with this file; the other files of the folder are the project, with
+# @@NAME@@, @@ID@@, @@MODULE@@, @@CREATED_AT@@ and one @@KEY@@ per question filled in, in their
+# text and in their paths. Languages are `[[variants]]`: the files of `variants/<id>/` are laid
+# over the common files, `--lang <id>` (or the menu) picks one, and the smoke test runs the
+# variant's own commands. `$DIR` is the project folder, `$STATE` and `$CACHE` its state
+# folders; a build writes under `$CACHE`, never into the project. A variant is `live` only
+# when its self-test passes.
+id = "extension"
+description = "A private macOS extension that heartbeats and serves a tiny local panel (Python, TypeScript, Go or Rust)"
+status = "live"
+extends = "floor"
+kind = "macos-service"
+default_variant = "python"
+# What the agent is told when you describe the project (`--describe`); the placeholders are filled.
+agent_prompt = "This folder is a fresh InOrbit project from the `@@TEMPLATE@@` template: a private macOS service in @@LANGUAGE_LABEL@@ (@@SOURCE@@) that heartbeats and serves a small panel (panel/index.html). Build what is described below by editing this folder. Keep extension.toml valid (`iohr ext lint --preview` must pass), keep the project free of secrets, and keep the self-test passing (@@RUN_TEST@@)."
+
+[[variants]]
+id = "python"
+label = "Python 3.12 or newer"
+status = "live"
+needs = ["python3"]
+toolchain = ["python3", "--version"]
+agent_allow = ["python3 -m unittest", "python3 -m py_compile", "iohr ext lint", "iohr ext dev --test"]
+run = ["python3", "-m", "@@MODULE@@"]
+test = ["python3", "-m", "unittest", "discover", "-s", "tests"]
+[variants.env]
+PYTHONPATH = "$DIR/src"
+PYTHONDONTWRITEBYTECODE = "1"
+[variants.vars]
+MATRIX = '''          - { os: ubuntu-24.04, dir: any }'''
+BUILD = '''      - name: Build (one zipapp, for every platform it targets)
+        run: |
+          module="${NAME//-/_}"
+          python3 -m zipapp src -m "$module.__main__:main" -p "/usr/bin/env python3" -o "$RUNNER_TEMP/$NAME"
+          for p in $(python3 -c 'import tomllib; print(" ".join(tomllib.load(open("extension.toml", "rb"))["targets"]["platforms"]))'); do
+            mkdir -p "dist/bin/${p/\//-}"
+            install -m 0755 "$RUNNER_TEMP/$NAME" "dist/bin/${p/\//-}/$NAME"
+          done'''
+CI_TEST = '''mkdir -p "$RUNNER_TEMP/state" "$RUNNER_TEMP/cache" && STATE="$RUNNER_TEMP/state" CACHE="$RUNNER_TEMP/cache" PYTHONPATH=src python3 -m unittest discover -s tests'''
+SOURCE = "src/@@MODULE@@/"
+NEEDS = '"python3"'
+IGNORE = "__pycache__/\n*.pyc"
+DEV = '''[dev]
+lang = "python"                  # how `iohr ext dev` runs this folder'''
+LAYOUT = '''- `src/@@MODULE@@/`: the service. `__main__.py` heartbeats and serves the panel; `channel.py`
+  asks iohr's token socket for a token with the one scope the manifest declares.
+- `tests/test_selftest.py`: the self-test. One heartbeat, nothing written outside its state.'''
+RUN_DEV = '''iohr ext dev                # run it with live logs, a real token channel, $STATE and $CACHE
+iohr ext dev --test         # the self-test, with the same channel and folders'''
+RUN_ONCE = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache \
+IOHR_EXT_ONCE=1 PYTHONPATH=src python3 -m @@MODULE@@'''
+RUN_TEST = "`iohr ext dev --test`"
+
+[[variants]]
+id = "typescript"
+label = "TypeScript on Node 22.18 or newer"
+status = "live"
+needs = ["node"]
+toolchain = ["node", "--version"]
+agent_allow = ["node --test", "node --check", "npm test", "iohr ext lint"]
+run = ["node", "src/main.ts"]
+test = ["node", "--test", "tests/**/*.test.ts"]
+[variants.vars]
+MATRIX = '''          - { os: ubuntu-24.04, dir: any }'''
+BUILD = '''      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Build (the TypeScript as it is, with a launcher, Node runs it)
+        run: |
+          for p in $(python3 -c 'import tomllib; print(" ".join(tomllib.load(open("extension.toml", "rb"))["targets"]["platforms"]))'); do
+            d="dist/bin/${p/\//-}"
+            mkdir -p "$d"
+            cp src/*.ts "$d/"
+            # shellcheck disable=SC2016  # the launcher keeps its $ for run time
+            printf '#!/bin/sh\nexec node "$(dirname "$0")/main.ts" "$@"\n' > "$d/$NAME"
+            chmod 0755 "$d/$NAME"
+          done'''
+CI_TEST = '''mkdir -p "$RUNNER_TEMP/state" "$RUNNER_TEMP/cache" && STATE="$RUNNER_TEMP/state" CACHE="$RUNNER_TEMP/cache" node --test 'tests/**/*.test.ts''''
+SOURCE = "src/"
+NEEDS = '"node"'
+IGNORE = "node_modules/"
+DEV = '''# `iohr ext dev` runs Rust, Python and shell folders; run this one with `node src/main.ts`
+# under the same STATE and CACHE (see the README).'''
+LAYOUT = '''- `src/`: the service. `main.ts` heartbeats and serves the panel; `channel.ts` asks iohr's
+  token socket for a token with the one scope the manifest declares. Node runs the TypeScript
+  as it is (22.18 or newer), so there is nothing to build and nothing to install.
+- `tests/selftest.test.ts`: the self-test. One heartbeat, nothing written outside its state.'''
+RUN_DEV = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache node src/main.ts
+STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache node --test "tests/**/*.test.ts"'''
+RUN_ONCE = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache \
+IOHR_EXT_ONCE=1 node src/main.ts'''
+RUN_TEST = "`node --test 'tests/**/*.test.ts'` with STATE and CACHE set"
+
+[[variants]]
+id = "go"
+label = "Go 1.26 or newer (standard library only)"
+status = "live"
+needs = ["go"]
+toolchain = ["go", "version"]
+agent_allow = ["go build", "go test", "go vet", "iohr ext lint"]
+build = ["go", "build", "-o", "$CACHE/bin/@@NAME@@", "."]
+run = ["$CACHE/bin/@@NAME@@"]
+test = ["go", "test", "./..."]
+[variants.vars]
+MATRIX = '''          - { os: ubuntu-24.04, dir: any }'''
+BUILD = '''      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build (one static binary per platform it targets)
+        run: |
+          for p in $(python3 -c 'import tomllib; print(" ".join(tomllib.load(open("extension.toml", "rb"))["targets"]["platforms"]))'); do
+            mkdir -p "dist/bin/${p/\//-}"
+            CGO_ENABLED=0 GOOS="${p%/*}" GOARCH="${p#*/}" go build -trimpath -o "dist/bin/${p/\//-}/$NAME" .
+          done'''
+CI_TEST = "go vet ./... && go test ./..."
+SOURCE = "main.go and channel.go"
+NEEDS = ''
+IGNORE = "/@@NAME@@"
+DEV = '''# `iohr ext dev` runs Rust, Python and shell folders; run this one with `go run .` under the
+# same STATE and CACHE (see the README).'''
+LAYOUT = '''- `main.go` and `channel.go`: the service. `main.go` heartbeats and serves the panel (the page is
+  embedded in the program); `channel.go` asks iohr's token socket for a token with the one
+  scope the manifest declares. Standard library only, so there is nothing to install.
+- `main_test.go`: the self-test. One heartbeat, nothing written outside its state.'''
+RUN_DEV = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache go run .
+STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache go test ./...'''
+RUN_ONCE = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache \
+IOHR_EXT_ONCE=1 go run .'''
+RUN_TEST = "`go test ./...` with STATE and CACHE set"
+
+[[variants]]
+id = "rust"
+label = "Rust (standard library only)"
+status = "live"
+needs = ["cargo"]
+toolchain = ["rustc", "--version"]
+agent_allow = ["cargo build", "cargo test", "cargo fmt", "cargo clippy", "iohr ext lint", "iohr ext dev --test"]
+build = ["cargo", "build", "--quiet", "--manifest-path", "$DIR/Cargo.toml", "--target-dir", "$CACHE/target"]
+run = ["$CACHE/target/debug/@@NAME@@"]
+test = ["cargo", "test", "--quiet"]
+[variants.vars]
+MATRIX = '''          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl, dir: linux-amd64 }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, dir: linux-arm64 }
+          - { os: macos-15, target: aarch64-apple-darwin, dir: darwin-arm64 }'''
+BUILD = '''      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+          DIR: ${{ matrix.dir }}
+        run: |
+          if [[ "$TARGET" == *musl ]]; then sudo apt-get update && sudo apt-get install -y musl-tools; fi
+          rustup target add "$TARGET"
+          cargo build --release --locked --target "$TARGET"
+          mkdir -p "dist/bin/$DIR"
+          install -m 0755 "target/$TARGET/release/$NAME" "dist/bin/$DIR/$NAME"'''
+CI_TEST = "cargo test --locked"
+SOURCE = "src/"
+NEEDS = ''
+IGNORE = "target/"
+DEV = '''[dev]
+lang = "rust"                    # how `iohr ext dev` runs this folder'''
+LAYOUT = '''- `src/`: the service. `main.rs` heartbeats and serves the panel (the page is compiled in);
+  `channel.rs` asks iohr's token socket for a token with the one scope the manifest declares.
+  Standard library only: a fresh build needs no crates.
+- `tests/selftest.rs`: the self-test. One heartbeat, nothing written outside its state.'''
+RUN_DEV = '''iohr ext dev                # run it with live logs, a real token channel, $STATE and $CACHE
+iohr ext dev --test         # the self-test, with the same channel and folders'''
+RUN_ONCE = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache \
+IOHR_EXT_ONCE=1 cargo run --quiet'''
+RUN_TEST = "`iohr ext dev --test`"
+TOOLCHAIN_MINOR = "1.85"
+
+[[steps]]
+name = "git"
+
+[[steps]]
+name = "register"
+
+[[steps]]
+name = "smoke"
+
+# Shared with `iohr ext init`, read from the same embedded folders: one copy of each.
+[include]
+".github/workflows/release.yml" = "ext/common/.github/workflows/release.yml"
+"tools/ext_artifact.py" = "ext/common/tools/ext_artifact.py"
+"variants/python/src/@@MODULE@@/channel.py" = "ext/python/src/@@MODULE@@/channel.py"
