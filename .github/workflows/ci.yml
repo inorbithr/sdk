@@ -189,15 +189,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        go: ["1.26.10", "1.27.3"]
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","go":"1.27.3"},{"os":"macos-latest","go":"1.27.3"}]' || '[]') }}
+        go: ["1.26.11", "1.27.4"]
+        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","go":"1.27.4"},{"os":"macos-latest","go":"1.27.4"}]' || '[]') }}
     env:
       MISE_GO_VERSION: ${{ matrix.go }}
       # Linux cells use the tools job's binaries; Windows and macOS build their own.
       IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
       REPLAY_PREBUILT: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
       # One cell builds the generator's compile test (it needs Rust).
-      COMPILE_CELL: ${{ matrix.os == 'ubuntu-latest' && matrix.go == '1.27.3' }}
+      COMPILE_CELL: ${{ matrix.os == 'ubuntu-latest' && matrix.go == '1.27.4' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -207,7 +207,7 @@ jobs:
         with:
           install_args: >-
             go golangci-lint go:golang.org/x/exp/cmd/gorelease go:golang.org/x/vuln/cmd/govulncheck
-            ${{ (matrix.os != 'ubuntu-latest' || (matrix.go == '1.27.3')) && 'rust cargo-binstall cargo:cargo-nextest' || '' }}
+            ${{ (matrix.os != 'ubuntu-latest' || (matrix.go == '1.27.4')) && 'rust cargo-binstall cargo:cargo-nextest' || '' }}
       - if: matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -567,7 +567,10 @@ jobs:
       # The panel's pty tests (tests/panel_live.rs) run a real zsh: the panel is a zsh feature,
       # and the runner image has none. macOS ships one.
       - if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends zsh
+        uses: ./.github/actions/apt-install # zizmor: ignore[self-repository]
+        timeout-minutes: 10
+        with:
+          packages: zsh
       - run: mise run cli:check
       - run: mise run cli:audit
       # A generated surface builds against rust/ and the wrong profile is refused.
@@ -577,7 +580,10 @@ jobs:
         run: mise run cli:installers
       # A Secret Service for the Linux credential-store test; packages from the runner image's archive.
       - if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends gnome-keyring dbus
+        uses: ./.github/actions/apt-install # zizmor: ignore[self-repository]
+        timeout-minutes: 10
+        with:
+          packages: gnome-keyring dbus
       - if: runner.os == 'Linux'
         run: mise run cli:keyring
       # Browser and device sign-in against the identity provider the platform runs.

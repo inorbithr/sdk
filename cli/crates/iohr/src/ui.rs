@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use cliclack::Theme as _;
 use console::Key;
 
+use crate::ask_template;
 use crate::card::{Look, nearest_256};
 use crate::error::Error;
 use crate::output::table_text;
@@ -219,7 +220,7 @@ impl Paint {
 /// One menu entry: the value returned, its label, a one-line hint, and whether it can be
 /// chosen. An entry that cannot be chosen is shown dimmed, marked "coming", and refused.
 /// `key` is a letter that picks it at once; a menu where any entry has one is drawn by
-/// [`Ui::select_keyed`].
+/// [`Ui::select_bar`].
 #[derive(Debug, Clone)]
 pub(crate) struct Choice {
     pub(crate) value: String,
@@ -249,14 +250,26 @@ impl<T> Nav<T> {
 /// The value of the "Back" row of a menu (no real choice starts with `@`).
 const BACK: &str = "@back";
 
-/// What typed into a text step goes back one step. cliclack 0.5 reports Esc and Ctrl-C as the
-/// same `Interrupted` error, so Esc cannot be the way back: this is, and the prompt says so.
-const BACK_WORD: &str = "<";
-
 /// The look, decided once per command.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Ui {
     fancy: bool,
+}
+
+thread_local! {
+    /// Whether the questions are closed on this thread: `init` closes them once the person has
+    /// pressed Create (no general question after it), see [`Ui::close_questions`].
+    static CLOSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Closes the questions until it is dropped. See [`Ui::close_questions`].
+#[derive(Debug)]
+pub(crate) struct Closed(());
+
+impl Drop for Closed {
+    fn drop(&mut self) {
+        CLOSED.with(|c| c.set(false));
+    }
 }
 
 /// The marks a finished step wears: a green check, a yellow bang, a red cross. cliclack's own
@@ -933,7 +946,7 @@ enum Act {
     Fail(io::Error),
 }
 
-/// The loop of [`Ui::select_keyed`] and [`Ui::select_bar`], with the drawing and the key source passed in so it is
+/// The loop of [`Ui::select_bar`], with the drawing and the key source passed in so it is
 /// tested without a terminal. `numbered` is the action bar's: digits pick, `j`/`k` move. `draw` paints the menu with entry `at` highlighted, `clear`
 /// removes it, and `read` gives the next key and whether it came in the same burst as the
 /// key before.
@@ -1193,46 +1206,6 @@ fn log_width() -> usize {
     terminal_width().saturating_sub(4).max(30)
 }
 
-/// The text of each menu entry: labels padded to one width so the reasons line up in a
-/// column, the reason dim, and the whole line cut to `width` (less the menu's own margin) so
-/// it never wraps. An entry that cannot be chosen is dim and says "coming".
-fn menu_rows(choices: &[Choice], width: usize) -> Vec<String> {
-    let label = |c: &Choice| {
-        if c.available {
-            c.label.clone()
-        } else {
-            format!("{} (coming)", c.label)
-        }
-    };
-    let pad = choices
-        .iter()
-        .map(|c| console::measure_text_width(&label(c)))
-        .max()
-        .unwrap_or(0);
-    let room = width.saturating_sub(6);
-    choices
-        .iter()
-        .map(|c| {
-            let l = label(c);
-            let gap = pad - console::measure_text_width(&l);
-            let plain_line = if c.hint.is_empty() {
-                l.clone()
-            } else {
-                format!("{l}{}  {}", " ".repeat(gap), c.hint)
-            };
-            let cut = console::truncate_str(&plain_line, room, "...").into_owned();
-            let head: String = cut.chars().take(l.chars().count()).collect();
-            let tail: String = cut.chars().skip(l.chars().count()).collect();
-            let head = if c.available {
-                head
-            } else {
-                console::style(head).dim().to_string()
-            };
-            format!("{head}{}", console::style(tail).dim())
-        })
-        .collect()
-}
-
 /// The columns below which the action bar is one plain line per row, with no box.
 const BAR_BOX_MIN: usize = 40;
 
@@ -1241,6 +1214,7 @@ const BAR_BOX_MIN: usize = 40;
 /// and the terminal is `cols` wide enough; otherwise one line per row, numbered all the same.
 /// Each row is `› [1] Name  k  hint`: the chip, the name, its letter and the dim hint; the
 /// highlighted row has the `›` and is reversed. `cols` of 0 is unknown, taken as 80.
+#[cfg(test)]
 fn bar_lines(prompt: &str, choices: &[Choice], at: usize, cols: usize, look: Look) -> Vec<String> {
     bar_lines_in(&BarTop::default(), prompt, choices, at, cols, look)
 }
@@ -1253,6 +1227,9 @@ fn bar_lines(prompt: &str, choices: &[Choice], at: usize, cols: usize, look: Loo
 pub(crate) struct BarTop<'a> {
     pub(crate) header: Option<String>,
     pub(crate) lines: &'a [String],
+    /// When the rows are a window of a longer list: how many rows come before the first one
+    /// shown (the chips keep their place in the whole list) and how many rows there are in all.
+    pub(crate) window: Option<(usize, usize)>,
 }
 
 /// Whether the bar is drawn as a box at `cols` columns (0 is unknown, taken as 80).
@@ -1305,18 +1282,21 @@ pub(crate) fn bar_lines_in(
     } else {
         out.push(look.plain().bold().apply_to(prompt).to_string());
     }
-    if boxed {
-        for l in top.lines {
-            if l.is_empty() {
-                out.push(look.violet().apply_to("\u{2502}").to_string());
-            } else {
-                out.push(format!("{}{l}", look.violet().apply_to(lead)));
-            }
+    for l in top.lines {
+        if !boxed {
+            // No rail to put it on: the line as it is.
+            out.push(l.clone());
+        } else if l.is_empty() {
+            out.push(look.violet().apply_to("\u{2502}").to_string());
+        } else {
+            out.push(format!("{}{l}", look.violet().apply_to(lead)));
         }
     }
+    let first = top.window.map_or(0, |(first, _)| first);
+    let chip_w = format!("[{}]", first + choices.len()).len();
     for (i, c) in choices.iter().enumerate() {
         let on = i == at;
-        let chip = format!("[{}]", i + 1);
+        let chip = format!("{:<chip_w$}", format!("[{}]", first + i + 1));
         let name = format!(
             "{}{}",
             c.label,
@@ -1348,7 +1328,15 @@ pub(crate) fn bar_lines_in(
             look.dim().apply_to(hint),
         ));
     }
-    let foot = truncate_str(FOOT, width.saturating_sub(3), "\u{2026}");
+    let foot = match top.window {
+        Some((first, total)) => format!(
+            "{}\u{2013}{} of {total} \u{b7} {FOOT}",
+            first + 1,
+            first + choices.len()
+        ),
+        None => FOOT.to_owned(),
+    };
+    let foot = truncate_str(&foot, width.saturating_sub(3), "\u{2026}");
     if boxed {
         out.push(format!(
             "{}{}",
@@ -1362,6 +1350,21 @@ pub(crate) fn bar_lines_in(
 }
 
 impl Ui {
+    /// Closes the questions: while the guard lives, a question put to a terminal is a bug (a
+    /// panic in a debug build, which the tests run). `init` holds it from Create to the end: the flow only acts and prints
+    /// progress after that, every answer having been taken before the review.
+    pub(crate) fn close_questions() -> Closed {
+        CLOSED.with(|c| c.set(true));
+        Closed(())
+    }
+
+    /// Every prompt calls this before it draws anything.
+    fn asking(self) {
+        if self.fancy && CLOSED.with(std::cell::Cell::get) {
+            debug_assert!(false, "a question was asked after Create");
+        }
+    }
+
     /// The look for this run: drawn only when [`fancy_for`] says so.
     #[must_use]
     pub(crate) fn detect(json: bool) -> Self {
@@ -1508,83 +1511,47 @@ impl Ui {
         initial: &str,
         back: bool,
     ) -> Result<Nav<String>, Error> {
+        self.asking();
         if !self.fancy {
             return Err(Error::Usage(format!(
                 "{prompt}: there is no terminal to ask on; pass the choice as a flag"
             )));
         }
-        let mut all = choices.to_vec();
+        let mut all: Vec<Choice> = choices
+            .iter()
+            .map(|c| {
+                let mut c = c.clone();
+                if !c.available {
+                    c.label = format!("{} (coming)", c.label);
+                }
+                c
+            })
+            .collect();
         if back {
             all.push(back_row());
         }
-        if all.iter().any(|c| c.key.is_some()) {
-            let picked = Self::select_keyed(prompt, &all, initial)?
-                .ok_or_else(|| Error::Failed("cancelled".into()))?;
-            return Ok(if back && picked == BACK {
-                Nav::Back
-            } else {
-                Nav::Next(picked)
-            });
-        }
-        let rows = menu_rows(&all, terminal_width());
         loop {
-            let mut menu = cliclack::select::<String>(prompt);
-            for (c, label) in all.iter().zip(&rows) {
-                menu = menu.item(c.value.clone(), label.clone(), "");
-            }
-            let picked = menu
-                .initial_value(initial.to_owned())
-                .interact()
-                .map_err(|e| cancelled(&e))?;
+            let picked = ask_template::pick(&ask_template::Template::new(prompt, &all), initial)?
+                .ok_or_else(cancel)?;
             match all.iter().find(|c| c.value == picked) {
                 Some(c) if c.available => {
+                    if picked != BACK {
+                        settled(prompt, &c.label);
+                    }
                     return Ok(if back && picked == BACK {
                         Nav::Back
                     } else {
                         Nav::Next(picked)
                     });
                 }
-                _ => {
-                    let _ = cliclack::log::warning(format!("{picked} is coming; pick a live one"));
-                }
+                _ => self.warn(&format!("{picked} is coming; pick a live one")),
             }
         }
     }
 
-    /// A menu of entries with a letter each: the letter picks, the arrows and Enter pick the
-    /// highlighted one, Esc, `q` and Ctrl-C leave (`None`). `cliclack`'s menu has no hotkeys,
-    /// so this one is drawn on stderr with `console` and works on any terminal, with or
-    /// without colour (`console` honours `NO_COLOR`). Entries that are not available are left
-    /// out by the caller.
-    ///
-    /// # Errors
-    ///
-    /// No terminal on stderr, or the terminal cannot be read.
-    pub(crate) fn select_keyed(
-        prompt: &str,
-        choices: &[Choice],
-        initial: &str,
-    ) -> Result<Option<String>, Error> {
-        use console::style;
-        Self::select_drawn(prompt, choices, initial, false, |at| {
-            let mut rows = vec![style(prompt).bold().to_string()];
-            for (i, c) in choices.iter().enumerate() {
-                let key = c.key.map_or_else(String::new, |k| format!("{k}"));
-                rows.push(format!(
-                    "{} {} {}  {}",
-                    if i == at { "\u{203a}" } else { " " },
-                    style(key).cyan(),
-                    c.label,
-                    style(&c.hint).dim()
-                ));
-            }
-            rows
-        })
-    }
-
-    /// The action bar under a card (PRD 0187.1): [`Ui::select_keyed`]'s keys, plus a number
-    /// for each row (`1`-`9` pick it at once, `j` and `k` move), drawn by [`bar_lines`] in a
-    /// box that reads as part of the card. Esc, `q` and Ctrl-C leave (`None`) and the bar is
+    /// The action bar under a card (PRD 0187.1) and every list of rows with keys: the rows of
+    /// `choices` in the ask template ([`ask_template`]), `1`-`9` pick a row at once, a row's
+    /// letter picks it, `j` and `k` move, Esc, `q` and Ctrl-C leave (`None`) and the card is
     /// erased.
     ///
     /// # Errors
@@ -1595,11 +1562,7 @@ impl Ui {
         choices: &[Choice],
         initial: &str,
     ) -> Result<Option<String>, Error> {
-        let look = Look::detect(Ui::detect(false).fancy());
-        let cols = stderr_cols();
-        Self::select_drawn(prompt, choices, initial, true, |at| {
-            bar_lines(prompt, choices, at, cols, look)
-        })
+        ask_template::pick(&ask_template::Template::new(prompt, choices), initial)
     }
 
     /// The loop of every menu: `rows(at)` is the screen with entry `at` highlighted, always
@@ -1661,7 +1624,7 @@ impl Ui {
         self,
         prompt: &str,
         default: &str,
-        check: impl Fn(&str) -> Result<(), String> + 'static,
+        check: impl Fn(&str) -> Result<(), String>,
     ) -> Result<String, Error> {
         match self.input_step(prompt, default, check, false)? {
             Nav::Next(v) => Ok(v),
@@ -1679,39 +1642,24 @@ impl Ui {
         self,
         prompt: &str,
         default: &str,
-        check: impl Fn(&str) -> Result<(), String> + 'static,
+        check: impl Fn(&str) -> Result<(), String>,
         back: bool,
     ) -> Result<Nav<String>, Error> {
+        self.asking();
         if !self.fancy {
             return Err(Error::Usage(format!(
                 "{prompt}: there is no terminal to ask on; pass it as an argument"
             )));
         }
-        let shown = if back {
-            format!("{prompt}  {}", console::style("(< goes back)").dim())
-        } else {
-            prompt.to_owned()
-        };
-        let mut q = cliclack::input(shown).validate(move |v: &String| {
-            let v = v.trim();
-            if back && v == BACK_WORD {
-                Ok(())
-            } else {
-                check(v)
+        let t = ask_template::Template::new(prompt, &[]);
+        match ask_template::type_in(&t, default, back, &check)? {
+            ask_template::Typed::Text(v) => {
+                settled(prompt, &v);
+                Ok(Nav::Next(v))
             }
-        });
-        if !default.is_empty() {
-            q = q.default_input(default);
+            ask_template::Typed::Back => Ok(Nav::Back),
+            ask_template::Typed::Cancel => Err(cancel()),
         }
-        let typed = q
-            .interact::<String>()
-            .map(|s| s.trim().to_owned())
-            .map_err(|e| cancelled(&e))?;
-        Ok(if back && typed == BACK_WORD {
-            Nav::Back
-        } else {
-            Nav::Next(typed)
-        })
     }
 
     /// Any of the choices, as a list; `initial` are ticked first.
@@ -1729,25 +1677,45 @@ impl Ui {
         self.multiselect_items(prompt, &items, initial)
     }
 
-    /// The list of [`Ui::multiselect`] with a label apart from each value.
+    /// The list of [`Ui::multiselect`] with a label apart from each value, in the ask template:
+    /// each row toggles its tick, the last row ("Done") ends the list.
     fn multiselect_items(
         self,
         prompt: &str,
         items: &[(String, String)],
         initial: &[String],
     ) -> Result<Vec<String>, Error> {
+        self.asking();
         if !self.fancy {
             return Err(Error::Usage(format!(
                 "{prompt}: there is no terminal to ask on; pass it with --set"
             )));
         }
-        let mut menu = cliclack::multiselect::<String>(prompt).required(false);
-        for (value, label) in items {
-            menu = menu.item(value.clone(), label.clone(), "");
+        let mut ticked: Vec<String> = initial.to_vec();
+        let mut at = ticked_rows(items, &ticked)
+            .first()
+            .map_or_else(|| DONE.to_owned(), |c| c.value.clone());
+        loop {
+            let rows = ticked_rows(items, &ticked);
+            let t = ask_template::Template::new(prompt, &rows);
+            let picked = ask_template::pick(&t, &at)?.ok_or_else(cancel)?;
+            if picked == BACK {
+                return Ok(vec![BACK.to_owned()]);
+            }
+            if picked == DONE {
+                return Ok(items
+                    .iter()
+                    .map(|(v, _)| v.clone())
+                    .filter(|v| ticked.contains(v))
+                    .collect());
+            }
+            if let Some(i) = ticked.iter().position(|v| *v == picked) {
+                ticked.remove(i);
+            } else {
+                ticked.push(picked.clone());
+            }
+            at = picked;
         }
-        menu.initial_values(initial.to_vec())
-            .interact()
-            .map_err(|e| cancelled(&e))
     }
 
     /// A yes or no. Plain: the default, asked of no one.
@@ -1756,14 +1724,34 @@ impl Ui {
     ///
     /// The person cancelled.
     pub(crate) fn confirm(self, prompt: &str, default: bool) -> Result<bool, Error> {
+        self.asking();
         if !self.fancy {
             return Ok(default);
         }
-        cliclack::confirm(prompt)
-            .initial_value(default)
-            .interact()
-            .map_err(|e| cancelled(&e))
+        let rows = yes_no_rows();
+        let picked = ask_template::pick(
+            &ask_template::Template::new(prompt, &rows),
+            if default { "yes" } else { "no" },
+        )?
+        .ok_or_else(cancel)?;
+        settled(prompt, if picked == "yes" { "Yes" } else { "No" });
+        Ok(picked == "yes")
     }
+}
+
+/// What a wizard step leaves on the screen once answered, in the wizard's rail: `◇  question`
+/// and `│  answer`, so the scrollback reads as a record of what was chosen (the card itself is
+/// erased).
+fn settled(prompt: &str, answer: &str) {
+    let look = Look::detect(true);
+    let term = console::Term::stderr();
+    let _ = term.write_line(&format!("{}  {prompt}", look.green().apply_to("\u{25c7}")));
+    let _ = term.write_line(&format!(
+        "{}  {}",
+        look.dim().apply_to("\u{2502}"),
+        look.dim().apply_to(answer)
+    ));
+    let _ = term.write_line(&look.dim().apply_to("\u{2502}").to_string());
 }
 
 impl Ui {
@@ -1785,10 +1773,7 @@ impl Ui {
         }
         let mut items: Vec<(String, String)> =
             choices.iter().map(|c| (c.clone(), c.clone())).collect();
-        items.push((
-            BACK.to_owned(),
-            "Back (tick it to go to the step before)".to_owned(),
-        ));
+        items.push((BACK.to_owned(), "Back (to the step before)".to_owned()));
         let mut picked = self.multiselect_items(prompt, &items, initial)?;
         if picked.iter().any(|p| p == BACK) {
             return Ok(Nav::Back);
@@ -1811,21 +1796,58 @@ impl Ui {
         if !back || !self.fancy {
             return self.confirm(prompt, default).map(Nav::Next);
         }
-        let yes_no = |value: &str, label: &str| Choice {
-            value: value.into(),
-            label: label.into(),
-            hint: String::new(),
-            available: true,
-            key: None,
-        };
-        let rows = [yes_no("yes", "Yes"), yes_no("no", "No")];
         Ok(
-            match self.select_step(prompt, &rows, if default { "yes" } else { "no" }, true)? {
+            match self.select_step(
+                prompt,
+                &yes_no_rows(),
+                if default { "yes" } else { "no" },
+                true,
+            )? {
                 Nav::Next(v) => Nav::Next(v == "yes"),
                 Nav::Back => Nav::Back,
             },
         )
     }
+}
+
+/// The rows of a yes or no: `y` and `n` pick them.
+fn yes_no_rows() -> [Choice; 2] {
+    let row = |value: &str, label: &str, key: char| Choice {
+        value: value.into(),
+        label: label.into(),
+        hint: String::new(),
+        available: true,
+        key: Some(key),
+    };
+    [row("yes", "Yes", 'y'), row("no", "No", 'n')]
+}
+
+/// The value of the row that ends a tick-list.
+const DONE: &str = "@done";
+
+/// The rows of a tick-list: `[x]` or `[ ]` before each label, then "Done".
+fn ticked_rows(items: &[(String, String)], ticked: &[String]) -> Vec<Choice> {
+    let mut rows: Vec<Choice> = items
+        .iter()
+        .map(|(value, label)| Choice {
+            value: value.clone(),
+            label: format!(
+                "[{}] {label}",
+                if ticked.contains(value) { "x" } else { " " }
+            ),
+            hint: String::new(),
+            available: true,
+            key: None,
+        })
+        .collect();
+    rows.push(Choice {
+        value: DONE.into(),
+        label: "Done".into(),
+        hint: "keep what is ticked".into(),
+        available: true,
+        key: None,
+    });
+    rows
 }
 
 fn back_row() -> Choice {
@@ -1926,8 +1948,76 @@ mod tests {
     use super::{Ui, wrapped};
     use console::Key;
 
-    use super::{Choice, Look, Marks, Paint, bar_lines, fancy_for, menu_rows, run_keyed};
+    #[test]
+    #[should_panic(expected = "a question was asked after Create")]
+    fn a_question_after_create_is_a_bug() {
+        let _closed = Ui::close_questions();
+        let _ = Ui { fancy: true }.confirm("Install it?", false);
+    }
+
+    #[test]
+    fn questions_open_again_when_the_latch_drops() {
+        drop(Ui::close_questions());
+        assert!(!super::CLOSED.get());
+    }
+
+    use super::{Choice, Look, Marks, Paint, bar_lines, fancy_for, run_keyed};
+    use super::{ask_template, back_row, ticked_rows, yes_no_rows};
     use cliclack::Theme;
+
+    /// One layout test per kind of wizard step: each is the ask template, so each shows the
+    /// title, numbered rows and (a step after the first) the Back row.
+    fn template_text(title: &str, rows: &[Choice]) -> String {
+        let t = ask_template::Template::new(title, rows);
+        let look = Look {
+            fancy: true,
+            truecolor: false,
+        };
+        ask_template::lines(&t, 0, 80, 40, look)
+            .iter()
+            .map(|l| console::strip_ansi_codes(l).into_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn a_wizard_select_with_back_is_one_template_card() {
+        let rows = vec![
+            Choice {
+                value: "a".into(),
+                label: "Alpha".into(),
+                hint: "first".into(),
+                available: true,
+                key: None,
+            },
+            back_row(),
+        ];
+        let out = template_text("Which one?", &rows);
+        assert!(
+            out.contains("Which one?") && out.contains("[1] Alpha"),
+            "{out}"
+        );
+        assert!(out.contains("[2]") && out.contains("Back"), "{out}");
+    }
+
+    #[test]
+    fn a_confirm_is_two_keyed_rows_in_the_template() {
+        let out = template_text("Copy it?", &yes_no_rows());
+        assert!(out.contains("[1] Yes") && out.contains("[2] No"), "{out}");
+    }
+
+    #[test]
+    fn a_tick_list_is_rows_with_boxes_and_a_done_row() {
+        let items = [
+            ("a".to_owned(), "Alpha".to_owned()),
+            ("b".to_owned(), "Beta".to_owned()),
+        ];
+        let out = template_text("Pick any", &ticked_rows(&items, &["b".to_owned()]));
+        assert!(
+            out.contains("Alpha") && out.contains("Beta") && out.contains("Done"),
+            "{out}"
+        );
+    }
 
     thread_local! {
         static CLOCK: (Instant, Cell<Duration>) = (Instant::now(), Cell::new(Duration::ZERO));
@@ -2148,16 +2238,6 @@ mod tests {
         console::strip_ansi_codes(s).into_owned()
     }
 
-    fn c(value: &str, label: &str, hint: &str, available: bool) -> Choice {
-        Choice {
-            value: value.into(),
-            label: label.into(),
-            hint: hint.into(),
-            available,
-            key: None,
-        }
-    }
-
     #[test]
     fn a_long_log_line_is_broken_at_spaces_inside_the_width() {
         let text = "iohr project init: AI-built project, generated by an AI model (claude) under your own subscription; the folder goes to that provider. Check it before you rely on it.";
@@ -2176,33 +2256,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn menu_reasons_start_in_one_column() {
-        console::set_colors_enabled(false);
-        let rows = menu_rows(
-            &[
-                c("a", "./my-shop", "in the folder you are in", true),
-                c("b", "~/code/my-shop", "your projects folder", true),
-            ],
-            120,
-        );
-        assert_eq!(rows[0].find("in the"), rows[1].find("your"));
-        assert!(rows[0].starts_with("./my-shop"));
-    }
-
-    #[test]
-    fn a_long_reason_is_cut_to_the_width_and_a_coming_entry_says_so() {
-        console::set_colors_enabled(false);
-        let rows = menu_rows(
-            &[
-                c("a", "go", &"x".repeat(200), true),
-                c("b", "zig", "later", false),
-            ],
-            50,
-        );
-        assert!(console::measure_text_width(&rows[0]) <= 50, "{}", rows[0]);
-        assert!(rows[1].contains("zig (coming)"), "{}", rows[1]);
-    }
     #[test]
     fn the_look_needs_a_terminal_and_a_colour_capable_term() {
         assert!(fancy_for(true, false, None, Some("xterm-256color")));
