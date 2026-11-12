@@ -13,7 +13,7 @@
 # broken dataset or a scorer with no bar stops the run. The variant is `live` only when that
 # test passes.
 id = "evals"
-description = "An offline eval suite with a pass bar: dataset, solver, scorers, thresholds and a CI workflow (Python, TypeScript, Go, Rust, Java, C#, Dart, Swift)"
+description = "An offline eval suite with a pass bar: dataset, solver, scorers, thresholds and a CI workflow"
 status = "live"
 extends = "floor"
 kind = "evals"

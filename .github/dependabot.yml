@@ -1,7 +1,7 @@
 # Every dependency stays on its latest version, majors included (docs/releasing.md,
 # Dependencies). Updates arrive grouped: one pull request per ecosystem for patch and
-# minor, which merges itself once `ci-ok` passes (dependabot-automerge.yml), and one for
-# majors, where a maintainer adapts the code in the same pull request. Never a version
+# minor, which a maintainer merges once `ci-ok` passes (nothing merges itself), and one
+# for majors, where a maintainer adapts the code in the same pull request. Never a version
 # younger than the cooldown: a compromised release usually surfaces within days
 # (ADR 0005). Security updates ignore the schedule and the cooldown.
 #

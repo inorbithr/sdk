@@ -30,6 +30,8 @@ pub(crate) struct Session {
     /// Everything the process wrote, as text: for counting how often a line was drawn (the
     /// screen holds only what is visible now).
     pub transcript: String,
+    /// The same, as the bytes the terminal got.
+    pub raw: Vec<u8>,
 }
 
 impl Session {
@@ -79,8 +81,9 @@ impl Session {
             master: File::from(master),
             child,
             output,
-            screen: vt100::Parser::new(ROWS, COLS, 0),
+            screen: vt100::Parser::new(nz(ROWS), nz(COLS), 0),
             transcript: String::new(),
+            raw: Vec::new(),
         }
     }
 
@@ -107,6 +110,7 @@ impl Session {
 
     fn take(&mut self, bytes: &[u8]) {
         self.screen.process(bytes);
+        self.raw.extend_from_slice(bytes);
         self.transcript.push_str(&String::from_utf8_lossy(bytes));
     }
 
@@ -138,6 +142,11 @@ impl Drop for Session {
     }
 }
 
+/// A terminal size as vt100 takes it.
+fn nz(n: u16) -> std::num::NonZeroU16 {
+    std::num::NonZeroU16::new(n).unwrap()
+}
+
 pub(crate) fn row(screen: &vt100::Screen, r: u16) -> String {
     screen.rows(0, COLS).nth(usize::from(r)).unwrap_or_default()
 }
@@ -145,4 +154,23 @@ pub(crate) fn row(screen: &vt100::Screen, r: u16) -> String {
 /// Whether any row of the screen holds `text`.
 pub(crate) fn any(screen: &vt100::Screen, text: &str) -> bool {
     (0..ROWS).any(|r| row(screen, r).contains(text))
+}
+
+/// What a terminal of this size that kept `scrollback` lines held when it had been fed `raw`:
+/// the lines that scrolled off (oldest first) and the rows of the screen.
+pub(crate) fn with_history(raw: &[u8], scrollback: usize) -> (Vec<String>, Vec<String>) {
+    let mut term = vt100::Parser::new(nz(ROWS), nz(COLS), scrollback);
+    term.process(raw);
+    term.screen_mut().set_scrollback(usize::MAX);
+    let top = term.screen().scrollback();
+    let mut off = Vec::new();
+    let mut seen = 0;
+    while seen < top {
+        term.screen_mut().set_scrollback(top - seen);
+        let take = usize::from(ROWS).min(top - seen);
+        off.extend(term.screen().rows(0, COLS).take(take));
+        seen += take;
+    }
+    term.screen_mut().set_scrollback(0);
+    (off, term.screen().rows(0, COLS).collect())
 }

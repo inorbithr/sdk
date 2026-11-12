@@ -436,6 +436,25 @@ impl Template {
         })
     }
 
+    /// The picker line: `description`, then the live languages derived from the variants, in
+    /// alphabetical order, so a language added as a variant shows without editing the text.
+    /// A template with no live variant keeps its description as written.
+    #[must_use]
+    pub fn picker_description(&self) -> String {
+        let mut names: Vec<String> = self
+            .live_variants()
+            .iter()
+            .map(|v| language_name(&v.id))
+            .collect();
+        names.sort();
+        let list = match names.split_last() {
+            None => return self.meta.description.clone(),
+            Some((only, [])) => only.clone(),
+            Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        };
+        format!("{} ({list})", self.meta.description)
+    }
+
     fn language_list(&self) -> String {
         let live: Vec<_> = self.live_variants().iter().map(|v| v.id.clone()).collect();
         if live.is_empty() {
@@ -862,6 +881,23 @@ pub fn load(spec: &Spec, root: &Path) -> Result<Template, String> {
     }
 }
 
+/// The display name of a variant id: the SDK's eight languages by name, anything else as written.
+#[must_use]
+pub fn language_name(id: &str) -> String {
+    match id {
+        "go" => "Go",
+        "python" => "Python",
+        "rust" => "Rust",
+        "typescript" => "TypeScript",
+        "java" => "Java",
+        "csharp" => "C#",
+        "swift" => "Swift",
+        "dart" => "Dart",
+        other => other,
+    }
+    .to_owned()
+}
+
 /// One line of `iohr project template list`.
 #[derive(Debug, Clone, Serialize)]
 pub struct Row {
@@ -914,7 +950,7 @@ pub fn list(root: &Path, default: &str, all: bool) -> Vec<Row> {
             };
             rows.push(row(
                 (*id).into(),
-                t.meta.description,
+                t.picker_description(),
                 t.meta.status.word(),
                 origin,
             ));
@@ -932,7 +968,7 @@ pub fn list(root: &Path, default: &str, all: bool) -> Vec<Row> {
                 }
                 row(
                     id,
-                    t.meta.description,
+                    t.picker_description(),
                     t.meta.status.word(),
                     Origin::User(p.clone()).label(),
                 )
@@ -1804,6 +1840,30 @@ mod tests {
         assert!(e.contains("coming"), "{e}");
         assert!(!e.contains("go,"), "{e}");
         assert!(!c.all_questions()[0].choices.contains(&"go".to_owned()));
+    }
+
+    #[test]
+    fn the_picker_line_lists_the_live_languages_derived_from_the_variants() {
+        let mut d = demo();
+        assert_eq!(
+            d.picker_description(),
+            format!("{} (Go, Python, Rust or TypeScript)", d.meta.description)
+        );
+        // A variant that is added shows; one that is coming does not; no list is typed.
+        let mut java = d.meta.variants[0].clone();
+        java.id = "java".into();
+        d.meta.variants.push(java);
+        d.meta.variants[2].status = Status::Coming;
+        assert!(
+            d.picker_description()
+                .ends_with("(Java, Python, Rust or TypeScript)"),
+            "{}",
+            d.picker_description()
+        );
+        d.meta.variants.truncate(1);
+        assert!(d.picker_description().ends_with("(Python)"));
+        d.meta.variants.clear();
+        assert_eq!(d.picker_description(), d.meta.description);
     }
 
     #[test]

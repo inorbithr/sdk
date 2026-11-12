@@ -556,13 +556,17 @@ struct ToolchainCheck {
 /// Puts the check's result in the plan (a dry run says what it would do), and, when the
 /// toolchain is behind, offers the upgrade: at a terminal a yes/no question that defaults to
 /// no, and the command runs only on a yes; without a terminal, with `--yes` or in a dry run
-/// the command is printed and never run. Nothing here fails `init`.
+/// the command is printed and never run. Nothing here fails `init`. The question is asked in
+/// the planning pass (`preview`, before the review) and kept in `kept`; the real run, after
+/// Create, only reads that answer and asks nothing.
 ///
 /// # Errors
 /// The person cancelled the question.
 fn check_toolchain(
     flow: &mut Flow,
     interactive: bool,
+    preview: bool,
+    kept: &mut Option<(String, bool)>,
     lang: Lang,
     state: &State,
 ) -> Result<ToolchainCheck, Error> {
@@ -594,6 +598,15 @@ fn check_toolchain(
             up.shown
         ),
     ) {
+        // The planning pass for the review asks it now, so nothing is asked after Create.
+        if preview && interactive && up.run.is_some() && kept.is_none() {
+            ui.info(&said);
+            let yes = ui.confirm(
+                &format!("Upgrade {} now with `{}`?", lang.label(), up.shown),
+                false,
+            )?;
+            *kept = Some((lang.label().to_owned(), yes));
+        }
         return Ok(ToolchainCheck {
             step: step("ask", format!("{said}; upgrade with `{}`", up.shown)),
             upgraded: false,
@@ -607,11 +620,10 @@ fn check_toolchain(
             upgraded: false,
         });
     }
-    ui.info(&said);
-    let yes = ui.confirm(
-        &format!("Upgrade {} now with `{}`?", lang.label(), up.shown),
-        false,
-    )?;
+    // Answered in the planning pass; never asked here. No answer is no.
+    let yes = kept
+        .as_ref()
+        .is_some_and(|(l, yes)| *yes && l == lang.label());
     if !yes {
         return Ok(ToolchainCheck {
             step: step("ask", behind),
@@ -777,7 +789,11 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         let planned = execute(&cx, &r, true).await;
         wiz.draft.agent_ok = r.agent_ok.get();
         match review(ui, &wiz, planned.err())? {
-            Review::Create => return execute(&cx, &resolved(&wiz)?, false).await,
+            Review::Create => {
+                // No question after Create: every answer was taken before the review.
+                let _closed = Ui::close_questions();
+                return execute(&cx, &resolved(&wiz)?, false).await;
+            }
             Review::Change(stage) => wiz.at.jump(stage),
         }
     }
@@ -1240,11 +1256,24 @@ struct Asked {
     key: String,
     place: Option<super::project_place::Decision>,
     crawl: Option<CrawlAnswer>,
+    /// The project's shape, once asked.
+    shape: Option<ShapeAnswer>,
+    /// Whether to upgrade the behind toolchain of that language.
+    upgrade: Option<(String, bool)>,
+    /// The extensions the person said yes to installing, once the offer was put.
+    extensions: Option<(String, Vec<String>)>,
 }
 
-/// What the crawl question settled: the plan, or no crawl (also an answer, not asked again).
+/// What the crawl question settled: the plan, or no crawl (also an answer, not asked again),
+/// and whether to install the crawler first when it is missing (asked with it, before the
+/// review).
 #[derive(Clone)]
-struct CrawlAnswer(Option<super::init_crawl::Plan>);
+struct CrawlAnswer(Option<super::init_crawl::Plan>, bool);
+
+/// What the shape question settled: the shape, or `None` when nobody answered (the item stays
+/// open; also an answer, not asked again).
+#[derive(Clone)]
+struct ShapeAnswer(Option<String>);
 
 impl Asked {
     /// Forgets the answers unless they were given for the same project.
@@ -1349,7 +1378,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             },
             other => other,
         };
-        let done = check_toolchain(&mut flow, interactive, l, &state)?;
+        let mut kept = cx.asked.borrow().upgrade.clone();
+        let done = check_toolchain(&mut flow, interactive, preview, &mut kept, l, &state)?;
+        cx.asked.borrow_mut().upgrade = kept;
         if done.upgraded {
             // The files and the agent are told the version that is there now.
             toolchain = variant.and_then(|v| project::toolchain_line(&v.toolchain));
@@ -1446,6 +1477,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         } else if has_agent_step && interactive {
             if let Some(v) = r.agent_ok.get() {
                 v
+            } else if !dry {
+                // After Create nothing is asked: the planning pass took this answer.
+                false
             } else {
                 let v = ui.confirm(
                     &format!(
@@ -1550,7 +1584,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     let placed = if let Some(d) = kept {
         d
     } else {
-        let d = super::project_place::decide(a, &dir, name, interactive, ui)?;
+        let d = super::project_place::decide(a, &dir, name, interactive && dry, ui)?;
         cx.asked.borrow_mut().place = Some(d.clone());
         d
     };
@@ -1739,13 +1773,26 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
         report.steps.push(p.step);
     }
-    // The project's shape (PRD 0210): asked once, recorded, and filed as an item in the plan.
-    // A dry run asks nothing and only says what it would do.
+    // The project's shape (PRD 0210): asked once, in the planning pass before the review, kept
+    // in `Asked`, then recorded and filed as an item in the plan. A dry run asks nothing and
+    // only says what it would do; the real run, after Create, only reads the answer.
     {
-        let answer = if dry {
+        let kept = cx.asked.borrow().shape.clone();
+        let answer = if let Some(ShapeAnswer(k)) = kept {
+            k
+        } else if dry && !preview {
             a.place_args.shape.clone()
         } else {
-            super::project_shape::pick(a.place_args.shape.as_deref(), interactive, ui, &dir)?
+            let k = super::project_shape::pick(
+                a.place_args.shape.as_deref(),
+                interactive && preview,
+                ui,
+                &dir,
+            )?;
+            if preview {
+                cx.asked.borrow_mut().shape = Some(ShapeAnswer(k.clone()));
+            }
+            k
         };
         let what = super::project_shape::would(answer.as_deref());
         let st = flow
@@ -1762,25 +1809,31 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     }
     // A public site, read on this machine when the person said so (PRD 0190.1).
     let kept = cx.asked.borrow().crawl.clone();
-    let crawl = if let Some(CrawlAnswer(c)) = kept {
-        c
+    let (crawl, install_crawler) = if let Some(CrawlAnswer(c, install)) = kept {
+        (c, install)
     } else {
         let c = super::init_crawl::decide(
             &a.crawl,
             describe.as_deref(),
             &layout.shown(&layout.crawl()),
-            interactive,
+            interactive && dry,
             ui,
             out,
         )?;
-        cx.asked.borrow_mut().crawl = Some(CrawlAnswer(c.clone()));
-        c
+        // Whether to install a missing crawler is asked here too, before the review.
+        let install = if c.is_some() && preview {
+            super::init_crawl::ask_install(g, ui, out, interactive)?
+        } else {
+            false
+        };
+        cx.asked.borrow_mut().crawl = Some(CrawlAnswer(c.clone(), install));
+        (c, install)
     };
     if let Some(plan) = crawl {
         let what = plan.would();
         let st = flow
             .act_async("crawl", &what, || {
-                super::init_crawl::run(g, env, ui, out, interactive, &dir, &plan)
+                super::init_crawl::run(g, env, ui, out, install_crawler, &dir, &plan)
             })
             .await;
         if let Some(st) = st {
@@ -2008,20 +2061,38 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     }
     // Extensions that fit the project: one more step, offered at a terminal, a hint
     // line otherwise.
-    if let Some(st) = super::init_extensions::offer(
+    // The question is put in the planning pass; the run after Create installs what was said yes to.
+    let ext_key = format!(
+        "{}\n{}",
+        tpl.meta.id,
+        describe.as_deref().unwrap_or_default()
+    );
+    let mut ext_kept = cx
+        .asked
+        .borrow()
+        .extensions
+        .clone()
+        .filter(|(k, _)| *k == ext_key)
+        .map(|(_, ids)| ids);
+    let offered = super::init_extensions::offer(
         g,
         env,
         ui,
         out,
         dry,
+        preview,
         interactive,
         &super::init_extensions::Signals {
             template: &tpl.meta.id,
             describe: describe.as_deref(),
         },
+        &mut ext_kept,
     )
-    .await
-    {
+    .await;
+    if preview {
+        cx.asked.borrow_mut().extensions = ext_kept.map(|ids| (ext_key, ids));
+    }
+    if let Some(st) = offered {
         report.steps.push(st);
     }
     if dry {

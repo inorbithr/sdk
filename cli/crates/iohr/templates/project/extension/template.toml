@@ -13,7 +13,7 @@
 # folders; a build writes under `$CACHE`, never into the project. A variant is `live` only
 # when its self-test passes.
 id = "extension"
-description = "A private macOS extension that heartbeats and serves a tiny local panel (Python, TypeScript, Go, Rust, Java, C#, Dart or Swift)"
+description = "A private macOS extension that heartbeats and serves a tiny local panel"
 status = "live"
 extends = "floor"
 kind = "macos-service"

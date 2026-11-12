@@ -24,8 +24,7 @@ use crate::environments::{self, Environment, Environments};
     long_about,
     propagate_version = true,
     max_term_width = 100,
-    styles = crate::ui::clap_styles(),
-    after_help = "Exit codes: 0 ok, 1 a finding or a failure, 2 usage, 3 not signed in, 4 forbidden."
+    styles = crate::ui::clap_styles()
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -74,6 +73,7 @@ pub struct Global {
         long,
         global = true,
         env = "IOHR_SIGN_IN",
+        hide_short_help = true,
         value_enum,
         value_name = "WHO"
     )]
@@ -81,7 +81,13 @@ pub struct Global {
     /// With `--sign-in io`: the role named in the `x-iohr-via` attribution header, such as
     /// `improver`. Attribution only, it grants nothing. Not `--via`, which `iohr ask` uses for
     /// where an answer comes from.
-    #[arg(long, global = true, env = "IOHR_VIA_ROLE", value_name = "NAME")]
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_ROLE",
+        value_name = "NAME",
+        hide_short_help = true
+    )]
     pub via_role: Option<String>,
     /// The old name of `--via-role`, kept so scripts keep working. The header it sets is
     /// unchanged (`personality=...`).
@@ -94,10 +100,22 @@ pub struct Global {
     )]
     pub via_personality: Option<String>,
     /// With `--sign-in io`: the agent session named in `x-iohr-via`.
-    #[arg(long, global = true, env = "IOHR_VIA_SESSION", value_name = "ID")]
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_SESSION",
+        value_name = "ID",
+        hide_short_help = true
+    )]
     pub via_session: Option<String>,
     /// With `--sign-in io`: the coordinator job named in `x-iohr-via`.
-    #[arg(long, global = true, env = "IOHR_VIA_JOB", value_name = "ID")]
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_JOB",
+        value_name = "ID",
+        hide_short_help = true
+    )]
     pub via_job: Option<String>,
     /// Where profiles are kept (default: the platform's config directory).
     #[arg(long, global = true, env = "IOHR_CONFIG_DIR", hide = true)]
@@ -243,9 +261,21 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ),
     (
         "Operate",
-        &["ui", "tunnel", "browser", "upgrade", "completion", "help"],
+        &[
+            "ui",
+            "tunnel",
+            "browser",
+            "doctor",
+            "upgrade",
+            "completion",
+            "help",
+        ],
     ),
 ];
+
+/// The exit codes, as the root help ends with them. They are a contract (`Error::exit_code`).
+pub const EXIT_CODES: &str = "Exit codes: 0 ok, 1 a finding or a failure, 2 usage, 3 not signed in, \
+     4 forbidden, 75 a runner stopped to restart after an upgrade.";
 
 /// The command tree `main` parses with: [`Cli`]'s, with the root help grouped by
 /// [`GROUPS`] and colour off under `--json` (a pipe and `NO_COLOR` are clap's own rules).
@@ -269,10 +299,7 @@ pub fn command(json: bool) -> clap::Command {
         format!("{}{text}{}", style.render(), style.render_reset())
     };
     for (path, list) in crate::examples::ALL {
-        if path.is_empty() {
-            continue;
-        }
-        let text = crate::examples::block(
+        let mut text = crate::examples::block(
             list,
             &crate::examples::Style {
                 head: &|t| paint(head, t),
@@ -280,6 +307,16 @@ pub fn command(json: bool) -> clap::Command {
                 note: &str::to_owned,
             },
         );
+        if path.is_empty() {
+            // The root also says where to begin and what its exit codes mean.
+            let _ = write!(
+                text,
+                "\n\n{} {}, then {}\n\n{EXIT_CODES}",
+                paint(head, "Get started:"),
+                paint(lit, "iohr login"),
+                paint(lit, "iohr doctor"),
+            );
+        }
         cmd = with_after_help(cmd, path, &text);
     }
     let listed: Vec<(String, String)> = cmd
@@ -411,6 +448,18 @@ pub enum Command {
     /// machine, and what is installed. The same as `iohr ext packages`.
     #[command(hide = true)]
     Packages,
+    /// Check this machine for the known problems with iohr and say how to fix each.
+    ///
+    /// Looks for a sign-in that is gone, the MCP bridge not answering, a nearly full disk
+    /// and a `config.toml` that does not parse. Exits 1 when something fails. `--fix` runs
+    /// the safe fixes (those that only restart something already down) now; with
+    /// `[doctor] auto_fix = true` in `config.toml` they also run on their own, and the `?`
+    /// card tells you what it found. Every other fix is shown, never run.
+    Doctor {
+        /// Run the safe fixes for this run.
+        #[arg(long)]
+        fix: bool,
+    },
     /// Update iohr to the newest release.
     ///
     /// Update this `iohr` to the newest release, the way it was installed: Homebrew runs
@@ -867,6 +916,20 @@ pub enum RunnerCommand {
         /// ask nothing.
         #[arg(long, conflicts_with_all = ["proof", "label"])]
         show: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Revoke a runner: it claims and reports nothing from then on (`RevokeRunner`).
+    ///
+    /// Looks the runner up in the account first and refuses an id that is not there or
+    /// is already revoked. A runner that is online is refused unless `--force-online`:
+    /// revoking a live runner stops its work.
+    Revoke {
+        /// The runner's id (`rnr_` and 26 characters), from `iohr runner status`.
+        runner_id: String,
+        /// Revoke it although it is online.
+        #[arg(long)]
+        force_online: bool,
         #[command(flatten)]
         account: AccountArg,
     },

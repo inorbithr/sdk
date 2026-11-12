@@ -131,12 +131,38 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     assert_eq!(rows.len(), 7);
     // `blank` is listed first, after the menu's "Describe it".
     assert_eq!(rows[0]["name"], "blank");
-    assert_eq!(
-        rows[0]["description"],
-        "A starter project in your language: one runnable file, Roles and memory"
+    // The languages in brackets are derived from the live variants, never written by hand.
+    let blank = rows[0]["description"].as_str().unwrap();
+    assert!(
+        blank.starts_with(
+            "A starter project in your language: one runnable file, Roles and memory ("
+        ),
+        "{blank}"
     );
     assert_eq!(rows[1]["name"], "service");
     assert!(rows.iter().all(|r| r["status"] == "live"));
+}
+
+/// The picker line's languages come from the variants (RFC: no hand-written list in
+/// `description`), so mcp-server and agent show every SDK language they have a variant for.
+#[test]
+fn the_picker_lists_every_language_the_mcp_server_and_agent_templates_have_variants_for() {
+    let h = tempfile::tempdir().unwrap();
+    let out = iohr(h.path(), &["project", "templates", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    for name in ["mcp-server", "agent"] {
+        let row = v
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == name)
+            .unwrap();
+        let d = row["description"].as_str().unwrap();
+        assert!(
+            d.ends_with("(C#, Dart, Go, Java, Python, Rust, Swift or TypeScript)"),
+            "{name}: {d}"
+        );
+    }
 }
 
 #[test]

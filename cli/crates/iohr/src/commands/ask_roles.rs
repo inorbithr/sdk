@@ -47,11 +47,56 @@ mod imp {
         ask: String,
     }
 
-    /// The Roles that answer: all the host runs, or the ones `--role` names. `None` when a
-    /// named one is not hosted (then the ask goes as it always did, `--role` and all).
-    pub(crate) fn chosen(named: Option<&str>, hosted: &[String]) -> Option<Vec<String>> {
+    /// Whether the question is in a Role's lane: the Role's name, an alias or one of the
+    /// `domain` words the catalogue gives it appears in the question as a whole word. A Role
+    /// the catalogue does not know (an account's own) is in its lane when its name is said.
+    pub(crate) fn in_lane(role: &str, question: &str) -> bool {
+        let said = words(question);
+        let mut terms = vec![role.to_owned()];
+        if let Some(r) = crate::roles::catalogue()
+            .into_iter()
+            .find(|r| r.name == role)
+        {
+            terms.extend(r.domain);
+            terms.extend(r.aliases);
+        }
+        terms.iter().any(|t| {
+            let t = words(t);
+            let t = t.trim();
+            !t.is_empty() && (said.contains(&format!(" {t} ")) || said.contains(&format!(" {t}s ")))
+        })
+    }
+
+    /// The question as lower-case words between single spaces, padded at both ends.
+    fn words(text: &str) -> String {
+        let mut out = String::from(" ");
+        for w in text
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+        {
+            out.push_str(w);
+            out.push(' ');
+        }
+        out
+    }
+
+    /// The Roles that answer: the hosted ones whose lane the question is in, or the ones
+    /// `--role` names (a Role named is always asked). `None` when a named one is not hosted,
+    /// or when the question is in no Role's lane (then the ask goes as it always did, Io
+    /// alone, `--role` and all).
+    pub(crate) fn chosen(
+        named: Option<&str>,
+        hosted: &[String],
+        question: &str,
+    ) -> Option<Vec<String>> {
         let Some(named) = named else {
-            return Some(hosted.to_vec());
+            let lane: Vec<String> = hosted
+                .iter()
+                .filter(|r| in_lane(r, question))
+                .cloned()
+                .collect();
+            return (!lane.is_empty()).then_some(lane);
         };
         let mut picked: Vec<String> = Vec::new();
         for name in named.split(',').map(str::trim).filter(|n| !n.is_empty()) {
@@ -129,7 +174,7 @@ mod imp {
     fn connect(plan: &Plan) -> Option<Routed> {
         let paths = route::find_host(&plan.cwd, &plan.data)?;
         let hosted = route::hosted_roles(&paths)?;
-        let roles = chosen(plan.named.as_deref(), &hosted)?;
+        let roles = chosen(plan.named.as_deref(), &hosted, &plan.payload.ask)?;
         if let Err(why) = route::fan_out(&paths, &plan.payload, &roles) {
             Out::note(&format!("the Roles could not take this ask: {why}"));
             return None;
@@ -302,15 +347,32 @@ mod imp {
         }
 
         #[test]
-        fn every_hosted_role_answers_unless_role_names_some() {
+        fn roles_answer_when_the_question_is_in_their_lane_or_named() {
             let hosted = names(&["rust-engineer", "security", "sdk-api"]);
-            assert_eq!(chosen(None, &hosted), Some(hosted.clone()));
+            let q = "is this project's secrets handling safe, and how does tokio schedule?";
             assert_eq!(
-                chosen(Some("security, sdk-api,security"), &hosted),
+                chosen(None, &hosted, q),
+                Some(names(&["rust-engineer", "security"]))
+            );
+            assert_eq!(
+                chosen(Some("security, sdk-api,security"), &hosted, "what is this?"),
                 Some(names(&["security", "sdk-api"]))
             );
-            assert_eq!(chosen(Some("security,ghost"), &hosted), None);
-            assert_eq!(chosen(Some(" , "), &hosted), None);
+            assert_eq!(chosen(Some("security,ghost"), &hosted, q), None);
+            assert_eq!(chosen(Some(" , "), &hosted, q), None);
+        }
+
+        #[test]
+        fn a_general_question_waits_on_no_role() {
+            let hosted = names(&["rust-engineer", "security"]);
+            assert_eq!(chosen(None, &hosted, "what is this project about?"), None);
+            assert!(in_lane(
+                "security",
+                "any Vulnerabilities in the supply-chain?"
+            ));
+            assert!(in_lane("rust-engineer", "explain Cargo features"));
+            assert!(!in_lane("security", "what is this project about?"));
+            assert!(!in_lane("rust-engineer", "what is this project about?"));
         }
     }
 }
