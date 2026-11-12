@@ -456,7 +456,14 @@ final class Config {
     }
 
     /** What resolution found: the {@code describe()} document, the typed values, the credential. */
-    record Resolution(ObjectNode doc, Map<String, Object> values, Credential credential) {}
+    record Resolution(ObjectNode doc, Map<String, Object> values, Credential credential) {
+
+        /** The redacted document, the names of the values and the credential; never a value. */
+        @Override
+        public String toString() {
+            return "Resolution[doc=" + doc + ", values=" + values.keySet() + ", credential=" + credential + "]";
+        }
+    }
 
     /** A value as it came, and from where. */
     private record Raw(String origin, Object value) {}

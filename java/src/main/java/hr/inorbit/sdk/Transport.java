@@ -60,7 +60,22 @@ final class Transport {
             String clientKeyPassword,
             KeyStore clientKeyStore,
             char[] clientKeyStorePassword,
-            List<String> pinnedKeys) {}
+            List<String> pinnedKeys) {
+
+        /** The settings, each password and key store shown only as whether it is set. */
+        @Override
+        public String toString() {
+            return "Net[connectTimeout=" + connectTimeout + ", proxy=" + proxy + ", caBundle=" + caBundle
+                    + ", systemTrust=" + systemTrust + ", clientCert=" + clientCert + ", clientKey=" + clientKey
+                    + ", clientKeyPassword=" + shown(clientKeyPassword) + ", clientKeyStore="
+                    + shown(clientKeyStore) + ", clientKeyStorePassword=" + shown(clientKeyStorePassword)
+                    + ", pinnedKeys=" + pinnedKeys + "]";
+        }
+
+        private static String shown(Object secret) {
+            return secret == null ? "null" : Config.REDACTED;
+        }
+    }
 
     static HttpClient build(URI base, Net net) {
         HttpClient.Builder b = HttpClient.newBuilder()
