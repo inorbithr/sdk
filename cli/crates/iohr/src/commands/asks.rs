@@ -24,7 +24,7 @@ use crate::cli::{AsksCommand, Global};
 use crate::context::{Session, account, quiet_session, session};
 use crate::error::Error;
 use crate::mac_sign;
-use crate::output::{Out, table_text};
+use crate::output::Out;
 use crate::prompt;
 use crate::runner::approvals::{is_approval_id, note_text};
 use crate::runner::service::{HttpService, ServiceError};
@@ -387,7 +387,7 @@ pub(crate) async fn detail_quiet(g: &Global, env: &Env, id: &str) -> Result<Pane
     let svc = service(&s, Some(id), None)?;
     let a = svc.get_approval(id).await.map_err(scoped)?;
     Ok(PanelAskDetail {
-        pairs: show_pairs(Paint::from_parts(false, true, None, None), &a),
+        pairs: show_pairs(&a),
         open: open(str_of(&a, "status")),
     })
 }
@@ -480,7 +480,7 @@ pub(crate) async fn auto_revoke(g: &Global, env: &Env) -> Result<(), Error> {
     Ok(())
 }
 
-fn service<'a>(
+pub(super) fn service<'a>(
     s: &'a Session,
     id: Option<&str>,
     account_flag: Option<String>,
@@ -497,7 +497,7 @@ fn service<'a>(
 }
 
 /// A failed call as the command's error: a refused sign-in says what to do.
-fn scoped(e: ServiceError) -> Error {
+pub(super) fn scoped(e: ServiceError) -> Error {
     match e {
         ServiceError::Api(a) if matches!(a.status(), Some(401 | 403)) => {
             Error::with_hint(a, SIGN_IN_HINT)
@@ -578,7 +578,7 @@ fn list_text(p: Paint, asks: &[Value]) -> String {
         .map(|a| {
             vec![
                 str_of(a, "approval_id").to_owned(),
-                status_cell(p, str_of(a, "status")),
+                str_of(a, "status").to_owned(),
                 str_of(a, "kind").to_owned(),
                 day(str_of(a, "created_at")),
                 headline(by(a), 24),
@@ -586,12 +586,7 @@ fn list_text(p: Paint, asks: &[Value]) -> String {
             ]
         })
         .collect();
-    let head: Vec<String> = ["ASK", "STATUS", "KIND", "ASKED", "BY", "TITLE"]
-        .iter()
-        .map(|h| p.head(h))
-        .collect();
-    let head: Vec<&str> = head.iter().map(String::as_str).collect();
-    table_text(&head, &rows)
+    p.table(&["ASK", "STATUS", "KIND", "ASKED", "BY", "TITLE"], &rows)
 }
 
 /// Who asked: the agent, else the person or tool behind the call.
@@ -601,16 +596,6 @@ fn by(a: &Value) -> &str {
         str_of(a, "requested_by")
     } else {
         agent
-    }
-}
-
-/// A status as one cell: open ones stand out, closed ones fade, a bad ending is red.
-fn status_cell(p: Paint, status: &str) -> String {
-    match status {
-        "pending" | "question" => p.mark(status),
-        "approved" | "in_progress" | "done" => p.name(status),
-        "denied" | "failed" | "stale" => p.status(status),
-        other => p.dim(other),
     }
 }
 
@@ -682,10 +667,10 @@ fn clean_lines(s: &str, max: usize) -> Vec<String> {
 }
 
 /// The key and value lines under an ask's title.
-fn show_pairs(p: Paint, a: &Value) -> Vec<(String, String)> {
+fn show_pairs(a: &Value) -> Vec<(String, String)> {
     let mut kv: Vec<(String, String)> = vec![
         ("ask".into(), str_of(a, "approval_id").to_owned()),
-        ("status".into(), status_cell(p, str_of(a, "status"))),
+        ("status".into(), str_of(a, "status").to_owned()),
         ("kind".into(), str_of(a, "kind").to_owned()),
     ];
     let who = headline(by(a), 60);
@@ -746,11 +731,8 @@ fn show_pairs(p: Paint, a: &Value) -> Vec<(String, String)> {
 fn show_text(p: Paint, a: &Value) -> String {
     let mut t = String::new();
     let _ = writeln!(t, "{}", p.name(&headline(str_of(a, "title"), 120)));
-    let kv = show_pairs(p, a);
-    let w = kv.iter().map(|(k, _)| k.chars().count()).max().unwrap_or(0);
-    for (k, v) in &kv {
-        let _ = writeln!(t, "{}{}  {v}", p.dim(k), " ".repeat(w - k.chars().count()));
-    }
+    let kv = show_pairs(a);
+    t.push_str(&p.pairs(&kv));
     let summary = clean_lines(str_of(a, "summary"), 12);
     if !summary.is_empty() {
         let _ = writeln!(t, "\n{}", p.head("Summary"));
@@ -925,7 +907,7 @@ async fn decide(
         choice("deny", "Deny", "with a note if you like", 'd'),
         choice("question", "Ask a question", "the ask stays open", 'w'),
     ];
-    match Ui::select_keyed("What do you want to do?", &choices, "approve")?.as_deref() {
+    match Ui::select_bar("What do you want to do?", &choices, "approve")?.as_deref() {
         Some("approve") => approve(g, s, id, false, account_flag, out).await,
         Some("deny") => {
             let note = Ui::detect(false).input("Why? (optional, Enter to skip)", "", |_| Ok(()))?;
@@ -1125,7 +1107,7 @@ impl Screen {
 
     fn draw(&mut self, text: &str) {
         let term = Term::stdout();
-        let width = usize::from(term.size().1).max(40);
+        let width = crate::ui::stdout_width();
         let fitted: String = text
             .lines()
             .map(|l| {

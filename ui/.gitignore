@@ -1,0 +1,2 @@
+# The compiled frame layer (pnpm run lib) that iohr-mac imports; built from src, never committed.
+/lib/

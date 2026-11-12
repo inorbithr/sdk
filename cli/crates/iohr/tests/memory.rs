@@ -790,6 +790,8 @@ fn project_init_and_atlas_init_create_the_local_memory_with_no_network() {
         &[
             "project",
             "init",
+            "--template",
+            "blank",
             "made",
             "--dir",
             dir.to_str().unwrap(),

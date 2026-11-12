@@ -306,7 +306,27 @@ impl Api {
         verbose: bool,
         via: Option<String>,
     ) -> Result<Self, Error> {
+        Self::with_streams(
+            base,
+            credential,
+            verbose,
+            via,
+            inorbithr::Streams::default(),
+        )
+    }
+
+    /// [`with_via`](Self::with_via) that also chooses how streams open: `Streams::Socket`
+    /// carries all of this client's streams over one `/v1/ws` connection (the page's live
+    /// socket, `iohr ui serve`).
+    pub(crate) fn with_streams(
+        base: &str,
+        credential: Arc<AnyCredential>,
+        verbose: bool,
+        via: Option<String>,
+        streams: inorbithr::Streams,
+    ) -> Result<Self, Error> {
         let mut b = Client::builder()
+            .streams(streams)
             .base_url(base)
             .token_provider(Shared(credential))
             .user_agent_suffix(concat!("iohr/", env!("CARGO_PKG_VERSION")));

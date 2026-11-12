@@ -5,6 +5,7 @@ use crate::cli::Global;
 use crate::context::session;
 use crate::error::Error;
 use crate::output::Out;
+use crate::ui::Listed;
 
 pub(crate) async fn list(g: &Global, env: &Env, out: Out) -> Result<(), Error> {
     let s = session(g, env).await?;
@@ -37,7 +38,11 @@ pub(crate) async fn list(g: &Global, env: &Env, out: Out) -> Result<(), Error> {
             ]
         })
         .collect();
-    Out::table(&["ACCOUNT", "KIND", "NAME", "PLAN", "ROLE"], &rows);
+    Out::list(
+        &["ACCOUNT", "KIND", "NAME", "PLAN", "ROLE"],
+        &rows,
+        &Listed::new("account", "accounts"),
+    );
     Ok(())
 }
 

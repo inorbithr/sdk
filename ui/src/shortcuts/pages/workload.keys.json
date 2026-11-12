@@ -1,0 +1,12 @@
+{
+  "scope": "workload",
+  "title": "Explore",
+  "page": "workload",
+  "where": "On Explore",
+  "rows": [
+    { "id": "workload-view-orbit", "label": "Orbit view", "accel": "1" },
+    { "id": "workload-view-room", "label": "Room view", "accel": "2" },
+    { "id": "workload-view-tree", "label": "Tree view", "accel": "3" },
+    { "id": "workload-show-all", "label": "Back to all workloads", "accel": "Escape" }
+  ]
+}

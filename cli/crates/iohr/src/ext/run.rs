@@ -211,6 +211,184 @@ pub(crate) async fn run_quiet(
     Ok(Quiet { code, stderr })
 }
 
+/// How long a started panel has to print its first line, `iohr-panel <port>`.
+pub(crate) const PANEL_LINE_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+/// How long a stopped panel's process group has between SIGTERM and SIGKILL.
+pub(crate) const PANEL_STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+/// The longest first line read: `iohr-panel 65535` and its newline fit with room.
+const PANEL_LINE_MAX: usize = 32;
+
+/// A panel extension started for `iohr ui serve` (RFC 0217, question 3): the port it
+/// said it listens on, and its process group, which [`StartedPanel::stop`] ends.
+#[derive(Debug)]
+pub(crate) struct StartedPanel {
+    pub(crate) port: u16,
+    pgid: u32,
+    /// Turns `true` once the program has exited and its token channel is closed.
+    done: tokio::sync::watch::Receiver<bool>,
+}
+
+impl StartedPanel {
+    /// Resolves when the program has exited by itself or was stopped.
+    pub(crate) fn exited(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let mut done = self.done.clone();
+        async move {
+            let _ = done.wait_for(|d| *d).await;
+        }
+    }
+
+    /// SIGTERM to the whole group, then SIGKILL to it once the program has exited or
+    /// [`PANEL_STOP_GRACE`] has passed. The kill reaches only what is left of the group:
+    /// a group id stays reserved while any member lives, and an empty group is refused.
+    pub(crate) async fn stop(self) {
+        use crate::runner::exec::{Signal, signal_group};
+        signal_group(self.pgid, Signal::Term);
+        let _ = tokio::time::timeout(PANEL_STOP_GRACE, self.exited()).await;
+        signal_group(self.pgid, Signal::Kill);
+    }
+}
+
+/// The port in a panel's first line: exactly `iohr-panel <port>` and a newline, the port
+/// in 1024-65535 with no sign or leading zero. Anything else is `None`.
+pub(crate) fn panel_port(line: &[u8]) -> Option<u16> {
+    let digits = line.strip_suffix(b"\n")?.strip_prefix(b"iohr-panel ")?;
+    if digits.is_empty()
+        || digits.len() > 5
+        || digits[0] == b'0'
+        || !digits.iter().all(u8::is_ascii_digit)
+    {
+        return None;
+    }
+    let port: u16 = std::str::from_utf8(digits).ok()?.parse().ok()?;
+    (port >= 1024).then_some(port)
+}
+
+/// Reads one line from a panel's standard output, a byte at a time so nothing after it
+/// is read, and closes the pipe: a panel writes its logs to standard error.
+async fn first_line(mut out: tokio::process::ChildStdout) -> Result<u16, String> {
+    use tokio::io::AsyncReadExt as _;
+    let mut line = Vec::with_capacity(PANEL_LINE_MAX);
+    let mut byte = [0_u8; 1];
+    while line.len() < PANEL_LINE_MAX {
+        match out.read(&mut byte).await {
+            Ok(1) => {
+                line.push(byte[0]);
+                if byte[0] == b'\n' {
+                    return panel_port(&line).ok_or_else(|| {
+                        "its first line was not `iohr-panel <port>` with a port in 1024-65535"
+                            .to_owned()
+                    });
+                }
+            }
+            _ => return Err("it closed its output before printing `iohr-panel <port>`".into()),
+        }
+    }
+    Err("its first line was longer than `iohr-panel <port>`".into())
+}
+
+/// Returns once something accepts a connection on `127.0.0.1:<port>`, trying every
+/// 100 ms; the caller bounds the wait. A panel only on `[::1]` or another address never
+/// passes, so the frame never points at a port nothing on IPv4 loopback serves.
+#[cfg(unix)]
+async fn listening(port: u16) {
+    let at = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port));
+    while tokio::net::TcpStream::connect(at).await.is_err() {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+/// Starts panel extension `name` the way [`run`] starts any extension: the full trust
+/// check (`prepare`: the lock, the program's hash, the confirmed privileges) and the
+/// token channel with the installed manifest's scopes. Nothing from the caller reaches
+/// it: no arguments, no environment beyond what [`run`] passes, no path. It runs as its
+/// own process group with standard input closed and standard output read for its first
+/// line only. No line within [`PANEL_LINE_WINDOW`], a malformed one, a port out of
+/// range, or nothing listening on `127.0.0.1` at that port in the same window stops the
+/// group and is an error. Whether the port is the UI's own or another panel's is the
+/// caller's to judge (it knows them).
+///
+/// # Errors
+///
+/// What `prepare` refuses, a program that cannot start, or one that does not say its
+/// port in time.
+#[cfg(unix)]
+pub(crate) async fn start_panel(
+    global: &Global,
+    env: &Env,
+    store: &Store,
+    name: &str,
+) -> Result<StartedPanel, Error> {
+    let p = prepare(global, env, store, name)?;
+    let mut c = tokio::process::Command::new(&p.program);
+    c.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .process_group(0);
+    strip_credentials(&mut c);
+    let (pid_tx, pid_rx) = tokio::sync::oneshot::channel::<Option<u32>>();
+    let (line_tx, line_rx) = tokio::sync::oneshot::channel::<Result<u16, String>>();
+    let (done_tx, done) = tokio::sync::watch::channel(false);
+    let api = p.base.as_str().trim_end_matches('/').to_owned();
+    let program = p.program;
+    let ctx = p.ctx;
+    let task = tokio::spawn(async move {
+        let code = serve(c, &program, &api, ctx, move |child| {
+            let _ = pid_tx.send(child.id());
+            if let Some(out) = child.stdout.take() {
+                tokio::spawn(async move {
+                    let _ = line_tx.send(first_line(out).await);
+                });
+            }
+            Vec::new()
+        })
+        .await;
+        let _ = done_tx.send(true);
+        code
+    });
+    let Ok(Some(pgid)) = pid_rx.await else {
+        return Err(match task.await {
+            Ok(Err(e)) => e,
+            _ => Error::Failed(format!("{name} did not start")),
+        });
+    };
+    let started = StartedPanel {
+        port: 0,
+        pgid,
+        done,
+    };
+    let ready = async {
+        let port = line_rx.await.unwrap_or_else(|_| {
+            Err("it closed its output before printing `iohr-panel <port>`".to_owned())
+        })?;
+        listening(port).await;
+        Ok::<u16, String>(port)
+    };
+    let why = match tokio::time::timeout(PANEL_LINE_WINDOW, ready).await {
+        Ok(Ok(port)) => return Ok(StartedPanel { port, ..started }),
+        Ok(Err(why)) => why,
+        Err(_) => format!(
+            "it did not print `iohr-panel <port>` and listen on 127.0.0.1 at that port within \
+             {} s",
+            PANEL_LINE_WINDOW.as_secs()
+        ),
+    };
+    started.stop().await;
+    Err(Error::Failed(format!("panel {name} was stopped: {why}")))
+}
+
+/// Panels start on macOS and Linux only: stopping one needs its process group.
+#[cfg(not(unix))]
+pub(crate) async fn start_panel(
+    _global: &Global,
+    _env: &Env,
+    _store: &Store,
+    name: &str,
+) -> Result<StartedPanel, Error> {
+    Err(Error::Failed(format!(
+        "panel {name} was not started: panels start on macOS and Linux only"
+    )))
+}
+
 /// The API's origin for `IOHR_EXT_API`: HTTPS, or plain HTTP to this machine only
 /// (SR-07), as the runtime's client accepts it.
 pub(crate) fn api_origin(raw: &str) -> Result<url::Url, Error> {
@@ -406,4 +584,33 @@ pub(crate) async fn serve<M: Minter>(
     };
     drop(server);
     finish(status, tasks).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::panel_port;
+
+    #[test]
+    fn a_panel_port_is_exactly_one_line_in_range() {
+        assert_eq!(panel_port(b"iohr-panel 8123\n"), Some(8123));
+        assert_eq!(panel_port(b"iohr-panel 1024\n"), Some(1024));
+        assert_eq!(panel_port(b"iohr-panel 65535\n"), Some(65535));
+        for bad in [
+            &b"iohr-panel 1023\n"[..],
+            b"iohr-panel 65536\n",
+            b"iohr-panel 0\n",
+            b"iohr-panel 08123\n",
+            b"iohr-panel +8123\n",
+            b"iohr-panel 8123",
+            b"iohr-panel 8123\r\n",
+            b"iohr-panel  8123\n",
+            b"iohr-panel 8123 \n",
+            b"iohr-panel http://evil.example:8123\n",
+            b"IOHR-PANEL 8123\n",
+            b"iohr-panel \n",
+            b"\n",
+        ] {
+            assert_eq!(panel_port(bad), None, "{}", String::from_utf8_lossy(bad));
+        }
+    }
 }

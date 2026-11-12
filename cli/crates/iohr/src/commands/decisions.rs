@@ -32,6 +32,7 @@ use crate::cli::{DecisionsCommand, DecisionsWhere, Global};
 use crate::context::{Api, session};
 use crate::error::Error;
 use crate::output::Out;
+use crate::ui::Listed;
 
 /// The largest document the API takes (`SaveDocument`: 512 KiB).
 const MAX_TEXT: usize = 512 * 1024;
@@ -602,7 +603,7 @@ async fn list(
             ]
         })
         .collect();
-    Out::table(
+    Out::list(
         &[
             if mixed { "DOCUMENT" } else { "RFC" },
             "SPACE",
@@ -612,6 +613,7 @@ async fn list(
             "TITLE",
         ],
         &table,
+        &Listed::new("document", "documents").next("new one", "iohr decisions create"),
     );
     Ok(())
 }
