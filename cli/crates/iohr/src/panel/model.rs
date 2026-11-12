@@ -146,14 +146,14 @@ pub(super) enum Effect {
     },
     /// Interrupt the session (the person confirmed).
     StopWork(String),
-    /// Fold the chat box or bring it back (Option+h, Alt+h off macOS; Ctrl-] too).
-    ChatToggle,
     /// Show this terminal on the phone (the Mac app's terminal host does the sharing).
     ShareOn,
     /// Stop showing it.
     ShareOff,
     /// The person turned typing from the phone on (`true`) or off: what the link offers.
     Typing(bool),
+    /// Fold the chat box or bring it back (Option+h, Alt+h off macOS; Ctrl-] too).
+    ChatToggle,
     /// Stop the panel: the shell goes on without it.
     Stop,
 }
@@ -166,16 +166,12 @@ const MENU: &[(&str, char, View)] = &[
     ("Incidents", 'i', View::Incidents),
     ("Run", 'r', View::Run),
     ("Status", 's', View::Status),
-    ("Chat box", 'c', View::Rest),
     ("Share to phone", 'h', View::Menu),
     ("Let phone type", 't', View::Menu),
+    ("Chat box", 'c', View::Rest),
     ("Help", '?', View::Help),
     ("Stop panel", 'x', View::Rest),
 ];
-
-/// The menu rows that act in place (they keep the menu open).
-const SHARE_ROW: usize = 7;
-const TYPING_ROW: usize = 8;
 
 /// Rows of asks shown at once.
 const VISIBLE: usize = 5;
@@ -432,14 +428,15 @@ impl Model {
         if i == MENU.len() - 1 {
             return Effect::Stop;
         }
-        if key == 'c' {
-            // The box folds or comes back and the menu closes, so the result is in view.
-            self.view = View::Rest;
-            return Effect::ChatToggle;
-        }
-        match i {
-            SHARE_ROW => return self.share_toggle(),
-            TYPING_ROW => return self.typing_toggle(),
+        match key {
+            // Share and typing act in place: the menu stays open on the row.
+            'h' => return self.share_toggle(),
+            't' => return self.typing_toggle(),
+            'c' => {
+                // The box folds or comes back and the menu closes, so the result is in view.
+                self.view = View::Rest;
+                return Effect::ChatToggle;
+            }
             _ => {}
         }
         self.view = view;
@@ -598,9 +595,9 @@ impl Model {
             self.incidents_menu_right(),
             ("›".into(), MUTE),
             ("›".into(), MUTE),
-            (HIDE_LABEL.into(), MUTE),
             self.share_menu_right(),
             self.typing_menu_right(),
+            (HIDE_LABEL.into(), MUTE),
             (String::new(), MUTE),
             (String::new(), MUTE),
         ];

@@ -475,9 +475,9 @@ impl Proxy {
         self.child_output(&chunk)
     }
 
-    /// `chunk` without what is the panel's own: the hook's reports to the chat box (they go to
-    /// the box) and the stop and resume sequences (which set `stopped`). What is left is what the
-    /// shell printed, for the terminal and for the phone alike.
+    /// `chunk` without the hook's reports to the chat box and the panel's own stop and resume
+    /// sequences (which set `stopped`): what the shell printed, for the terminal and for the
+    /// phone alike.
     fn strip_control(&mut self, chunk: &[u8]) -> Vec<u8> {
         // The hook's reports to the chat box come out first (a start a chunk ended in the middle
         // of is held for the next one, which is also where a stop sequence's start is rejoined).
@@ -648,15 +648,15 @@ struct Session {
     held: Option<link::Session>,
     /// A rejoin in flight (starting a host takes seconds).
     rejoin_fetch: Option<Fetch<Joined>>,
-    /// A lone Esc held until this moment, to see whether `h` follows in the next read (Option+h
-    /// from a terminal that writes Esc and `h` apart).
-    esc_held: Option<Instant>,
     /// The link to the Mac app's terminal host while this terminal is shown on the phone.
     phone: Option<Phone>,
     /// The shell's process id, which the app reads Claude's presence from.
     shell_pid: u32,
     /// Shares started so far: each one's session id is new, a host may not have dropped the last.
     shares: u32,
+    /// A lone Esc held until this moment, to see whether `h` follows in the next read (Option+h
+    /// from a terminal that writes Esc and `h` apart).
+    esc_held: Option<Instant>,
 }
 
 impl Session {
@@ -719,7 +719,6 @@ impl Session {
                 }
             }
             Effect::Stop => self.proxy.stopped = true,
-            Effect::ChatToggle => self.proxy.chat.toggle(),
             Effect::ShareOn => self.share_on(),
             Effect::ShareOff => self.phone = None,
             Effect::Typing(on) => {
@@ -727,6 +726,7 @@ impl Session {
                     p.send(phone::Cmd::Typing(on));
                 }
             }
+            Effect::ChatToggle => self.proxy.chat.toggle(),
             Effect::Question { id, text } => {
                 if self.stub {
                     self.proxy.model.acted(Ok("stub: nothing was sent".into()));
@@ -1066,7 +1066,6 @@ impl Session {
     fn resized(&mut self) {
         let (rows, cols) = host_size();
         let bytes = self.proxy.resize(rows, cols);
-        // `emit` gives the shell its size, and `push_size` tells the phone.
         self.emit(&bytes);
     }
 
@@ -1326,10 +1325,10 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         project: config.project.take(),
         held: None,
         rejoin_fetch: None,
-        esc_held: None,
         phone: None,
         shell_pid,
         shares: 0,
+        esc_held: None,
     };
     session.redraw();
     session.refresh();
