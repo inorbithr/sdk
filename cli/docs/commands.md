@@ -62,7 +62,7 @@ ends its `--help` with real examples.
 | `iohr theme list \| show NAME` | The terminal themes of the InOrbit app (`inorbit`, `solarized-dark`, `nord`, `light`), the one that is on, and a theme's colours, font and cursor; local, no sign-in | [The terminal theme](terminal-theme.md) |
 | `iohr theme install NAME [--terminal] [--prompt] [--replace-prompt]` | Writes the Terminal.app profile `~/.inorbit/term/themes/NAME.terminal` and remembers the theme; `--terminal` opens the profile, `--prompt` turns on the zsh prompt, `--replace-prompt` replaces a prompt you set yourself | [The terminal theme](terminal-theme.md) |
 | `iohr theme off` | Turns the prompt off and forgets the chosen theme; an imported profile stays | [The terminal theme](terminal-theme.md) |
-| `iohr runner register \| run \| status \| config show \| gate-report \| run-key \| api-key \| personal-use` | This machine as a coordinator runner | [Runner](runner.md) |
+| `iohr runner register \| run \| status \| revoke \| config show \| gate-report \| run-key \| api-key \| personal-use` | This machine as a coordinator runner | [Runner](runner.md) |
 | `iohr session [DIR]`, `iohr stop [DIR]` | Open and stop a project's session | [Sessions](session-and-panel.md) |
 | `iohr coordinator ...` | The coordinator's jobs, asks and plans | [below](#iohr-coordinator) |
 | `iohr memory ...` | Memory kept as local files | [Memory](roles-and-memory.md#memory) |
@@ -76,7 +76,7 @@ ends its `--help` with real examples.
 | `iohr tunnel` | A loopback SSH pipe into an environment's edge | [below](#iohr-tunnel) |
 | `iohr browser install [--print]` | Install InOrbit Trails, the browser extension | [below](#iohr-browser-install) |
 | `iohr doctor [--fix]` | Check this machine for the known problems (signed out, MCP bridge down, low disk, unreadable `config.toml`), say how to fix each, exit 1 on a failure. `--fix`, or `[doctor] auto_fix = true`, runs the safe fixes (restart a stopped bridge); the `?` card shows what it found | [below](#iohr-doctor) |
-| `iohr upgrade [--check]` | Update `iohr` the way it was installed | [Upgrade](install.md#upgrade) |
+| `iohr upgrade [--check] [--no-extensions] [--yes]` | Update `iohr` the way it was installed, then every installed extension; `--no-extensions` leaves extensions alone | [Upgrade](install.md#upgrade) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell | |
 | `iohr help [COMMAND]` | The help | [below](#the-help) |
 

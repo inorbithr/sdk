@@ -59,8 +59,10 @@ rotation and in networks that inspect TLS, which banks often run.
 
 **SR-07. HTTPS-only base URLs.** `base_url` and `token_url` must be `https://`. Plain
 `http://` is refused at construction, except for loopback addresses, which tests and the
-conformance replay server use.
-- Verify: unit test; conformance runs on loopback.
+conformance replay server use. Loopback is `localhost`, `127.0.0.0/8` or `::1`, matched as
+a parsed address, never as the start of a name (`http://127.example.com` is refused); each
+language has one such check, used by every URL it accepts.
+- Verify: unit test with names that only start like loopback; conformance runs on loopback.
 - Refs: CRA I.2(b), I.2(e).
 
 **SR-08. FIPS-capable modes.** Each SDK can run with FIPS-validated cryptography
@@ -90,12 +92,20 @@ never retries or fails over to another region on its own.
 ## Secrets and data
 
 **SR-10. Secrets are typed and redacted.** Key secrets, access tokens, proxy passwords
-and private keys are held in a `Secret` type. Printing, formatting, serialising or
-logging it shows `<redacted>`: Go `String`/`GoString`/`Format`, Rust `Debug`/`Display`,
-TypeScript `toString`/`toJSON`/`util.inspect`, Python `__repr__`/`__str__`. The key id
-(`ak_...`) is not secret and may be shown.
-- Verify: a unit test per language for every way to print; conformance case
-  `secret-never-in-message`.
+and private keys are held in a `Secret` type, and every type that carries one (a token, a
+credential, a key's settings, a resolved configuration, proxy rules) shows only the
+marker. Printing, formatting, serialising to JSON or logging it, structured logs
+included, shows `<redacted>`: Go `String`/`GoString`/`Format` (every verb),
+`MarshalJSON` and `slog.LogValuer`; Rust `Debug`/`Display`; TypeScript
+`toString`/`toJSON`/`util.inspect`, the token kept off the object's own properties;
+Python `__repr__`/`__str__` and the pydantic JSON form; Java `toString` and Jackson,
+the secret fields `transient`; C# `ToString` and `System.Text.Json`; Swift
+`description`/`debugDescription`/`Mirror`, `Secret` not `Codable`. Swift's `HTTPRequest`
+prints the `authorization` header without its value, and an operation (Go, Python, Rust)
+prints its query, body and field names without their values. Each language has one marker constant. The
+key id (`ak_...`) is not secret and may be shown.
+- Verify: a unit test per language for every way to print, JSON and a structured log
+  among them; conformance case `secret-never-in-message`.
 - Refs: SSDF PW.5; CRA I.2(e); OSPS BR-07.
 
 **SR-11. Secrets are wiped where the language allows.** Rust zeroes secret memory on
@@ -194,7 +204,8 @@ names) only in `iohr ext install`, `upgrade` and `sync`: that registry, the toke
 service its challenge names and the storage host a blob download redirects to, with
 `GET`, over HTTPS (plain HTTP to this machine only). Never on another command, never to
 look for updates, no telemetry. A mirror's credential comes from
-`IOHR_EXT_REGISTRY_AUTH` and goes to that registry and its token service only.
+`IOHR_EXT_REGISTRY_AUTH` and goes to that registry only, and to its token service when
+that service is on the registry's own origin.
 - Why: banks and regulated companies do not allow software that changes or reports on
   its own; a security team needs to know every host the tool reaches.
 - Verify: review; integration tests run against a registry on loopback with nothing

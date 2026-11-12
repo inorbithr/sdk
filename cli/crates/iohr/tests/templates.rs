@@ -35,6 +35,22 @@ fn run(home: &Path, cwd: &Path, args: &[&str]) -> Output {
         .env("GOCACHE", home.join("gocache"))
         .env("GOFLAGS", "-modcacherw")
         .env("UV_CACHE_DIR", home.join("uv"))
+        // Java, .NET, Dart and Swift keep their packages in the private home too, so a cold
+        // cache proves the lockfile and the pin, not what an earlier build left behind.
+        .env(
+            "MAVEN_OPTS",
+            format!("-Dmaven.repo.local={}", home.join("m2").display()),
+        )
+        .env("DOTNET_CLI_HOME", home.join("dotnet"))
+        .env("NUGET_PACKAGES", home.join("nuget"))
+        .env("DOTNET_NOLOGO", "1")
+        .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+        .env("PUB_CACHE", home.join("pub"))
+        .envs(
+            ["JAVA_HOME", "DOTNET_ROOT"]
+                .into_iter()
+                .filter_map(|k| std::env::var_os(k).map(|v| (k, v))),
+        )
         .stdin(Stdio::null())
         .output()
         .unwrap()
@@ -58,10 +74,15 @@ fn on_path(program: &str) -> bool {
 /// Whether the package registry a variant installs from answers (TCP connect, 5 s).
 fn registry_reachable(lang: &str) -> bool {
     use std::net::ToSocketAddrs;
-    let host = if lang == "python" {
-        "pypi.org:443"
-    } else {
-        "registry.npmjs.org:443"
+    let host = match lang {
+        "python" => "pypi.org:443",
+        "go" => "proxy.golang.org:443",
+        "rust" => "static.crates.io:443",
+        "java" => "repo1.maven.org:443",
+        "csharp" => "api.nuget.org:443",
+        "swift" => "github.com:443",
+        "dart" => "pub.dev:443",
+        _ => "registry.npmjs.org:443",
     };
     host.to_socket_addrs().is_ok_and(|mut a| {
         a.any(|addr| {
@@ -230,8 +251,21 @@ fn the_enterprise_floor_is_written_on_every_template_but_blank() {
         ("cli", "go"),
         ("cli", "rust"),
         ("agent", "python"),
+        ("agent", "typescript"),
+        ("agent", "go"),
+        ("agent", "rust"),
+        ("agent", "java"),
+        ("agent", "csharp"),
+        ("agent", "swift"),
+        ("agent", "dart"),
         ("mcp-server", "python"),
         ("mcp-server", "typescript"),
+        ("mcp-server", "go"),
+        ("mcp-server", "rust"),
+        ("mcp-server", "java"),
+        ("mcp-server", "csharp"),
+        ("mcp-server", "swift"),
+        ("mcp-server", "dart"),
         ("evals", "python"),
         ("extension", "python"),
         ("extension", "typescript"),
@@ -359,6 +393,32 @@ fn evals_and_mcp_server_carry_what_their_readme_promises_and_leave_no_placeholde
             "package-lock.json",
             "\"@modelcontextprotocol/server\": \"2.4.0\"",
         ),
+        (
+            "go",
+            "go.mod",
+            "go.sum",
+            "github.com/modelcontextprotocol/go-sdk v1.8.0",
+        ),
+        (
+            "rust",
+            "Cargo.toml",
+            "Cargo.lock",
+            "rmcp = { version = \"=3.9.0\"",
+        ),
+        ("java", "pom.xml", "pom.xml", "<version>2.1.0</version>"),
+        (
+            "csharp",
+            "src/App/App.csproj",
+            "src/App/packages.lock.json",
+            "[2.4.0]",
+        ),
+        (
+            "swift",
+            "Package.swift",
+            "Package.resolved",
+            "exact: \"0.12.1\"",
+        ),
+        ("dart", "pubspec.yaml", "pubspec.lock", "dart_mcp: 0.5.2"),
     ] {
         let (_h, dir, out) = init("mcp-server", Some(lang), false, &[]);
         assert!(out.status.success(), "mcp-server/{lang}: {}", text(&out));
@@ -405,8 +465,20 @@ fn every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here(
         ("cli", "rust", &["cargo"]),
         ("agent", "python", &["uv"]),
         ("agent", "typescript", &["node"]),
+        ("agent", "go", &["go"]),
+        ("agent", "rust", &["cargo"]),
+        ("agent", "java", &["mvn", "java"]),
+        ("agent", "csharp", &["dotnet"]),
+        ("agent", "swift", &["swift"]),
+        ("agent", "dart", &["dart"]),
         ("mcp-server", "python", &["uv"]),
         ("mcp-server", "typescript", &["node", "npm"]),
+        ("mcp-server", "go", &["go"]),
+        ("mcp-server", "rust", &["cargo"]),
+        ("mcp-server", "java", &["mvn", "java"]),
+        ("mcp-server", "csharp", &["dotnet"]),
+        ("mcp-server", "swift", &["swift"]),
+        ("mcp-server", "dart", &["dart"]),
         ("evals", "python", &["python3"]),
         ("extension", "python", &["python3"]),
         ("extension", "typescript", &["node"]),

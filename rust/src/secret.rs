@@ -2,6 +2,9 @@ use std::fmt;
 
 use zeroize::{Zeroize, Zeroizing};
 
+/// What every printer in the crate shows in place of a secret.
+pub(crate) const REDACTED: &str = "<redacted>";
+
 /// A secret value: a key secret or an access token.
 ///
 /// `Debug` and `Display` print `<redacted>`, the value is not `Serialize`, and its
@@ -55,13 +58,13 @@ impl<'de, T: Zeroize + serde::Deserialize<'de>> serde::Deserialize<'de> for Secr
 
 impl<T: Zeroize> fmt::Debug for Secret<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("<redacted>")
+        f.write_str(REDACTED)
     }
 }
 
 impl<T: Zeroize> fmt::Display for Secret<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("<redacted>")
+        f.write_str(REDACTED)
     }
 }
 

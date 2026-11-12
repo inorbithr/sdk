@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
-import ipaddress
 import json
 import os
 import threading
@@ -38,6 +37,7 @@ from inorbithr._config import (
     Resolution,
     ResolvedConfig,
     env_name,
+    is_loopback,
     resolve,
 )
 from inorbithr._errors import (
@@ -129,9 +129,9 @@ class Operation:
     """The path, parameters bound and encoded."""
     name: str | None = None
     """What hooks see (`radar.list_digests`)."""
-    query: Sequence[tuple[str, object]] = ()
+    query: Sequence[tuple[str, object]] = field(default=(), repr=False)
     """Query parameters; `None` ones are left out, lists repeat the name."""
-    body: object = None
+    body: object = field(default=None, repr=False)
     """The JSON body: a model, or anything `json.dumps` writes."""
     scopes: Sequence[str] = ()
     """The scopes the operation needs, for the record."""
@@ -139,7 +139,7 @@ class Operation:
     """Retry it like an idempotent method although its method is not."""
     rpc: str = ""
     """A stream's RPC (`x-iohr-rpc`), what its call on the socket names."""
-    params: Sequence[tuple[str, object]] = ()
+    params: Sequence[tuple[str, object]] = field(default=(), repr=False)
     """A stream's path parameters by wire name, unencoded, for its call on the socket."""
     idempotency_key: bool = False
     """The operation takes `Idempotency-Key`: the call sends one and may be retried."""
@@ -241,12 +241,7 @@ def _check_url(what: str, raw: str, *, origin_only: bool) -> str:
         host = url.hostname or ""
     except ValueError as e:
         raise ConfigError(f"{what} is not usable: {e}") from None
-    loopback = host == "localhost"
-    if not loopback:
-        try:
-            loopback = ipaddress.ip_address(host).is_loopback
-        except ValueError:
-            loopback = False
+    loopback = is_loopback(host)
     if not (url.scheme == "https" or (url.scheme == "http" and loopback)) or not host:
         raise ConfigError(
             f"{what} is not usable: it must use https (plain http only to this machine)"
