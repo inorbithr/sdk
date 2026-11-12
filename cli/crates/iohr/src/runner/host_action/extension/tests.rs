@@ -1,6 +1,8 @@
 use super::*;
+use crate::runner::host_action::Output;
 use crate::runner::host_action::testing::{Fake, fake};
-use crate::runner::host_action::{HostRunner, KubeTarget, Output};
+#[cfg(unix)]
+use crate::runner::host_action::{HostRunner, KubeTarget};
 use serde_json::json;
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
