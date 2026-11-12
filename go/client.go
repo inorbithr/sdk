@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -64,6 +66,28 @@ type Operation struct {
 	// in wire names, unset ones left out: the body of a socket call frame.
 	Fields map[string]any
 }
+
+// String shows the operation without its values: the query and field names and whether
+// a body is set, never what they hold (SR-10).
+func (op Operation) String() string {
+	body := "none"
+	if op.Body != nil {
+		body = "set"
+	}
+	return fmt.Sprintf(
+		"Operation{%s %s %s, template: %s, query: %v, body: %s, scopes: %v, idempotent: %t, idempotency key: %t, rpc: %s, fields: %v}",
+		op.Name, op.Method, op.Path, op.Template, slices.Sorted(maps.Keys(op.Query)), body, op.Scopes,
+		op.Idempotent, op.IdempotencyKey, op.RPC, slices.Sorted(maps.Keys(op.Fields)))
+}
+
+// GoString is String, for %#v.
+func (op Operation) GoString() string { return op.String() }
+
+// Format writes String for every verb.
+func (op Operation) Format(st fmt.State, _ rune) { formatRedacted(st, op) }
+
+// LogValue is String, for log/slog.
+func (op Operation) LogValue() slog.Value { return logRedacted(op) }
 
 func (op Operation) retrySafe() bool {
 	switch op.Method {
@@ -504,8 +528,7 @@ func checkURL(what, raw string, originOnly bool) (*url.URL, error) {
 		return nil, &ConfigError{Message: fmt.Sprintf("%s is not usable: %v", what, err)}
 	}
 	host := u.Hostname()
-	loopback := host == "localhost" || host == "::1" || strings.HasPrefix(host, "127.")
-	if u.Scheme != "https" && (u.Scheme != "http" || !loopback) {
+	if u.Scheme != "https" && (u.Scheme != "http" || !isLoopback(host)) {
 		return nil, &ConfigError{Message: what + " is not usable: it must use https (plain http only to this machine)"}
 	}
 	if u.User != nil || u.Fragment != "" || host == "" {
