@@ -36,7 +36,7 @@ pub mod fetch;
 #[cfg(not(unix))]
 mod claims {
     /// Evidence needs the index, which is unix-only; the shape exists so callers compile.
-    pub struct PageEvidence;
+    pub(crate) struct PageEvidence;
 }
 #[cfg(unix)]
 pub mod index;
@@ -412,6 +412,7 @@ pub async fn build(
     };
     let got = fetch::collect(&reach, &urls, progress).await;
     let mut html: Vec<(String, String)> = Vec::new();
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut evidence: Vec<claims::PageEvidence> = Vec::new();
     for g in &got.pages {
         let Ok(bytes) = std::fs::read(&g.path) else {

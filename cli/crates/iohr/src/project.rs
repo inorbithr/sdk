@@ -718,17 +718,21 @@ pub const TOOLCHAIN_MINIMUM: &str = "The one exception is the language's own min
      scaffold wrote, the installed toolchain above, never raise it to a newer release, which \
      would not build here. A newer toolchain goes in your summary as a suggestion.";
 
+/// Seconds a toolchain's version command may take. A version prints at once; a proxy that
+/// starts installing what it runs (a version manager on a fresh machine) is stopped instead.
+const VERSION_SECS: u64 = 5;
+
 /// What `command` prints first, for the agent's prompt (`rustc 1.99.0 (b940084d7 2026-09-28)`),
-/// else nothing: a toolchain that will not run is told nothing rather than guessed. A version
-/// command is a read, so a dry run runs it too.
+/// else nothing: a toolchain that will not run, or does not answer within [`VERSION_SECS`], is
+/// told nothing rather than guessed. A version command is a read, so a dry run runs it too.
 #[must_use]
 pub fn toolchain_line(command: &[String]) -> Option<String> {
     let (prog, args) = command.split_first()?;
-    let o = Command::new(prog).args(args).output().ok()?;
-    if !o.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&o.stdout);
+    let stdout = crate::memory::drift::output_within(
+        Command::new(prog).args(args),
+        std::time::Duration::from_secs(VERSION_SECS),
+    )?;
+    let text = String::from_utf8_lossy(&stdout);
     let first = text.lines().map(str::trim).find(|l| !l.is_empty())?;
     Some(first.chars().take(120).collect())
 }
