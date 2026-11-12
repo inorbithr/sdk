@@ -128,6 +128,7 @@ pub const RESERVED: &[&str] = &[
     "doctor",
     "domains",
     "ext",
+    "handoff",
     "help",
     "init",
     "iohr",
