@@ -335,7 +335,12 @@ The order is fixed: scaffold, then the agent, then the smoke test, then the repo
    exits non-zero and prints one line to continue (`<bin> ask --allow-edits "continue the
    work"`). It also writes `.inorbit/handoff.md` (what was asked, the files written, the
    agent's last words); the next `ask --allow-edits` in that folder reads it into its
-   prompt and removes it when that run succeeds.
+   prompt and removes it when that run succeeds. An editing `ask --allow-edits` that stops
+   early (turn cap, time cap or failure) writes the same note. A second stop does not
+   overwrite the first: it folds it to one line under "Earlier runs", keeps the newest 6
+   and counts the older ones, so the note stays short. `<bin> handoff show|compact|clear
+   [--json]` reads it, re-folds it or deletes it. Local files only; the note is never
+   logged or sent.
 
 `--json` passes the agent's own events through, as `iohr ask --json` does, then an
 `iohr_summary` line (the agent, the bounds, how it ended) and the `iohr_report` line.
