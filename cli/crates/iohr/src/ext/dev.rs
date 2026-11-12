@@ -8,7 +8,6 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
-use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -44,20 +43,17 @@ fn now() -> String {
     format!("{:02}:{:02}:{:02}Z", t.hour(), t.minute(), t.second())
 }
 
-fn colour() -> bool {
-    std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal()
-}
-
-/// One log line on stderr: the time, where it came from, the text; red when `alarm`.
+/// One log line on stderr: the time, where it came from, the text; red when `alarm` (by the
+/// same colour rules as every drawn line: a terminal, `NO_COLOR` and `TERM=dumb` honoured).
 pub(crate) fn log_line(from: &str, text: &str, alarm: bool) {
     use std::io::Write as _;
     let line = format!("{} {from:<4} {text}", now());
-    let mut err = std::io::stderr().lock();
-    let _ = if alarm && colour() {
-        writeln!(err, "\x1b[31m{line}\x1b[0m")
+    let line = if alarm {
+        crate::ui::Paint::stderr(false).tone(crate::ui::Mark::Fail, &line)
     } else {
-        writeln!(err, "{line}")
+        line
     };
+    let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
 /// Streams `r` line by line with the time, to stdout or stderr.

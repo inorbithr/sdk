@@ -21,10 +21,11 @@ use crate::template::Runner;
 
 /// The template used when neither `--template` nor `[project] template` names one.
 pub mod folder;
+pub mod place;
 pub mod space;
 pub(crate) mod wizard;
 
-pub const DEFAULT_TEMPLATE: &str = "coordinated";
+pub const DEFAULT_TEMPLATE: &str = "service";
 
 /// The name rule: the folder, the Python module and the extension's name all come from it, so
 /// it is the extension name rule (lowercase, digits, dashes, 2 to 32, never `tbd`) and never a
@@ -131,6 +132,13 @@ fn commit_all(dir: &Path, message: &str) -> bool {
                 "user.email=iohr@inorbit.hr",
                 "-c",
                 "commit.gpgsign=false",
+                // A commit may start `git maintenance` in the background; a new folder has
+                // nothing to tidy, and a process left behind can write into `.git` after
+                // iohr has returned.
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
                 "commit",
                 "-q",
                 "-m",
@@ -547,7 +555,23 @@ pub fn register_step(
     template: &str,
     now: &str,
 ) -> Result<(PathBuf, Step), String> {
-    let state = state_root.join(name);
+    register_in(dir, &state_root.join(name), name, template, now)
+}
+
+/// [`register_step`] with the state folder already chosen (the place resolver's answer, see
+/// [`place::Layout::state`]).
+///
+/// # Errors
+///
+/// A folder or the record could not be written.
+pub fn register_in(
+    dir: &Path,
+    state: &Path,
+    name: &str,
+    template: &str,
+    now: &str,
+) -> Result<(PathBuf, Step), String> {
+    let state = state.to_path_buf();
     private_dir(&state.join("state"))?;
     private_dir(&state.join("cache"))?;
     let file = state.join("project.toml");
@@ -1103,6 +1127,10 @@ mod tests {
         if !t.meta.variants.is_empty() {
             given.insert("language".into(), template::Answer::Text(lang.into()));
         }
+        // The floor asks for a licence and has no default: a test names one.
+        if t.all_questions().iter().any(|q| q.key == "license") {
+            given.insert("license".into(), template::Answer::Text("MIT".into()));
+        }
         let answers = template::answer(&t, &given, None).unwrap();
         let vals = template::all_values(&t, name, "local", "2026-10-12T10:00:00Z", &answers);
         let tv = t.with_variant(lang).unwrap_or_else(|_| t.clone());
@@ -1144,7 +1172,7 @@ mod tests {
     }
 
     #[test]
-    fn the_coordinated_template_is_the_demo_plus_a_coordination_manifest() {
+    fn the_coordinated_template_is_the_extension_with_its_coordination_manifest() {
         let files = rendered("coordinated", "my-shop");
         let get = |p: &str| files.iter().find(|(f, _)| f == p).map(|(_, t)| t.as_str());
         for (p, t) in &files {
@@ -1163,17 +1191,19 @@ mod tests {
         paths.sort();
         paths.dedup();
         assert_eq!(paths.len(), files.len());
+        // The Planner manifest now comes from the base every template shares, so the old
+        // default and the demo are the extension under their old names, file for file.
         let demo = rendered("demo", "my-shop");
-        assert_eq!(demo.len() + 1, files.len());
+        assert_eq!(demo.len(), files.len());
     }
 
     #[test]
-    fn the_template_is_the_flag_then_the_config_then_coordinated() {
-        assert_eq!(choose_template(Some("demo"), Some("coordinated")), "demo");
-        assert_eq!(choose_template(None, Some("demo")), "demo");
-        assert_eq!(choose_template(None, None), "coordinated");
-        assert_eq!(choose_template(Some(" "), Some(" ")), "coordinated");
-        assert_eq!(DEFAULT_TEMPLATE, "coordinated");
+    fn the_template_is_the_flag_then_the_config_then_service() {
+        assert_eq!(choose_template(Some("demo"), Some("agent")), "demo");
+        assert_eq!(choose_template(None, Some("cli")), "cli");
+        assert_eq!(choose_template(None, None), "service");
+        assert_eq!(choose_template(Some(" "), Some(" ")), "service");
+        assert_eq!(DEFAULT_TEMPLATE, "service");
     }
 
     #[test]

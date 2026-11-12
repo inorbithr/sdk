@@ -1,0 +1,6 @@
+# Who must review a change (GitHub reads this file: the last matching line wins).
+# Replace @CHANGE-ME with a user or a team, and turn on "Require review from Code Owners"
+# in the branch protection of the default branch.
+* @@CODE_OWNER@@
+/.github/ @@CODE_OWNER@@
+/SECURITY.md @@CODE_OWNER@@

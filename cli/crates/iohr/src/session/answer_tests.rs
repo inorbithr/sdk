@@ -321,7 +321,7 @@ fn the_host_refuses_a_bad_ask_id_and_no_host_means_no_routing() {
 #[test]
 fn the_queue_reads_an_asks_tasks_gives_a_task_back_without_a_try_and_lists_its_roles() {
     let dir = tempfile::tempdir().unwrap();
-    let q = Queue::open(&dir.path().join("q.duckdb")).unwrap();
+    let q = Queue::open(&dir.path().join("own").join("q.duckdb")).unwrap();
     q.register_roles(&names(&["b", "a"]), now_ms()).unwrap();
     assert_eq!(q.role_names().unwrap(), ["a", "b"]);
     for (ext, role) in [("ask:x:a", "a"), ("ask:x:b", "b"), ("ask:xy:a", "a")] {

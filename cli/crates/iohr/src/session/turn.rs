@@ -69,12 +69,13 @@ pub(crate) fn args(role: &str, p: &Payload) -> Vec<OsString> {
 
 /// What the child printed: its answer, or why there is none.
 pub(crate) fn reply_of(stdout: &str) -> Result<Reply, String> {
-    let v: serde_json::Value =
-        serde_json::from_str(stdout.trim()).map_err(|_| "the Role printed no answer".to_owned())?;
-    let text = v
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| "the Role printed no answer".to_owned())?;
+    let v: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|_| "the Role's turn ended without an answer iohr could read".to_owned())?;
+    // `iohr --json ask` prints the answer as `answer`; `text` is what the queue stores it as.
+    let text = ["answer", "text"]
+        .iter()
+        .find_map(|k| v.get(*k).and_then(serde_json::Value::as_str))
+        .ok_or_else(|| "the Role's turn ended without an answer iohr could read".to_owned())?;
     Ok(Reply {
         text: text.to_owned(),
         model: v
@@ -219,6 +220,18 @@ mod tests {
                 "--",
                 "-why --role x?",
             ]
+        );
+    }
+
+    #[test]
+    fn the_reply_reads_the_answer_key_iohr_json_ask_prints() {
+        let r = reply_of(
+            r#"{"answer":"a demo crate","command":null,"agent":"claude","model":"sonnet","exit_code":0,"duration_ms":9187}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            (r.text.as_str(), r.model.as_str(), r.duration_ms),
+            ("a demo crate", "sonnet", 9187)
         );
     }
 

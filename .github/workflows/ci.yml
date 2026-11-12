@@ -49,6 +49,7 @@ jobs:
       swift: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.swift == 'true' }}
       dart: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.dart == 'true' }}
       cli: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.cli == 'true' }}
+      ui: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.ui == 'true' }}
       any: >-
         ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.go == 'true' ||
         steps.filter.outputs.rust == 'true' || steps.filter.outputs.ts == 'true' ||
@@ -120,6 +121,12 @@ jobs:
               - 'spec/**'
               - 'mise.toml'
               - '.github/workflows/ci.yml'
+            # The web UI package and the `iohr ui` verbs that run its scripts (RFC 0217).
+            ui:
+              - 'ui/**'
+              - 'cli/crates/iohr/src/commands/web_ui.rs'
+              - 'mise.toml'
+              - '.github/workflows/ci.yml'
 
   repo:
     name: repo
@@ -145,7 +152,7 @@ jobs:
   tools:
     name: tools
     needs: changes
-    if: needs.changes.outputs.any == 'true'
+    if: needs.changes.outputs.any == 'true' || needs.changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -182,15 +189,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        go: ["1.26.10", "1.27.3"]
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","go":"1.27.3"},{"os":"macos-latest","go":"1.27.3"}]' || '[]') }}
+        go: ["1.26.11", "1.27.4"]
+        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","go":"1.27.4"},{"os":"macos-latest","go":"1.27.4"}]' || '[]') }}
     env:
       MISE_GO_VERSION: ${{ matrix.go }}
       # Linux cells use the tools job's binaries; Windows and macOS build their own.
       IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
       REPLAY_PREBUILT: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
       # One cell builds the generator's compile test (it needs Rust).
-      COMPILE_CELL: ${{ matrix.os == 'ubuntu-latest' && matrix.go == '1.27.3' }}
+      COMPILE_CELL: ${{ matrix.os == 'ubuntu-latest' && matrix.go == '1.27.4' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -200,7 +207,7 @@ jobs:
         with:
           install_args: >-
             go golangci-lint go:golang.org/x/exp/cmd/gorelease go:golang.org/x/vuln/cmd/govulncheck
-            ${{ (matrix.os != 'ubuntu-latest' || (matrix.go == '1.27.3')) && 'rust cargo-binstall cargo:cargo-nextest' || '' }}
+            ${{ (matrix.os != 'ubuntu-latest' || (matrix.go == '1.27.4')) && 'rust cargo-binstall cargo:cargo-nextest' || '' }}
       - if: matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -560,7 +567,10 @@ jobs:
       # The panel's pty tests (tests/panel_live.rs) run a real zsh: the panel is a zsh feature,
       # and the runner image has none. macOS ships one.
       - if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends zsh
+        uses: ./.github/actions/apt-install # zizmor: ignore[self-repository]
+        timeout-minutes: 10
+        with:
+          packages: zsh
       - run: mise run cli:check
       - run: mise run cli:audit
       # A generated surface builds against rust/ and the wrong profile is refused.
@@ -570,12 +580,39 @@ jobs:
         run: mise run cli:installers
       # A Secret Service for the Linux credential-store test; packages from the runner image's archive.
       - if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends gnome-keyring dbus
+        uses: ./.github/actions/apt-install # zizmor: ignore[self-repository]
+        timeout-minutes: 10
+        with:
+          packages: gnome-keyring dbus
       - if: runner.os == 'Linux'
         run: mise run cli:keyring
       # Browser and device sign-in against the identity provider the platform runs.
       - if: runner.os == 'Linux' && matrix.rust != '1.94'
         run: mise run cli:hydra
+
+  # The web UI package's checks, run through the `iohr ui check` verb a developer runs.
+  ui:
+    name: ui
+    needs: [changes, tools]
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: node pnpm biome
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tools-linux
+          path: ci-tools
+      - run: chmod +x ci-tools/iohr
+      - run: pnpm install --frozen-lockfile
+        working-directory: ui
+      - run: ci-tools/iohr ui check --package ui
 
   examples:
     name: examples
@@ -617,7 +654,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [repo, tools, go, rust, ts, py, java, csharp, swift, swift-linux, dart, cli, examples]
+    needs: [repo, tools, go, rust, ts, py, java, csharp, swift, swift-linux, dart, cli, ui, examples]
     runs-on: ubuntu-latest
     permissions: {}
     steps:

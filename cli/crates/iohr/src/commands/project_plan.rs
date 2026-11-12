@@ -49,7 +49,7 @@ fn later(name: &str) -> String {
 }
 
 /// What the step can call the Planner with: a session, or the reason there is none.
-enum Access<'a> {
+pub(super) enum Access<'a> {
     In(&'a Api),
     /// No session, and why, in words fit to follow "not checked:" or begin a sentence.
     Without(String),
@@ -58,7 +58,10 @@ enum Access<'a> {
 /// The session init would call with. Only a machine with no profile and no token is "not
 /// signed in"; any other refusal (a token for another audience, an expired one, a store
 /// that cannot be read) says what it is.
-async fn access(g: &Global, env: &Env) -> Result<std::sync::Arc<crate::context::Session>, String> {
+pub(super) async fn access(
+    g: &Global,
+    env: &Env,
+) -> Result<std::sync::Arc<crate::context::Session>, String> {
     let ctx = Ctx::load(g).map_err(|e| first_line(&e.to_string()))?;
     if env.token.is_none() && run_profile(g, env, &ctx).is_none() {
         return Err("you are not signed in".to_owned());
@@ -71,8 +74,16 @@ async fn access(g: &Global, env: &Env) -> Result<std::sync::Arc<crate::context::
     })
 }
 
-/// The step: make or find the plan and write its id. `None` when the project has no
-/// `coordination.toml`, so there is nowhere to write one.
+/// What the step settled: its report, and the plan the project's items go in (when there is
+/// one), so a later step files into it without looking the plan up again.
+pub(crate) struct Planned {
+    pub step: Step,
+    pub id: Option<String>,
+}
+
+/// The step: make or find the plan, and write its id when the project has a
+/// `coordination.toml`. A project without one (the blank template) still gets the plan,
+/// because the project's shape item is filed in it; the id is then only passed on.
 pub(crate) async fn run(
     g: &Global,
     env: &Env,
@@ -80,62 +91,100 @@ pub(crate) async fn run(
     name: &str,
     chosen: Option<&str>,
     skip: bool,
-) -> Option<Step> {
+    local: bool,
+) -> Planned {
     let file = dir.join(MANIFEST);
-    let text = std::fs::read_to_string(&file).ok()?;
+    let text = std::fs::read_to_string(&file).ok();
     let title = "The project's Planner plan";
+    // `--no-sync` keeps the project on this machine: nothing is made in the account, so no plan
+    // is made or looked up. A project with a `coordination.toml` (every template but blank) keeps
+    // its `[plan] id` empty and is told how to set it; one without would only have had the plan
+    // for the shape item, so it says nothing is filed in it.
+    // A plan id you chose with `--plan-id` is still written (and checked when signed in).
+    if local && !skip && (text.is_none() || chosen.is_none()) {
+        let said = if text.is_some() {
+            format!(
+                "left empty (--no-sync keeps this project on this machine); {}",
+                later(name)
+            )
+        } else {
+            "not made (--no-sync keeps this project on this machine), so nothing is filed in it"
+                .to_owned()
+        };
+        return Planned {
+            step: step("plan", title, "skipped", said, ""),
+            id: None,
+        };
+    }
     if skip {
-        return Some(step(
-            "plan",
-            title,
-            "skipped",
-            format!("left empty (--no-plan); {}", later(name)),
-            "",
-        ));
+        let said = if text.is_some() {
+            format!("left empty (--no-plan); {}", later(name))
+        } else {
+            "not made (--no-plan), so nothing is filed in it".to_owned()
+        };
+        return Planned {
+            step: step("plan", title, "skipped", said, ""),
+            id: None,
+        };
     }
     let session = access(g, env).await;
     let api = match &session {
         Ok(s) => Access::In(&s.api),
         Err(why) => Access::Without(why.clone()),
     };
-    Some(settle(&api, &file, &text, name, chosen, title).await)
+    match text {
+        Some(text) => {
+            let step = settle(&api, &file, &text, name, chosen, title).await;
+            let id = std::fs::read_to_string(&file)
+                .ok()
+                .and_then(|t| plan_id_in(&t));
+            Planned { step, id }
+        }
+        None => settle_bare(&api, name, chosen, title).await,
+    }
 }
 
-/// [`run`] on a manifest already read: the choice, the write and the report.
-async fn settle(
+/// The plan to use: the chosen one (checked when signed in), or the one made or found by its
+/// `external_id`. `Err` is the finished step, `Ok` the id and what to say about it.
+async fn pick(
     api: &Access<'_>,
-    file: &Path,
-    text: &str,
     name: &str,
     chosen: Option<&str>,
     title: &str,
-) -> Step {
-    let fail = |said: String| step("plan", title, "failed", said, "");
+    has_manifest: bool,
+) -> Result<(String, String), Step> {
     if let Some(id) = chosen
         && let Err(e) = plan_segment(id)
     {
-        return fail(e.to_string());
+        return Err(step("plan", title, "failed", e.to_string(), ""));
     }
-    // A plan already named in the file stays: init may run again on a folder it made.
-    if chosen.is_none()
-        && let Some(id) = plan_id_in(text)
-    {
-        return step("plan", title, "done", format!("already set: {id}"), "");
-    }
-    let (id, said) = match (chosen, api) {
+    match (chosen, api) {
         (Some(id), Access::In(api)) => match Plans::new(api, None).get(id).await {
-            Ok(_) => (id.to_owned(), format!("chosen: {id}")),
+            Ok(_) => Ok((id.to_owned(), format!("chosen: {id}"))),
             Err(e) => {
                 // The files are already written when this runs: say so, and how to attach it.
-                return fail(format!(
-                    "the plan {id} was not found or cannot be seen ({}); the project's files are written, and {MANIFEST} has no plan yet: put a plan id you can see under [plan] id, or {}",
-                    first_line(&e.to_string()),
+                let after = if has_manifest {
+                    format!(
+                        "{MANIFEST} has no plan yet: put a plan id you can see under [plan] id, or {}",
+                        later(name)
+                    )
+                } else {
                     later(name)
-                ));
+                };
+                Err(step(
+                    "plan",
+                    title,
+                    "failed",
+                    format!(
+                        "the plan {id} was not found or cannot be seen ({}); the project's files are written, and {after}",
+                        first_line(&e.to_string()),
+                    ),
+                    "",
+                ))
             }
         },
         (Some(id), Access::Without(why)) => {
-            (id.to_owned(), format!("chosen: {id} (not checked: {why})"))
+            Ok((id.to_owned(), format!("chosen: {id} (not checked: {why})")))
         }
         (None, Access::In(api)) => match Plans::new(api, None)
             .create(name, Some(&format!("project:{name}")), None)
@@ -148,31 +197,70 @@ async fn settle(
                     .unwrap_or_default()
                     .to_owned();
                 let how = if created { "made" } else { "found" };
-                (id.clone(), format!("{how}: {id}"))
+                Ok((id.clone(), format!("{how}: {id}")))
             }
-            Err(e) => {
-                return step(
-                    "plan",
-                    title,
-                    "skipped",
-                    format!(
-                        "the Planner did not answer ({}); {}",
-                        first_line(&e.to_string()),
-                        later(name)
-                    ),
-                    "",
-                );
-            }
-        },
-        (None, Access::Without(why)) => {
-            return step(
+            Err(e) => Err(step(
                 "plan",
                 title,
                 "skipped",
-                format!("{why}; {}", later(name)),
+                format!(
+                    "the Planner did not answer ({}); {}",
+                    first_line(&e.to_string()),
+                    later(name)
+                ),
                 "",
-            );
-        }
+            )),
+        },
+        (None, Access::Without(why)) => Err(step(
+            "plan",
+            title,
+            "skipped",
+            format!("{why}; {}", later(name)),
+            "",
+        )),
+    }
+}
+
+/// [`run`] on a project with no manifest: the plan is made or found, and nothing is written.
+pub(super) async fn settle_bare(
+    api: &Access<'_>,
+    name: &str,
+    chosen: Option<&str>,
+    title: &str,
+) -> Planned {
+    match pick(api, name, chosen, title, false).await {
+        Ok((id, said)) => Planned {
+            step: step(
+                "plan",
+                title,
+                "done",
+                format!("{said} (this project has no {MANIFEST}, so the id is not written down)"),
+                "",
+            ),
+            id: Some(id),
+        },
+        Err(step) => Planned { step, id: None },
+    }
+}
+
+/// [`run`] on a manifest already read: the choice, the write and the report.
+async fn settle(
+    api: &Access<'_>,
+    file: &Path,
+    text: &str,
+    name: &str,
+    chosen: Option<&str>,
+    title: &str,
+) -> Step {
+    // A plan already named in the file stays: init may run again on a folder it made.
+    if chosen.is_none()
+        && let Some(id) = plan_id_in(text)
+    {
+        return step("plan", title, "done", format!("already set: {id}"), "");
+    }
+    let (id, said) = match pick(api, name, chosen, title, true).await {
+        Ok(x) => x,
+        Err(step) => return step,
     };
     let written =
         with_plan_id(text, &id).and_then(|t| std::fs::write(file, t).map_err(|e| e.to_string()));
@@ -184,11 +272,17 @@ async fn settle(
             format!("{said}, written to {MANIFEST}"),
             "",
         ),
-        Err(e) => fail(format!("{said}, but {MANIFEST} could not be written: {e}")),
+        Err(e) => step(
+            "plan",
+            title,
+            "failed",
+            format!("{said}, but {MANIFEST} could not be written: {e}"),
+            "",
+        ),
     }
 }
 
-fn first_line(s: &str) -> String {
+pub(super) fn first_line(s: &str) -> String {
     s.lines().next().unwrap_or_default().to_owned()
 }
 

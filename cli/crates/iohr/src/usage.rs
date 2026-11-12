@@ -27,6 +27,7 @@ use std::process::ExitCode;
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 use serde_json::json;
 
+use crate::Error;
 use crate::examples::{self, Example, Style, quote};
 use crate::ui::Paint;
 
@@ -103,6 +104,154 @@ pub fn report_message(args: &[OsString], json: bool, message: &str) -> ExitCode 
         report.shown = None;
     }
     emit(&report, json)
+}
+
+/// Prints a failure that is not a usage error and returns its exit code. Under `--json` it
+/// is one line in the platform's error envelope, like a usage error. Otherwise, with no
+/// colour (a pipe, `NO_COLOR`, `TERM=dumb`) it is the line scripts have always read,
+/// `iohr: <message>`. On a colour terminal it is drawn: what happened after a red cross, and
+/// under it the API's code and request id and the command's hint, each labelled. An error
+/// with nothing to say (an extension's own exit code, a runner restarting) prints nothing.
+#[must_use]
+pub fn report_failure(json: bool, e: &Error) -> ExitCode {
+    if !e.to_string().is_empty() {
+        let text = if json {
+            failure_envelope(e)
+        } else {
+            failure_text(e, Paint::stderr(json), ask_hook())
+        };
+        let _ = writeln!(std::io::stderr().lock(), "{text}");
+    }
+    e.exit_code()
+}
+
+/// A failure for a program: `code` (the API's own code for an API refusal, else what kind
+/// of failure it was), `error` (the first line) and one `failure` detail with the other
+/// lines, the HTTP status, the request id and the hint when there are any.
+fn failure_envelope(e: &Error) -> String {
+    let (code, message, status, request_id) = match e {
+        Error::Api {
+            error: inorbithr::Error::Api(api),
+            ..
+        } => (
+            api.code.as_str().to_owned(),
+            api.message.clone(),
+            Some(api.status),
+            api.raw.server_request_id.clone(),
+        ),
+        Error::Api { error, .. } => (
+            match error {
+                inorbithr::Error::Auth(_) => "unauthenticated",
+                inorbithr::Error::Connection { .. } => "connection",
+                inorbithr::Error::Timeout { .. } => "timeout",
+                inorbithr::Error::RateLimitWait { .. } => "rate_limited",
+                inorbithr::Error::Config(_) => "config",
+                inorbithr::Error::TooLarge => "payload_too_large",
+                inorbithr::Error::Decode { .. } => "decode",
+                _ => "failed",
+            }
+            .to_owned(),
+            error.to_string(),
+            None,
+            None,
+        ),
+        other => (
+            match other {
+                Error::Usage(_) => CODE,
+                Error::NotSignedIn(_) => "unauthenticated",
+                Error::Drift(_) => "drift",
+                Error::Findings(_) => "findings",
+                Error::StoreWouldAsk(_) => "store_would_ask",
+                _ => "failed",
+            }
+            .to_owned(),
+            other.to_string(),
+            None,
+            None,
+        ),
+    };
+    let (headline, notes) = split_lines(&message);
+    let mut detail = json!({ "type": "failure", "notes": notes });
+    if let Some(status) = status {
+        detail["status"] = json!(status);
+    }
+    if let Some(id) = request_id {
+        detail["request_id"] = json!(id);
+    }
+    if let Error::Api {
+        hint: Some(hint), ..
+    } = e
+    {
+        detail["hint"] = json!(hint);
+    }
+    json!({ "code": code, "error": headline, "details": [detail] }).to_string()
+}
+
+fn failure_text(e: &Error, paint: Paint, offer: bool) -> String {
+    if !paint.color() {
+        return format!("iohr: {e}");
+    }
+    let (headline, notes) = failure_parts(e);
+    let drawn = paint.failure(&headline, &notes);
+    if offer {
+        let io = paint.io_line(
+            "? why did that fail",
+            "asks your own agent about this command",
+        );
+        format!("{drawn}\n\n{io}")
+    } else {
+        drawn
+    }
+}
+
+/// Whether `?` works in the shell that ran this: the zsh hook exports `IOHR_ASK_HOOK=1`, and
+/// `INORBIT_ASK=0` turns `?` off for a shell.
+fn ask_hook() -> bool {
+    ask_hook_from(
+        std::env::var("IOHR_ASK_HOOK").ok().as_deref(),
+        std::env::var("INORBIT_ASK").ok().as_deref(),
+    )
+}
+
+fn ask_hook_from(hook: Option<&str>, ask: Option<&str>) -> bool {
+    hook == Some("1") && ask != Some("0")
+}
+
+/// What happened, and the lines under it: an API refusal's own lines, its code and HTTP
+/// status, the request id the API returned, and the command's hint; for anything else, the
+/// message's first line and the rest as they are.
+fn failure_parts(e: &Error) -> (String, Vec<(&'static str, String)>) {
+    let unlabelled = |text: &str| {
+        let (headline, rest) = split_lines(text);
+        (headline, rest.into_iter().map(|l| ("", l)).collect())
+    };
+    let Error::Api { error, hint } = e else {
+        return unlabelled(&e.to_string());
+    };
+    let (mut headline, mut notes): (String, Vec<_>) = match error {
+        inorbithr::Error::Api(api) => {
+            let (headline, mut notes) = unlabelled(&api.message);
+            notes.push(("code", format!("{} \u{b7} HTTP {}", api.code, api.status)));
+            if let Some(id) = &api.raw.server_request_id {
+                notes.push(("request", id.clone()));
+            }
+            (headline, notes)
+        }
+        other => unlabelled(&other.to_string()),
+    };
+    if let Some(hint) = hint {
+        let (first, rest) = split_lines(hint);
+        notes.push(("hint", first));
+        notes.extend(rest.into_iter().map(|l| ("", l)));
+    }
+    if headline.is_empty() {
+        e.to_string()
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .clone_into(&mut headline);
+    }
+    (headline, notes)
 }
 
 fn emit(report: &Report, json: bool) -> ExitCode {
@@ -190,8 +339,13 @@ fn ask_line(command: &str, said: &str) -> String {
         .chars()
         .take(ASK_ERROR_CHARS)
         .collect();
+    let stop = if said.ends_with(['.', '!', '?']) {
+        ""
+    } else {
+        "."
+    };
     let question =
-        format!("I ran `{command}` and iohr said: {said} What command should I run instead?");
+        format!("I ran `{command}` and iohr said: {said}{stop} What command should I run instead?");
     format!("iohr ask {}", quote(&question))
 }
 
@@ -635,5 +789,105 @@ mod tests {
                 .iter()
                 .any(|e| e.line().contains("permissions allow"))
         );
+    }
+
+    fn refused() -> Error {
+        let mut raw = inorbithr::RawResponse::for_tests(
+            403,
+            inorbithr::Headers::new([]),
+            br#"{"code":"forbidden","error":"the token cannot read this account's keys","details":[]}"#
+                .to_vec(),
+        );
+        raw.server_request_id = Some("req_test".to_owned());
+        Error::Api {
+            error: inorbithr::Error::Api(Box::new(inorbithr::ApiError::parse(raw))),
+            hint: Some("an API token needs the account:read scope"),
+        }
+    }
+
+    #[test]
+    fn a_failure_keeps_its_plain_line_without_colour() {
+        let plain = Paint::from_parts(false, false, None, None);
+        assert_eq!(
+            failure_text(&refused(), plain, true),
+            "iohr: the token cannot read this account's keys (forbidden, HTTP 403), \
+             request id req_test\nan API token needs the account:read scope"
+        );
+        for paint in [
+            Paint::from_parts(true, false, Some("1"), None),
+            Paint::from_parts(true, false, None, Some("dumb")),
+        ] {
+            let e = Error::Failed("cannot write config.toml\nthe folder is read-only".into());
+            assert_eq!(
+                failure_text(&e, paint, true),
+                "iohr: cannot write config.toml\nthe folder is read-only"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failure_on_a_colour_terminal_is_drawn_with_its_labels() {
+        let color = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let drawn = failure_text(&refused(), color, false);
+        assert_ne!(drawn, console::strip_ansi_codes(&drawn));
+        assert_eq!(
+            console::strip_ansi_codes(&drawn),
+            "\u{2717} the token cannot read this account's keys\n  \
+             code     forbidden \u{b7} HTTP 403\n  \
+             request  req_test\n  \
+             hint     an API token needs the account:read scope"
+        );
+        let e = Error::Failed("cannot write config.toml\nthe folder is read-only".into());
+        assert_eq!(
+            console::strip_ansi_codes(&failure_text(&e, color, false)),
+            "\u{2717} cannot write config.toml\n  the folder is read-only"
+        );
+    }
+
+    #[test]
+    fn a_failure_under_json_is_one_line_in_the_platforms_envelope() {
+        let line = failure_envelope(&refused());
+        assert!(!line.contains('\n'));
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(
+            v,
+            json!({
+                "code": "forbidden",
+                "error": "the token cannot read this account's keys",
+                "details": [{
+                    "type": "failure",
+                    "notes": [],
+                    "status": 403,
+                    "request_id": "req_test",
+                    "hint": "an API token needs the account:read scope",
+                }],
+            })
+        );
+        let e = Error::Failed("cannot write config.toml\nthe folder is read-only".into());
+        let v: serde_json::Value = serde_json::from_str(&failure_envelope(&e)).unwrap();
+        assert_eq!(
+            v,
+            json!({
+                "code": "failed",
+                "error": "cannot write config.toml",
+                "details": [{ "type": "failure", "notes": ["the folder is read-only"] }],
+            })
+        );
+    }
+
+    #[test]
+    fn a_drawn_failure_offers_the_ask_prompt_only_where_the_hook_is() {
+        let color = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        let e = Error::Failed("cannot write config.toml".into());
+        assert_eq!(
+            console::strip_ansi_codes(&failure_text(&e, color, true)),
+            "\u{2717} cannot write config.toml\n\n\
+             ? why did that fail  asks your own agent about this command"
+        );
+        assert!(ask_hook_from(Some("1"), None));
+        assert!(ask_hook_from(Some("1"), Some("1")));
+        assert!(!ask_hook_from(Some("1"), Some("0")));
+        assert!(!ask_hook_from(None, None));
+        assert!(!ask_hook_from(Some("0"), None));
     }
 }

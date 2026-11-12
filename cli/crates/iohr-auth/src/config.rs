@@ -54,6 +54,9 @@ pub struct Config {
     /// `iohr` panel settings (`[panel]`); read, never written: a person edits it.
     #[serde(default, skip_serializing_if = "PanelConfig::is_empty")]
     pub panel: PanelConfig,
+    /// `iohr doctor` settings (`[doctor]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "DoctorConfig::is_empty")]
+    pub doctor: DoctorConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -246,6 +249,31 @@ impl AskConfig {
     }
 }
 
+/// The `[doctor]` table: whether `iohr doctor` and the `?` card may repair a local problem
+/// themselves. Off when unset: a fix is offered, never run, until the person says yes here.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct DoctorConfig {
+    /// Run the safe fixes (the ones that only restart something already down) without asking.
+    /// Every other fix stays an offer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_fix: Option<bool>,
+}
+
+impl DoctorConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.auto_fix.is_none()
+    }
+
+    /// Whether the safe fixes run on their own (`auto_fix = true`).
+    #[must_use]
+    pub fn auto_fix_on(&self) -> bool {
+        self.auto_fix == Some(true)
+    }
+}
+
 /// The `[sync]` table: whether the project's `atlas/` documents may be pushed to Decisions
 /// without the person running `iohr sync` (RFC 0205). Nothing leaves the machine otherwise.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -315,13 +343,18 @@ pub struct PanelConfig {
     /// `IOHR_PANEL_MOUSE` overrides it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mouse: Option<String>,
+    /// The chat box at the bottom of the panel's terminal (RFC 0212): `on` (shown, the
+    /// default), `hidden` (loaded, but a corner chip until Option+h brings it back) or `off`
+    /// (never drawn, `?` stays the shell's). `IOHR_PANEL_CHAT` overrides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat: Option<String>,
 }
 
 impl PanelConfig {
     /// Whether nothing is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.mouse.is_none()
+        self.mouse.is_none() && self.chat.is_none()
     }
 }
 
