@@ -166,13 +166,22 @@ The picker offers these, in this order, after "Describe it" (below):
 
 | Template | What you get | Languages | Its own check (the smoke step) |
 |---|---|---|---|
-| `blank` | The smallest project: one runnable file, Roles and memory, no CI unless `--ci github` | Python, TypeScript, Go, Rust | the language's test command |
-| `service` (the default) | An HTTP service: `/healthz`, `/readyz`, `/metrics` (Prometheus text), `/v1/hello`, structured JSON logs with a `trace_id`, graceful shutdown, standard library only | Go, Python, Rust, TypeScript | its tests, which boot the server |
+| `blank` | The smallest project: one runnable file, Roles and memory, no CI unless `--ci github` | Python, TypeScript, Go, Rust, Java, C#, Dart, Swift | the language's test command |
+| `service` (the default) | An HTTP service: `/healthz`, `/readyz`, `/metrics` (Prometheus text), `/v1/hello`, structured JSON logs with a `trace_id`, graceful shutdown, standard library only | Go, Python, Rust, TypeScript, Java, C#, Dart, Swift | its tests, which boot the server |
 | `agent` | An agent loop with a step, tool-call and token budget, a tool allow-list, approval for risky tools, and a log that never holds arguments or results; the model is a labelled stub | Python (`uv`), TypeScript, Go, Rust, Java, C#, Swift, Dart (each on its standard library alone; no agent SDK to pin) | its tests |
-| `cli` | A command line with text and `--json` output, exit codes 0, 1 and 2, golden files, and a version that carries the commit | Go, Rust, Python | its tests, goldens included |
+| `cli` | A command line with text and `--json` output, exit codes 0, 1 and 2, golden files, and a version that carries the commit | Go, Rust, Python, TypeScript, Java, C#, Dart, Swift | its tests, goldens included |
 | `mcp-server` | An MCP server on the official SDK, pinned exactly with a lockfile and built for the 2026-07-28 revision: one read-only tool with a typed output, one resource, deterministic `tools/list`, input limits | Python (`uv`, `mcp` 2.3.0), TypeScript (`@modelcontextprotocol/server` 2.4.0), Go (`go-sdk` 1.8.0), Rust (`rmcp` 3.9.0), Java (`io.modelcontextprotocol.sdk:mcp` 2.1.0), C# (`ModelContextProtocol` 2.4.0), Swift (`swift-sdk` 0.12.1), Dart (`dart_mcp` 0.5.2, the Dart team's, not the modelcontextprotocol organisation's) | its tests, which start the server over stdio: `server/discover`, a `tools/list`, a `tools/call` and a legacy-mode `initialize` for the SDKs that speak 2026-07-28 (Python, TypeScript, Go, Rust, C#); Java, Swift and Dart speak up to 2025-11-25, so their tests check `initialize`, `tools/list` and `tools/call`. Needs the network once, to install the SDK |
 | `evals` | An offline eval suite: a JSONL dataset, a solver, deterministic scorers, a pass bar in `thresholds.toml`, `docs/how-to-grade.md` and an `evals.yml` workflow; the solver is a labelled stub (`stub: true`) | Python, TypeScript, Go, Rust, Java, C#, Dart, Swift (no package dependency; C# restores xunit once) | its tests: the fixture meets the bar with the network refused, and lowering one expected answer fails the run and names the case |
 | `extension` | A private macOS extension that heartbeats and serves a tiny local panel (the former `demo`) | Python, TypeScript, Go, Rust, Java, C#, Dart, Swift (core libraries only) | one heartbeat read back, with the token ask refused |
+
+`blank`, `service` and `cli` come in the eight languages the SDK ships. Each new variant is
+the same shape as the old ones and standard library only: Java on JDK 17 (`javac` and `java`),
+C# on .NET 10 (pinned by `global.json`), Dart 3.9 or newer, Swift 6.0 or newer (SwiftPM,
+Foundation and XCTest), and `cli` also in TypeScript on Node 22.18 or newer. A variant is `live`
+only when its own test passed through `tests/templates.rs`; the toolchains and the actions the
+generated CI and release pin are cited in the template's `template.toml`. Dependabot's `maven`
+entry on the Java variants finds nothing until you add a `pom.xml` or Gradle file, because they
+use no packages.
 
 Not offered yet, and said so: `macos-app` and `ui-panel` are `coming` and show only with
 `init --experimental` (the menu) or `template list --all`.
@@ -287,6 +296,10 @@ release files unless you pass `--ci github`):
 | Python | `pyproject.toml`, `src/<module>/__init__.py` |
 | Go | `go.mod`, `main.go` |
 | TypeScript | `package.json`, `src/index.ts` |
+| Java | `src/Main.java`, `tests/MainTest.java` (JDK 17, `javac` and `java`, no build tool) |
+| C# | `global.json`, `src/<module>.csproj`, `src/Program.cs`, `tests/Tests.csproj` (.NET 10) |
+| Dart | `pubspec.yaml`, `bin/main.dart`, `test/main_test.dart` (Dart 3.9 or newer) |
+| Swift | `Package.swift`, `Sources/Hello/Hello.swift`, `Tests/HelloTests/` (Swift 6.0 or newer) |
 
 The smoke test is the language's own test command. Its kind in `inorbit.toml` is `project`.
 
