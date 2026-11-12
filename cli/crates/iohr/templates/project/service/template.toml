@@ -1,0 +1,107 @@
+# The service template as data (PRD 0088.1, ADR 0221): a small HTTP service with health and
+# readiness probes, structured logs that carry a trace id, one span per request, request
+# metrics, graceful shutdown and a test that boots it. Go, Python, Rust and TypeScript, each on
+# its standard library alone, so a fresh project installs nothing. The enterprise floor (CI,
+# signed and attested release, SBOM, dependency updates, secret scan) comes from `floor`.
+#
+# The test of each variant is the passes-on-init check: it boots the service on a free port,
+# calls /healthz and /readyz, checks that the request produced one span with its route, and
+# checks that the log holds the trace id and none of the environment's values. A variant is
+# `live` only when that test passes.
+id = "service"
+description = "An HTTP service with health probes, structured logs, traces and metrics (Go, Python, Rust or TypeScript)"
+status = "live"
+extends = "floor"
+kind = "service"
+default_variant = "go"
+agent_prompt = "This folder is a fresh InOrbit project from the `@@TEMPLATE@@` template: an HTTP service in @@LANGUAGE_LABEL@@ (@@SOURCE@@) with /healthz, /readyz, /metrics, structured JSON logs and one span per request. Build what is described below by editing this folder. Keep a trace id on every request log, never log a header, a query or an environment value, keep the project free of secrets, and keep the test passing (@@RUN_TEST@@)."
+
+[[variants]]
+id = "go"
+label = "Go 1.26 or newer (standard library only)"
+status = "live"
+needs = ["go"]
+toolchain = ["go", "version"]
+agent_allow = ["go build", "go test", "go vet"]
+smoke = "test"
+test = ["go", "test", "./..."]
+[variants.vars]
+SOURCE = "main.go, server.go, obs.go"
+IGNORE = "/@@NAME@@"
+RUN_TEST = "`go test ./...`"
+README_TEST = "go vet ./... && go test ./..."
+RUN = "go run ."
+TOOLCHAIN_MINOR = "1.26"
+LAYOUT = '''- `main.go`: reads HOST and PORT, starts the server and stops it cleanly on SIGINT or SIGTERM.
+- `server.go`: the routes (`/healthz`, `/readyz`, `/metrics`, `/v1/hello`) and the one place a request is traced, logged and counted.
+- `obs.go`: JSON logs with `log/slog`, W3C `traceparent` spans, Prometheus text metrics.
+- `server_test.go`: the passes-on-init test.'''
+
+[[variants]]
+id = "python"
+label = "Python 3.12 or newer (standard library only)"
+status = "live"
+needs = ["python3"]
+toolchain = ["python3", "--version"]
+agent_allow = ["python3 -m unittest", "python3 -m py_compile", "uv lock", "uv build"]
+smoke = "test"
+test = ["python3", "-m", "unittest", "discover", "-s", "tests"]
+[variants.env]
+PYTHONPATH = "$DIR/src"
+PYTHONDONTWRITEBYTECODE = "1"
+[variants.vars]
+SOURCE = "src/@@MODULE@@/, tests in tests/"
+IGNORE = "__pycache__/\n*.pyc\n.venv/\n*.egg-info/"
+RUN_TEST = "`python3 -m unittest discover -s tests` with PYTHONPATH=src"
+README_TEST = "PYTHONPATH=src python3 -m unittest discover -s tests"
+RUN = "PYTHONPATH=src python3 -m @@MODULE@@"
+TOOLCHAIN_MINOR = "3.12"
+LAYOUT = '''- `src/@@MODULE@@/__main__.py`: reads HOST and PORT, starts the server and stops it cleanly on SIGINT or SIGTERM.
+- `src/@@MODULE@@/server.py`: the routes (`/healthz`, `/readyz`, `/metrics`, `/v1/hello`) and the one place a request is traced, logged and counted.
+- `src/@@MODULE@@/obs.py`: JSON logs, W3C `traceparent` spans, Prometheus text metrics.
+- `tests/test_service.py`: the passes-on-init test.
+- `uv.lock`: the lockfile (`uv lock` refreshes it).'''
+
+[[variants]]
+id = "rust"
+label = "Rust 1.85 or newer (standard library only)"
+status = "live"
+needs = ["cargo"]
+toolchain = ["rustc", "--version"]
+agent_allow = ["cargo build", "cargo test", "cargo fmt", "cargo clippy"]
+smoke = "test"
+test = ["cargo", "test", "--quiet", "--locked"]
+[variants.vars]
+SOURCE = "src/"
+IGNORE = "target/"
+RUN_TEST = "`cargo test --locked`"
+README_TEST = "cargo test --locked"
+RUN = "cargo run --quiet"
+TOOLCHAIN_MINOR = "1.85"
+LAYOUT = '''- `src/main.rs`: reads HOST and PORT, starts the server and stops it cleanly on SIGINT or SIGTERM.
+- `src/lib.rs`: the routes (`/healthz`, `/readyz`, `/metrics`, `/v1/hello`), the request parser and the one place a request is traced, logged and counted.
+- `src/obs.rs`: JSON logs, W3C `traceparent` spans, Prometheus text metrics.
+- `tests/service.rs`: the passes-on-init test.
+- `Cargo.lock`: the lockfile; CI and the release build with `--locked`.'''
+
+[[variants]]
+id = "typescript"
+label = "TypeScript on Node 22.18 or newer (standard library only)"
+status = "live"
+needs = ["node"]
+toolchain = ["node", "--version"]
+agent_allow = ["node --test", "node --check", "npm test"]
+smoke = "test"
+test = ["node", "--test", "tests/**/*.test.ts"]
+[variants.vars]
+SOURCE = "src/, tests in tests/"
+IGNORE = "node_modules/"
+RUN_TEST = "`node --test 'tests/**/*.test.ts'`"
+README_TEST = "node --test 'tests/**/*.test.ts'"
+RUN = "node src/main.ts"
+TOOLCHAIN_MINOR = "22.18"
+LAYOUT = '''- `src/main.ts`: reads HOST and PORT, starts the server and stops it cleanly on SIGINT or SIGTERM. Node runs the TypeScript as it is (22.18 or newer): nothing to build.
+- `src/server.ts`: the routes (`/healthz`, `/readyz`, `/metrics`, `/v1/hello`) and the one place a request is traced, logged and counted.
+- `src/obs.ts`: JSON logs, W3C `traceparent` spans, Prometheus text metrics.
+- `tests/service.test.ts`: the passes-on-init test.
+- `package-lock.json`: the lockfile.'''

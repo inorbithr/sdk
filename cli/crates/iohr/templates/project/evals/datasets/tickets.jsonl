@@ -1,0 +1,12 @@
+{"id": "billing-double-charge", "input": "I was charged twice for my March invoice.", "expected": "billing"}
+{"id": "billing-refund", "input": "Please refund the duplicate payment.", "expected": "billing"}
+{"id": "billing-card-declined", "input": "My card was declined but I still got an invoice.", "expected": "billing"}
+{"id": "bug-export-crash", "input": "The export button crashes the app with an error.", "expected": "bug"}
+{"id": "bug-blank-screen", "input": "A blank screen shows after login, error 500.", "expected": "bug"}
+{"id": "bug-search-crash", "input": "The search crashes when I type an accent.", "expected": "bug"}
+{"id": "feature-dark-mode", "input": "It would be great if you had a dark mode.", "expected": "feature_request"}
+{"id": "feature-csv", "input": "Can you add an option to export as CSV?", "expected": "feature_request"}
+{"id": "account-password", "input": "I cannot reset my password.", "expected": "account"}
+{"id": "account-delete", "input": "Please delete my account and my data.", "expected": "account"}
+{"id": "other-hours", "input": "What are your opening hours?", "expected": "other"}
+{"id": "other-thanks", "input": "Thanks, the new release works well.", "expected": "other"}

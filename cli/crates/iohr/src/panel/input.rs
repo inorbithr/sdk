@@ -8,6 +8,20 @@ use super::model::Key;
 /// that works where Option+i does not.
 const MENU_KEYS: [&[u8]; 4] = [b"\x1bi", "\u{2c6}".as_bytes(), b"\x1b[105;3u", b"\x07"];
 
+/// The chat box's hide and show key, forms as the menu key's: Option+h is Esc then `h`, the macOS
+/// dead-key `˙` (U+02D9), or the CSI-u form (`ESC [ 104 ; 3 u`). Ctrl-] (the byte 0x1d) is the
+/// older key, kept as an alias.
+const HIDE_KEYS: [&[u8]; 4] = [b"\x1bh", "\u{2d9}".as_bytes(), b"\x1b[104;3u", b"\x1d"];
+
+/// What the chat box calls its hide key, in every terminal: `⌥h` on macOS and `Alt+h` elsewhere.
+/// The forms above catch Option+h even where Option types characters, so the name never changes
+/// with the terminal.
+pub(super) const HIDE_LABEL: &str = if cfg!(target_os = "macos") {
+    "\u{2325}h"
+} else {
+    "Alt+h"
+};
+
 /// The byte Ctrl-G sends.
 const CTRL_G: &[u8] = b"\x07";
 
@@ -57,6 +71,17 @@ impl OpenKey {
     /// The key as the pill and the help name it.
     pub(super) fn label(self) -> &'static str {
         self.label
+    }
+
+    /// Whether this input is exactly the chat box's hide and show key, in any of its forms.
+    pub(super) fn is_hide(bytes: &[u8]) -> bool {
+        HIDE_KEYS.contains(&bytes)
+    }
+
+    /// Whether this read is a lone Esc, which may be the first half of Option+h (a terminal
+    /// that sends Esc and `h` in two writes): it is held a moment before it is anyone's.
+    pub(super) fn starts_hide(bytes: &[u8]) -> bool {
+        bytes == b"\x1b"
     }
 
     /// Whether this input is exactly the panel's key (the only keyboard input the panel reads
@@ -310,6 +335,43 @@ mod tests {
             [Key::Down, Key::Menu],
             "Ctrl-G is one byte, never a companion"
         );
+    }
+
+    #[test]
+    fn the_hide_key_is_option_h_in_its_forms_with_ctrl_close_bracket_as_alias() {
+        let k = OpenKey::default();
+        assert!(OpenKey::is_hide(b"\x1bh"));
+        assert!(OpenKey::is_hide("\u{2d9}".as_bytes()));
+        assert!(OpenKey::is_hide(b"\x1b[104;3u"));
+        assert!(OpenKey::is_hide(b"\x1d"), "Ctrl-] stays");
+        assert!(!OpenKey::is_hide(b"h"));
+        assert!(!OpenKey::is_hide(b"\x1b"));
+        assert!(!OpenKey::is_hide(b"ls\x1bh"));
+        assert!(
+            !OpenKey::is_hide(b"\x1bi"),
+            "the menu key is not the hide key"
+        );
+        assert!(!k.is(b"\x1bh"));
+        // Typed `h` and a cut Esc are parsed as what they are.
+        assert_eq!(parse(b"h"), [Key::Char('h')]);
+        assert!(
+            OpenKey::starts_hide(b"\x1b")
+                && !OpenKey::starts_hide(b"\x1bh")
+                && !OpenKey::starts_hide(b"h")
+        );
+    }
+
+    #[test]
+    fn the_hide_key_has_one_name_in_every_terminal() {
+        let name = if cfg!(target_os = "macos") {
+            "\u{2325}h"
+        } else {
+            "Alt+h"
+        };
+        assert_eq!(HIDE_LABEL, name);
+        // Option+h's dead-key form is caught, so the terminals where Option types characters
+        // need no other name for it.
+        assert!(OpenKey::is_hide("\u{2d9}".as_bytes()));
     }
 
     #[test]

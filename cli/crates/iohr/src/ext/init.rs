@@ -9,70 +9,13 @@ use std::path::{Path, PathBuf};
 use super::lint::{contains_tbd, lint};
 use super::manifest::{Lang, ManifestError, SOURCE_FILE, split_id};
 
-/// One file of a template: where it goes (placeholders allowed), its text, and whether
-/// it is a program.
-struct File {
-    path: &'static str,
-    text: &'static str,
-    program: bool,
+/// Files written as programs (executable), by their filled path suffix.
+const PROGRAMS: &[&str] = &["tests/selftest.sh", "tools/ext_artifact.py"];
+
+/// Whether a scaffold file is a program: the shell entry point (`bin/NAME`) or a listed one.
+fn is_program(path: &str, lang: Lang) -> bool {
+    PROGRAMS.contains(&path) || (lang == Lang::Shell && path.starts_with("bin/"))
 }
-
-macro_rules! file {
-    ($path:literal, $src:literal) => {
-        File {
-            path: $path,
-            text: include_str!(concat!("../../templates/ext/", $src)),
-            program: false,
-        }
-    };
-    ($path:literal, $src:literal, program) => {
-        File {
-            path: $path,
-            text: include_str!(concat!("../../templates/ext/", $src)),
-            program: true,
-        }
-    };
-}
-
-const COMMON: &[File] = &[
-    file!("extension.toml", "common/extension.toml"),
-    file!("README.md", "common/README.md"),
-    file!(".gitignore", "common/gitignore"),
-    file!(
-        ".github/workflows/release.yml",
-        "common/workflows/release.yml"
-    ),
-    file!(
-        "tools/ext_artifact.py",
-        "common/tools/ext_artifact.py",
-        program
-    ),
-];
-
-const SHELL: &[File] = &[
-    file!("bin/@@NAME@@", "shell/bin/entry", program),
-    file!("tests/selftest.sh", "shell/tests/selftest.sh", program),
-];
-
-const PYTHON: &[File] = &[
-    file!("pyproject.toml", "python/pyproject.toml"),
-    file!(
-        "src/@@MODULE@@/__init__.py",
-        "python/src/module/__init__.py"
-    ),
-    file!(
-        "src/@@MODULE@@/__main__.py",
-        "python/src/module/__main__.py"
-    ),
-    file!("src/@@MODULE@@/channel.py", "python/src/module/channel.py"),
-    file!("tests/test_selftest.py", "python/tests/test_selftest.py"),
-];
-
-const RUST: &[File] = &[
-    file!("Cargo.toml", "rust/Cargo.toml.tmpl"),
-    file!("src/main.rs", "rust/src/main.rs"),
-    file!("tests/selftest.rs", "rust/tests/selftest.rs"),
-];
 
 const SCRIPT_MATRIX: &str = "          - { os: ubuntu-24.04, dir: any }";
 
@@ -213,15 +156,14 @@ pub fn render(id: &str, lang: Lang) -> Result<Vec<(String, String, bool)>, InitE
     }
     let (_, name) = split_id(id)?;
     let values = values(id, name, lang);
-    let lang_files = match lang {
-        Lang::Shell => SHELL,
-        Lang::Python => PYTHON,
-        Lang::Rust => RUST,
-    };
-    Ok(COMMON
-        .iter()
-        .chain(lang_files)
-        .map(|f| (fill(f.path, &values), fill(f.text, &values), f.program))
+    let own = format!("ext/{}/", lang.as_str());
+    Ok(crate::embedded::under("ext/common/")
+        .chain(crate::embedded::under(&own))
+        .map(|(path, text)| {
+            let path = fill(path, &values);
+            let program = is_program(&path, lang);
+            (path, fill(text, &values), program)
+        })
         .collect())
 }
 

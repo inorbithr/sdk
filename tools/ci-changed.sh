@@ -36,6 +36,8 @@ for lang in "${langs[@]}"; do
   fi
 done
 touched '^(cli/|rust/|spec/|mise\.toml$|\.github/workflows/ci\.yml$)' && tasks+=(cli:check)
+# The web UI package and the `iohr ui` verbs that run its scripts (RFC 0217).
+touched '^(ui/|cli/crates/iohr/src/commands/web_ui\.rs$|mise\.toml$|\.github/workflows/ci\.yml$)' && tasks+=(ui:check)
 touched '^(examples/|tools/run-examples\.py|conformance/cases/examples/|conformance/server/)' && tasks+=(examples:check examples:run)
 
 echo "ci:changed: ${#files[@]} changed file(s) since $(git rev-parse --short "$base")"

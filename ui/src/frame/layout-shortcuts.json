@@ -1,0 +1,9 @@
+[
+  { "id": "layout-left", "label": "Left half", "accel": "Ctrl+Alt+ArrowLeft" },
+  { "id": "layout-right", "label": "Right half", "accel": "Ctrl+Alt+ArrowRight" },
+  { "id": "layout-top", "label": "Top half", "accel": "Ctrl+Alt+ArrowUp" },
+  { "id": "layout-bottom", "label": "Bottom half", "accel": "Ctrl+Alt+ArrowDown" },
+  { "id": "layout-full", "label": "Full", "accel": "Ctrl+Alt+Enter" },
+  { "id": "layout-grid", "label": "Grid…", "accel": "Ctrl+Alt+G" },
+  { "id": "layout-back", "label": "Back to before", "accel": "Ctrl+Alt+Z" }
+]
