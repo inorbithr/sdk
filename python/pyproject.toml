@@ -29,8 +29,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://docs.inorbit.hr"
-Documentation = "https://docs.inorbit.hr/docs/sdk/"
+Homepage = "https://developers.inorbit.hr"
+Documentation = "https://developers.inorbit.hr/docs/sdk/"
 Source = "https://github.com/inorbithr/sdk/tree/main/python"
 Issues = "https://github.com/inorbithr/sdk/issues"
 Changelog = "https://github.com/inorbithr/sdk/blob/main/python/CHANGELOG.md"
