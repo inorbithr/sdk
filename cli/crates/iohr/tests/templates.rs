@@ -46,10 +46,25 @@ fn run(home: &Path, cwd: &Path, args: &[&str]) -> Output {
         .env("DOTNET_NOLOGO", "1")
         .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
         .env("PUB_CACHE", home.join("pub"))
+        // On Windows `rustc` finds the MSVC linker through the Visual Studio installer
+        // (its COM server under `ProgramData`, then `vswhere` under `ProgramFiles(x86)`);
+        // without these a Rust variant fails to link its tests. None is set elsewhere.
         .envs(
-            ["JAVA_HOME", "DOTNET_ROOT"]
-                .into_iter()
-                .filter_map(|k| std::env::var_os(k).map(|v| (k, v))),
+            [
+                "JAVA_HOME",
+                "DOTNET_ROOT",
+                "ProgramData",
+                "ProgramFiles",
+                "ProgramFiles(x86)",
+                "ProgramW6432",
+                "CommonProgramFiles",
+                "CommonProgramFiles(x86)",
+                "SystemDrive",
+                "windir",
+                "PROCESSOR_ARCHITECTURE",
+            ]
+            .into_iter()
+            .filter_map(|k| std::env::var_os(k).map(|v| (k, v))),
         )
         .stdin(Stdio::null())
         .output()

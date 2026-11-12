@@ -21,6 +21,7 @@ mod ext_catalogue;
 mod ext_packages;
 mod folder_context;
 mod handoff;
+#[cfg(unix)]
 pub(crate) mod incident_settings;
 mod init_crawl;
 mod init_extensions;

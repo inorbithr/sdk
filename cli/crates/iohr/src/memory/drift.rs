@@ -40,19 +40,29 @@ const GIT_SECS: u64 = 5;
 /// exits non-zero or takes too long. The one runner of `iohr ask`'s git facts and the drift
 /// check.
 pub(crate) fn git(root: &Path, args: &[&str]) -> Option<String> {
+    let mut cmd = Command::new("git");
+    cmd.args([
+        "--no-pager",
+        "--no-optional-locks",
+        "-c",
+        "core.fsmonitor=false",
+    ])
+    .arg("-C")
+    .arg(root)
+    .args(args)
+    .env("GIT_TERMINAL_PROMPT", "0");
+    let bytes = output_within(&mut cmd, std::time::Duration::from_secs(GIT_SECS))?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Runs `cmd` with stdin closed and stderr dropped, for at most `limit`: its stdout when it
+/// exits zero in time, else None (it is stopped once the limit passes). For the short reads
+/// whose answer is only a hint (git facts, a toolchain's version line), so a hung disk or a
+/// stuck tool never stalls the command that asked.
+pub(crate) fn output_within(cmd: &mut Command, limit: std::time::Duration) -> Option<Vec<u8>> {
     use std::io::Read as _;
     use std::time::{Duration, Instant};
-    let mut child = Command::new("git")
-        .args([
-            "--no-pager",
-            "--no-optional-locks",
-            "-c",
-            "core.fsmonitor=false",
-        ])
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
+    let mut child = cmd
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -65,7 +75,7 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Option<String> {
         let _ = stdout.read_to_end(&mut buf);
         buf
     });
-    let deadline = Instant::now() + Duration::from_secs(GIT_SECS);
+    let deadline = Instant::now() + limit;
     let status = loop {
         match child.try_wait() {
             Ok(Some(s)) => break s,
@@ -75,15 +85,16 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Option<String> {
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                let _ = reader.join();
+                // The reader is left to finish on its own: a child the program started (a
+                // toolchain proxy installing what it runs) can hold the pipe open after the
+                // kill, and waiting for it would be the stall this limit is for.
+                drop(reader);
                 return None;
             }
         }
     };
     let bytes = reader.join().ok()?;
-    status
-        .success()
-        .then(|| String::from_utf8_lossy(&bytes).into_owned())
+    status.success().then_some(bytes)
 }
 
 /// Whether `root` is inside a git work tree.
