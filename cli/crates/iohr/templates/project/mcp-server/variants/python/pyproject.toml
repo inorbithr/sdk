@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling==1.29.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "@@NAME@@"
+version = "0.1.0"
+description = "@@ID@@"
+requires-python = ">=3.12"
+license = "@@LICENSE@@"
+# The official MCP Python SDK, pinned. 2.x speaks the 2026-07-28 revision of the protocol and
+# still answers the 2025-11-25 handshake for older clients.
+dependencies = ["mcp==2.3.0"]
+
+[project.scripts]
+@@NAME@@ = "@@MODULE@@.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/@@MODULE@@"]

@@ -17,6 +17,7 @@ use crate::output::Out;
 use crate::permissions::engine::{Place, Verdict, decide};
 use crate::permissions::rule::Rule;
 use crate::permissions::store::{self, Files, Kind, Scope};
+use crate::ui::Listed;
 
 pub(crate) fn run(g: &Global, cmd: PermissionsCommand, out: Out) -> Result<(), Error> {
     let cwd = std::env::current_dir().unwrap_or_default();
@@ -80,7 +81,11 @@ fn list(files: &Files, scope: Option<Scope>, out: Out) -> Result<(), Error> {
                 ]
             })
             .collect();
-        Out::table(&["KIND", "RULE", "FILE"], &rows);
+        Out::list(
+            &["KIND", "RULE", "FILE"],
+            &rows,
+            &Listed::new("rule", "rules"),
+        );
     }
     Ok(())
 }

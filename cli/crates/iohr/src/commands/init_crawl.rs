@@ -26,14 +26,12 @@ use crate::error::Error;
 use crate::memory::store::{self, Kind as MemKind};
 use crate::output::Out;
 use crate::project::{self, Step};
-use crate::ui::{Choice, Ui};
+use crate::ui::Ui;
 
 mod progress;
 
 /// The extension that holds the crawler.
 const EXTENSION: &str = "agent";
-/// Where a crawl keeps its files, under the project.
-const DIR: &str = ".inorbit/crawl";
 /// The hard caps of the crawler (`iohr-agent atlas crawl --help`); init never asks for more.
 const MAX_PAGES: u32 = 20_000;
 const MAX_MINUTES: u32 = 240;
@@ -57,13 +55,15 @@ pub(crate) struct Plan {
     pub rate: u32,
     /// `--crawl-subdomains`: follow every subdomain without asking.
     pub subdomains: bool,
+    /// The crawl folder as a person reads it (`.inorbit/crawl`, or a full path in home).
+    pub kept_in: String,
 }
 
 impl Plan {
     /// What a dry run says it would do.
     pub(crate) fn would(&self) -> String {
         format!(
-            "read {} on this machine with iohr-agent (up to {} pages or {} minutes, at most {} a second; {}) into {DIR}/{}/, keep each page's text for a local search index (an older iohr-agent reads each page once more, at the same pace), then write atlas facts, a local knowledge base and one memory entry; nothing is sent to InOrbit",
+            "read {} on this machine with iohr-agent (up to {} pages or {} minutes, at most {} a second; {}) into {}/{}/, keep each page's text for a local search index (an older iohr-agent reads each page once more, at the same pace), then write atlas facts, a local knowledge base and one memory entry; nothing is sent to InOrbit",
             self.url.as_str(),
             self.pages,
             self.minutes,
@@ -71,8 +71,9 @@ impl Plan {
             if self.subdomains {
                 "its subdomains too"
             } else {
-                "a subdomain only after you say yes"
+                "no subdomain unless --crawl-subdomains"
             },
+            self.kept_in,
             self.name
         )
     }
@@ -89,13 +90,14 @@ pub(crate) fn consent(p: &Plan) -> String {
     let more = if p.subdomains {
         ""
     } else {
-        " A link to another name in its domain is asked about, once per name, before it is followed; with no terminal none is followed (--crawl-subdomains follows them)."
+        " A link to another name in its domain is not followed and is listed as not read (--crawl-subdomains follows them)."
     };
     format!(
-        "This reads the public pages of {scope} on this machine, with iohr-agent: at most {} a second to one host (a slower Crawl-delay in robots.txt wins), robots.txt followed, up to {} pages or {} minutes.{more} It keeps the text of each page for a local search index (an older iohr-agent makes one more request per page, at the same pace and under the same rules). What it finds stays in this project, under {DIR}/{}/ and atlas/. Nothing is sent to InOrbit.",
+        "This reads the public pages of {scope} on this machine, with iohr-agent: at most {} a second to one host (a slower Crawl-delay in robots.txt wins), robots.txt followed, up to {} pages or {} minutes.{more} It keeps the text of each page for a local search index (an older iohr-agent makes one more request per page, at the same pace and under the same rules). What it finds stays in this project, under {}/{}/ and atlas/. Nothing is sent to InOrbit.",
         requests(p.rate),
         p.pages,
         p.minutes,
+        p.kept_in,
         p.name
     )
 }
@@ -187,6 +189,7 @@ fn policy_text(host: &str, subdomains: bool) -> String {
 pub(crate) fn decide(
     args: &InitCrawlArgs,
     describe: Option<&str>,
+    kept_in: &str,
     interactive: bool,
     ui: Ui,
     out: Out,
@@ -212,6 +215,7 @@ pub(crate) fn decide(
         minutes: args.crawl_minutes.clamp(1, MAX_MINUTES),
         rate,
         subdomains: args.crawl_subdomains,
+        kept_in: kept_in.to_owned(),
     };
     if !out.json {
         ui.note("Crawl", &consent(&plan));
@@ -341,7 +345,14 @@ fn fact_line(p: &Page, site: &str, crawled: &str) -> String {
 
 /// The study's text: what was read, the site model when the knowledge base was built, then one
 /// line per page, up to [`LISTED`].
-fn study_text(c: &Crawl, n: &Counts, name: &str, crawled: &str, model: Option<&str>) -> String {
+fn study_text(
+    c: &Crawl,
+    n: &Counts,
+    name: &str,
+    crawled: &str,
+    model: Option<&str>,
+    kept_in: &str,
+) -> String {
     let mut t = String::new();
     let _ = writeln!(
         t,
@@ -350,7 +361,7 @@ fn study_text(c: &Crawl, n: &Counts, name: &str, crawled: &str, model: Option<&s
     );
     let _ = writeln!(
         t,
-        "- pages read: {}\n- pages that failed: {}\n- links skipped by robots.txt: {}\n- {}\n- the full record is in `{DIR}/{name}/` (`crawl.json`, `facts.jsonl`)\n",
+        "- pages read: {}\n- pages that failed: {}\n- links skipped by robots.txt: {}\n- {}\n- the full record is in `{kept_in}/{name}/` (`crawl.json`, `facts.jsonl`)\n",
         n.read,
         n.failed,
         n.robots,
@@ -393,7 +404,7 @@ fn study_text(c: &Crawl, n: &Counts, name: &str, crawled: &str, model: Option<&s
     if c.pages.len() > LISTED {
         let _ = writeln!(
             t,
-            "\n{} more pages are in `{DIR}/{name}/facts.jsonl`.",
+            "\n{} more pages are in `{kept_in}/{name}/facts.jsonl`.",
             c.pages.len() - LISTED
         );
     }
@@ -427,7 +438,13 @@ fn stopped_line(stopped: &[String], hint: bool) -> String {
 }
 
 /// What init prints when a crawl finished: the PRD's lines, ending with where it stands.
-pub(crate) fn summary(name: &str, n: &Counts, facts: usize, memories: usize) -> String {
+pub(crate) fn summary(
+    name: &str,
+    n: &Counts,
+    facts: usize,
+    memories: usize,
+    kept_in: &str,
+) -> String {
     let robots = n.robots;
     let failed = n.failed;
     let left_out = if n.not_followed.is_empty() {
@@ -439,7 +456,7 @@ pub(crate) fn summary(name: &str, n: &Counts, facts: usize, memories: usize) -> 
         )
     };
     format!(
-        "Crawl   {name}   on this machine, by iohr-agent\n  read {} pages in {} s, {robots} skipped by robots.txt, {failed} failed\n  {}{left_out}\n  facts: {facts} in atlas/   memory: {memories} entr{}   local files: {DIR}/{name}/\nNothing was sent to InOrbit. Run iohr sync when you want it there.",
+        "Crawl   {name}   on this machine, by iohr-agent\n  read {} pages in {} s, {robots} skipped by robots.txt, {failed} failed\n  {}{left_out}\n  facts: {facts} in atlas/   memory: {memories} entr{}   local files: {kept_in}/{name}/\nNothing was sent to InOrbit. Run iohr sync when you want it there.",
         n.read,
         n.seconds,
         stopped_line(&n.stopped, true),
@@ -471,7 +488,8 @@ pub(crate) fn keep(
     model: Option<&crate::kb::Built>,
 ) -> Result<Kept, String> {
     let n = c.counts();
-    let dir = root.join(DIR).join(name);
+    let dir = crate::kb::crawl_dir(root).join(name);
+    let kept_in = crate::kb::crawl_shown(root);
     let mut facts = String::new();
     for p in &c.pages {
         facts.push_str(&fact_line(p, name, crawled));
@@ -495,18 +513,25 @@ pub(crate) fn keep(
         &title,
         &summary,
         crawled,
-        &study_text(c, &n, name, crawled, model.map(|m| m.study.as_str())),
+        &study_text(
+            c,
+            &n,
+            name,
+            crawled,
+            model.map(|m| m.study.as_str()),
+            &kept_in,
+        ),
     )?;
     let store = store::Store::project(root);
     let text = format!(
-        "The public site {name} was crawled on this machine; its pages are in study {number:04} ({study}) and {DIR}/{name}/facts.jsonl."
+        "The public site {name} was crawled on this machine; its pages are in study {number:04} ({study}) and {kept_in}/{name}/facts.jsonl."
     );
     store::remember(
         &store,
         &text,
         MemKind::Fact,
         "written by iohr project init after reading the site",
-        &[study.clone(), format!("{DIR}/{name}/facts.jsonl")],
+        &[study.clone(), format!("{kept_in}/{name}/facts.jsonl")],
         false,
     )
     .map_err(|e| format!("cannot write the memory entry: {e}"))?;
@@ -615,37 +640,6 @@ pub(crate) enum Answer {
     No,
     /// Yes, and every other one too.
     All,
-}
-
-/// Asks about one subdomain at a terminal; the default is no.
-fn ask_about(ui: Ui, site: &str, host: &str) -> Result<Answer, Error> {
-    let choice = |value: &str, label: &str, hint: &str| Choice {
-        value: value.into(),
-        label: label.into(),
-        hint: hint.into(),
-        available: true,
-        key: None,
-    };
-    let said = ui.select(
-        &format!(
-            "The site links to {host}, another name under the same domain as {site}. Read it too?"
-        ),
-        &[
-            choice("no", "No", "skip it, the default"),
-            choice("yes", "Yes", "read its public pages as well"),
-            choice(
-                "all",
-                "Yes to all",
-                "read every such name without asking again",
-            ),
-        ],
-        "no",
-    )?;
-    Ok(match said.as_str() {
-        "yes" => Answer::Yes,
-        "all" => Answer::All,
-        _ => Answer::No,
-    })
 }
 
 /// A name in the crawl's own domain that the policy kept the crawler from: the host and the
@@ -921,14 +915,35 @@ impl Ctx<'_> {
     }
 }
 
+/// The question about a crawler that is not installed: whether to install it. Asked with the
+/// crawl's own consent, before the review, so the run after Create asks nothing. `false`
+/// without a terminal, under `--json`, or when it is installed already.
+///
+/// # Errors
+///
+/// The person cancelled the question.
+pub(crate) fn ask_install(g: &Global, ui: Ui, out: Out, interactive: bool) -> Result<bool, Error> {
+    if !interactive || out.json || have_agent(g) {
+        return Ok(false);
+    }
+    let id = format!("inorbit/{EXTENSION}");
+    ui.confirm(
+        &format!(
+            "The crawler is part of the {id} extension, which is not installed. Install it now?"
+        ),
+        false,
+    )
+}
+
 /// Runs the crawl and keeps what it found. The report step says how it went; the summary is
-/// printed here.
+/// printed here. `install` is the answer [`ask_install`] took before the review; nothing is
+/// asked here.
 pub(crate) async fn run(
     g: &Global,
     env: &Env,
     ui: Ui,
     out: Out,
-    interactive: bool,
+    install: bool,
     root: &Path,
     p: &Plan,
 ) -> Step {
@@ -936,12 +951,9 @@ pub(crate) async fn run(
     let id = format!("inorbit/{EXTENSION}");
     if !have_agent(g) {
         let line = format!("The crawler is part of the {id} extension, which is not installed.");
-        let install = format!("{bin} ext install {id}");
-        let yes = interactive
-            && !out.json
-            && ui
-                .confirm(&format!("{line} Install it now?"), false)
-                .unwrap_or(false);
+        let install_cmd = format!("{bin} ext install {id}");
+        let yes = install && !out.json;
+        let install = install_cmd;
         if yes {
             if let Err(e) = super::init_extensions::install_one(g, env, out, &id).await {
                 return failed(format!(
@@ -964,7 +976,7 @@ pub(crate) async fn run(
         old_agent: std::sync::atomic::AtomicBool::new(false),
         no_keep: std::sync::atomic::AtomicBool::new(false),
     };
-    let dir: PathBuf = root.join(DIR).join(&p.name);
+    let dir: PathBuf = crate::kb::crawl_dir(root).join(&p.name);
     let host = p.url.host_str().unwrap_or_default();
     let first = match ctx
         .pass(
@@ -977,18 +989,12 @@ pub(crate) async fn run(
         Ok(c) => c,
         Err(e) => return failed(e),
     };
-    // With the flag the first pass already read the subdomains; without it each one is asked
-    // about, at a terminal, and left out anywhere else.
+    // With the flag the first pass already read the subdomains; without it none is followed
+    // (the crawl is under way, so nothing is asked now) and the result lists them as not read.
     let crawl = if p.subdomains {
         first
     } else {
-        let ask = |h: &str| {
-            if interactive && !out.json {
-                ask_about(ui, host, h).unwrap_or(Answer::No)
-            } else {
-                Answer::No
-            }
-        };
+        let ask = |_: &str| Answer::No;
         let more_dir = dir.join("more");
         explore(p, first, ask, |sub, start, b| {
             let (ctx, dir) = (&ctx, more_dir.join(folder_part(&sub)));
@@ -1008,7 +1014,7 @@ pub(crate) async fn run(
         Err(e) => return failed(e),
     };
     let n = crawl.counts();
-    let mut text = summary(&p.name, &n, kept.facts, kept.memories);
+    let mut text = summary(&p.name, &n, kept.facts, kept.memories, &p.kept_in);
     if let Some(m) = &model {
         text = m.report.within(&p.name, &text);
     }
@@ -1151,8 +1157,9 @@ fn folder_part(host: &str) -> String {
 /// project keeps). A result of an earlier run is removed, so a crawl that fails is never
 /// read as the last one that worked.
 fn prepare_dir(root: &Path, dir: &Path, policy: &str) -> Result<(), String> {
+    crate::kb::ensure_crawl_dir(root)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-    let ignore = root.join(DIR).join(".gitignore");
+    let ignore = crate::kb::crawl_dir(root).join(".gitignore");
     if !ignore.exists() {
         std::fs::write(&ignore, "*\n")
             .map_err(|e| format!("cannot write {}: {e}", ignore.display()))?;
@@ -1167,6 +1174,7 @@ fn prepare_dir(root: &Path, dir: &Path, policy: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::cli::{CRAWL_RATE_DEFAULT, CRAWL_RATE_MAX, CRAWL_RATE_MIN, CrawlRate};
+    use crate::kb::DIR;
 
     fn args(crawl: Option<&str>, no_crawl: bool) -> InitCrawlArgs {
         InitCrawlArgs {
@@ -1188,6 +1196,7 @@ mod tests {
             minutes: 5,
             rate: 10,
             subdomains: false,
+            kept_in: DIR.to_owned(),
         }
     }
 
@@ -1315,6 +1324,7 @@ mod tests {
         let r = decide(
             &args(None, false),
             Some("see https://acme.example"),
+            DIR,
             false,
             ui,
             out,
@@ -1329,6 +1339,7 @@ mod tests {
         let r = decide(
             &args(Some("https://acme.example"), true),
             None,
+            DIR,
             true,
             ui,
             out,
@@ -1412,23 +1423,23 @@ mod tests {
         for (asked, kept) in [("1", 1), ("10", 10), ("50", 50), (" 7 ", 7)] {
             let mut a = args(Some("https://acme.example/"), false);
             a.crawl_rate = asked.parse::<CrawlRate>().unwrap();
-            let p = decide(&a, None, false, ui, out).unwrap().unwrap();
+            let p = decide(&a, None, DIR, false, ui, out).unwrap().unwrap();
             assert_eq!(p.rate, kept, "asked {asked}");
         }
         for bad in ["0", "51", "-1", "1000", "fast", "", "2.5"] {
             let mut a = args(Some("https://acme.example/"), false);
             a.crawl_rate = bad.parse::<CrawlRate>().unwrap();
-            let e = decide(&a, None, false, ui, out).unwrap_err();
+            let e = decide(&a, None, DIR, false, ui, out).unwrap_err();
             assert!(matches!(e, Error::Usage(_)), "{bad}: {e:?}");
             assert!(e.to_string().contains("1 to 50"), "{bad}: {e}");
         }
         // Nothing is asked of the rate when no crawl runs.
         let mut a = args(None, true);
         a.crawl_rate = "fast".parse::<CrawlRate>().unwrap();
-        assert!(decide(&a, None, false, ui, out).unwrap().is_none());
+        assert!(decide(&a, None, DIR, false, ui, out).unwrap().is_none());
         let mut a = args(None, false);
         a.crawl_rate = "fast".parse::<CrawlRate>().unwrap();
-        assert!(decide(&a, None, false, ui, out).unwrap().is_none());
+        assert!(decide(&a, None, DIR, false, ui, out).unwrap().is_none());
     }
 
     #[test]
@@ -1447,7 +1458,7 @@ mod tests {
         let mut a = args(Some("https://acme.example/"), false);
         a.crawl_pages = 1_000_000;
         a.crawl_minutes = 0;
-        let p = decide(&a, None, false, ui, out).unwrap().unwrap();
+        let p = decide(&a, None, DIR, false, ui, out).unwrap().unwrap();
         assert_eq!((p.pages, p.minutes), (MAX_PAGES, 1));
         assert!(consent(&p).contains("Nothing is sent to InOrbit"));
     }
@@ -1456,7 +1467,14 @@ mod tests {
     fn a_bad_address_is_a_usage_error() {
         let ui = Ui::detect(true);
         let out = Out { json: true };
-        let r = decide(&args(Some("acme.example"), false), None, false, ui, out);
+        let r = decide(
+            &args(Some("acme.example"), false),
+            None,
+            DIR,
+            false,
+            ui,
+            out,
+        );
         assert!(matches!(r, Err(Error::Usage(_))));
     }
 
@@ -1501,7 +1519,7 @@ mod tests {
             stopped: vec![],
             not_followed: vec![],
         };
-        let s = summary("acme.example", &n, 13, 1);
+        let s = summary("acme.example", &n, 13, 1, DIR);
         assert!(
             s.starts_with("Crawl   acme.example   on this machine, by iohr-agent"),
             "{s}"
@@ -1520,7 +1538,7 @@ mod tests {
             stopped: vec!["pages".into(), "minutes".into()],
             ..n
         };
-        let s = summary("acme.example", &n, 13, 1);
+        let s = summary("acme.example", &n, 13, 1, DIR);
         assert!(s.contains("stopped at the page limit and the time limit; raise it with --crawl-pages / --crawl-minutes"), "{s}");
     }
 
@@ -1629,7 +1647,7 @@ mod tests {
                 .collect(),
             ..Crawl::default()
         };
-        let t = study_text(&c, &c.counts(), "a", "2026-11-08", None);
+        let t = study_text(&c, &c.counts(), "a", "2026-11-08", None, DIR);
         assert_eq!(t.matches("\n- https://a/").count(), LISTED);
         assert!(
             t.contains("3 more pages are in `.inorbit/crawl/a/facts.jsonl`"),
@@ -1713,7 +1731,7 @@ mod tests {
             crawl.not_followed,
             ["shop.acme.example", "blog.acme.example"]
         );
-        let s = summary("acme.example", &crawl.counts(), 1, 1);
+        let s = summary("acme.example", &crawl.counts(), 1, 1, DIR);
         assert!(
             s.contains("not read: shop.acme.example, blog.acme.example"),
             "{s}"

@@ -4,15 +4,16 @@
 //! enough ([`drawn_at`]); everywhere else the ask stays the one plain line of
 //! [`super::broker::card_line`], which scripts and the tests read.
 //!
-//! [`lines_with`] is pure (the width and the look are arguments) so the layout is tested. It reuses
-//! [`crate::card::header_line`] for the header and [`crate::ui`]'s bar for the rows, the keys
-//! and the box; nothing here draws a second box or reads keys of its own.
+//! [`template`] fills the one ask template ([`crate::ask_template`]) with this ask's words and
+//! rows; nothing here draws a box or reads keys of its own. [`lines_with`] is pure (the width and
+//! the look are arguments) so the layout is tested.
 
 use console::{measure_text_width, truncate_str};
 
 use super::broker::{Choice, Wanted};
-use crate::card::{self, Look};
-use crate::ui::{self, BarTop};
+use crate::ask_template::{IoHeader, Template};
+use crate::card::Look;
+use crate::ui;
 
 /// The most lines the command takes on the card before it is cut with a "more" line.
 const COMMAND_LINES: usize = 3;
@@ -133,18 +134,18 @@ pub(crate) fn lines(ask: &Ask, at: usize, cols: usize, look: Look) -> Vec<String
     lines_with(ask, &choices(ask.can_always), at, cols, look)
 }
 
-/// The card with these rows: a command's ([`choices`]) or the folder-trust ask's ([`trust_choices`]).
+/// The ask template ([`ask_template`]) for this ask with these rows: a command's
+/// ([`choices`]) or the folder-trust ask's ([`trust_choices`]). The body is built for a
+/// terminal `cols` wide.
 #[must_use]
-pub(crate) fn lines_with(
+pub(crate) fn template<'a>(
     ask: &Ask,
-    rows: &[ui::Choice],
-    at: usize,
+    rows: &'a [ui::Choice],
     cols: usize,
     look: Look,
-) -> Vec<String> {
+) -> Template<'a> {
     let width = ui::bar_width(cols);
     let inner = width.saturating_sub(3);
-    let header = card::header_line(" AI request ", false, "permission", width, look);
     let mut body = Vec::new();
     let said = truncate_str(
         &format!("Io (AI) wants to {}", ask.wanted.verb),
@@ -171,13 +172,34 @@ pub(crate) fn lines_with(
     }
     let place = truncate_str(&format!("in {}", ask.folder), inner, "\u{2026}").into_owned();
     body.push(look.dim().apply_to(place).to_string());
-    body.push(String::new());
-    let top = BarTop {
-        header: Some(header),
-        lines: &body,
-    };
-    ui::bar_lines_in(&top, "Io (AI) asks", rows, at, cols, look)
+    Template {
+        title: "Io (AI) asks",
+        io: Some(IoHeader {
+            badge: " AI request ",
+            meta: "permission",
+        }),
+        body,
+        rows,
+    }
 }
+
+/// The card with these rows as screen lines (the layout the tests read); the live ask draws the
+/// same [`template`] through [`ask_template::pick`].
+#[cfg(test)]
+#[must_use]
+pub(crate) fn lines_with(
+    ask: &Ask,
+    rows: &[ui::Choice],
+    at: usize,
+    cols: usize,
+    look: Look,
+) -> Vec<String> {
+    crate::ask_template::lines(&template(ask, rows, cols, look), at, cols, SCREEN, look)
+}
+
+/// The rows of a screen the card may take: a permission ask has three rows, so any height does.
+#[cfg(test)]
+const SCREEN: usize = 100;
 
 #[cfg(test)]
 mod tests {

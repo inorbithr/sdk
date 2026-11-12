@@ -30,6 +30,12 @@ impl Screen {
         self.parser.screen_mut().set_size(clamp(rows), clamp(cols));
     }
 
+    /// Where the cursor is: (row, column), counted from 0.
+    pub(super) fn cursor(&self) -> (usize, usize) {
+        let (r, c) = self.parser.screen().cursor_position();
+        (usize::from(r), usize::from(c))
+    }
+
     /// The child is on the alternate screen (a full screen program): the panel stays away.
     pub(super) fn alt(&self) -> bool {
         self.parser.screen().alternate_screen()

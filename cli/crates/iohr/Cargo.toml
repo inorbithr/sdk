@@ -18,6 +18,7 @@ name = "iohr"
 path = "src/main.rs"
 
 [dependencies]
+iohr-atlas-core.workspace = true
 iohr-auth.workspace = true
 iohr-codegen.workspace = true
 iohr-lab.workspace = true
@@ -26,6 +27,7 @@ inorbithr.workspace = true
 
 aws-lc-rs.workspace = true
 base64.workspace = true
+chrono.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 cliclack.workspace = true
@@ -48,6 +50,8 @@ sigstore-verify.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
 url.workspace = true

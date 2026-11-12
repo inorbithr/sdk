@@ -45,6 +45,12 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: AtlasCommand, out: Out) -> R
             dir,
             out,
         ),
+        AtlasCommand::Claims {
+            site,
+            prove,
+            limit,
+            dir,
+        } => kb_claims(site.as_deref(), prove.as_deref(), limit, dir, out),
         AtlasCommand::Index {
             pages,
             site,
@@ -156,6 +162,119 @@ fn kb_facts(
         .collect();
     Out::table(&["site", "predicate", "value", "page", "source"], &cells);
     Ok(())
+}
+
+/// `iohr atlas claims`: the claims made from the facts, or with `--prove` one claim's proof.
+#[cfg(unix)]
+fn kb_claims(
+    site: Option<&str>,
+    prove: Option<&str>,
+    limit: usize,
+    dir: Option<PathBuf>,
+    out: Out,
+) -> Result<(), Error> {
+    let root = root_of(dir)?;
+    if let Some(id) = prove {
+        let p = crate::kb::prove(&root, id).map_err(Error::Failed)?;
+        let evidence: Vec<_> = p
+            .evidence
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "id": e.id, "digest": e.digest, "bytes": e.bytes,
+                    "read_at": e.at.iter().map(|(u, c)| serde_json::json!({"url": u, "kept": c}))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        let s = p.claim.statement();
+        let value = serde_json::json!({
+            "claim": id, "predicate": s.predicate.name.as_str(),
+            "value": serde_json::to_value(&s.value).unwrap_or_default(),
+            "support": crate::kb::claims::support_word(p.claim.state().support()),
+            "stale": p.stale, "integrity": p.integrity,
+            "complete": p.tree.is_complete(), "depth": p.tree.depth(),
+            "evidence": evidence,
+            "means": "a deterministic reader found this value in these bytes; it does not say the value is true",
+        });
+        if out.json {
+            Out::print_json(&value);
+            return Ok(());
+        }
+        let cells: Vec<Vec<String>> = p
+            .evidence
+            .iter()
+            .flat_map(|e| {
+                e.at.iter()
+                    .map(|(u, c)| vec![e.digest.clone(), u.clone(), c.clone()])
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        Out::note(&format!(
+            "{id}: {} ({}), {}{}",
+            s.predicate.name.as_str(),
+            value["support"].as_str().unwrap_or(""),
+            if p.tree.is_complete() {
+                "proof complete"
+            } else {
+                "proof incomplete"
+            },
+            if p.stale {
+                ", stale: its page changed or the fact went"
+            } else {
+                ""
+            },
+        ));
+        Out::table(&["evidence (sha256)", "read at", "kept"], &cells);
+        return Ok(());
+    }
+    let site = kb_site(site);
+    let rows =
+        crate::kb::claims(&root, site.as_deref(), limit.clamp(1, 500)).map_err(Error::Failed)?;
+    if out.json {
+        let items: Vec<_> = rows
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.id, "site": r.site, "subject": r.subject,
+                    "predicate": r.predicate, "value": r.value, "support": r.support,
+                    "stale": r.stale,
+                })
+            })
+            .collect();
+        Out::print_json(&serde_json::json!({ "claims": items }));
+        return Ok(());
+    }
+    if rows.is_empty() {
+        Out::note("no claims yet; `iohr project init --crawl <url>` reads a site");
+        return Ok(());
+    }
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| {
+            vec![
+                r.id.clone(),
+                r.predicate.clone(),
+                r.value.clone(),
+                r.support.clone() + if r.stale { " (stale)" } else { "" },
+            ]
+        })
+        .collect();
+    Out::table(&["claim", "predicate", "value", "support"], &cells);
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn kb_claims(
+    _site: Option<&str>,
+    _prove: Option<&str>,
+    _limit: usize,
+    _dir: Option<PathBuf>,
+    _out: Out,
+) -> Result<(), Error> {
+    Err(Error::Failed(
+        "the local index is not available on this build".to_owned(),
+    ))
 }
 
 /// `iohr atlas index`: the crawled sites (or, with `--pages`, their pages).
