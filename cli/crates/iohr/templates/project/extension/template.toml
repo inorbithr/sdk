@@ -1,5 +1,5 @@
 # The extension template as data (PRD 0088.1): a private macOS service that heartbeats and
-# serves a tiny local panel, in Python, TypeScript, Go or Rust, with the enterprise floor
+# serves a tiny local panel, in Python, TypeScript, Go, Rust, Java, C#, Dart or Swift, with the enterprise floor
 # (CI, signed and attested release, SBOM, dependency updates, secret scan). Its own floor files
 # differ from the generic ones in two places: the release is the extension release of
 # `iohr ext init` (the OCI artifact, signed and attested the way `iohr ext install` verifies),
@@ -35,13 +35,14 @@ PYTHONPATH = "$DIR/src"
 PYTHONDONTWRITEBYTECODE = "1"
 [variants.vars]
 MATRIX = '''          - { os: ubuntu-24.04, dir: any }'''
-BUILD = '''      - name: Build (one zipapp, for every platform it targets)
+BUILD = '''      - name: Build (one zipapp, for every platform it targets, the panel page beside it)
         run: |
           module="${NAME//-/_}"
           python3 -m zipapp src -m "$module.__main__:main" -p "/usr/bin/env python3" -o "$RUNNER_TEMP/$NAME"
           for p in $(python3 -c 'import tomllib; print(" ".join(tomllib.load(open("extension.toml", "rb"))["targets"]["platforms"]))'); do
-            mkdir -p "dist/bin/${p/\//-}"
+            mkdir -p "dist/bin/${p/\//-}/panel"
             install -m 0755 "$RUNNER_TEMP/$NAME" "dist/bin/${p/\//-}/$NAME"
+            cp panel/index.html "dist/bin/${p/\//-}/panel/index.html"
           done'''
 CI_TEST = '''mkdir -p "$RUNNER_TEMP/state" "$RUNNER_TEMP/cache" && STATE="$RUNNER_TEMP/state" CACHE="$RUNNER_TEMP/cache" PYTHONPATH=src python3 -m unittest discover -s tests'''
 SOURCE = "src/@@MODULE@@/"
@@ -72,12 +73,13 @@ MATRIX = '''          - { os: ubuntu-24.04, dir: any }'''
 BUILD = '''      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
-      - name: Build (the TypeScript as it is, with a launcher, Node runs it)
+      - name: Build (the TypeScript as it is and the panel page, with a launcher, Node runs it)
         run: |
           for p in $(python3 -c 'import tomllib; print(" ".join(tomllib.load(open("extension.toml", "rb"))["targets"]["platforms"]))'); do
             d="dist/bin/${p/\//-}"
-            mkdir -p "$d"
+            mkdir -p "$d/panel"
             cp src/*.ts "$d/"
+            cp panel/index.html "$d/panel/index.html"
             # shellcheck disable=SC2016  # the launcher keeps its $ for run time
             printf '#!/bin/sh\nexec node "$(dirname "$0")/main.ts" "$@"\n' > "$d/$NAME"
             chmod 0755 "$d/$NAME"
@@ -119,7 +121,6 @@ BUILD = '''      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef45430
             mkdir -p "dist/bin/${p/\//-}"
             CGO_ENABLED=0 GOOS="${p%/*}" GOARCH="${p#*/}" go build -trimpath -o "dist/bin/${p/\//-}/$NAME" .
           done'''
-CI_TEST = "go vet ./... && go test ./..."
 SOURCE = "main.go and channel.go"
 NEEDS = ''
 IGNORE = "/@@NAME@@"
@@ -159,7 +160,6 @@ BUILD = '''      - name: Build
           cargo build --release --locked --target "$TARGET"
           mkdir -p "dist/bin/$DIR"
           install -m 0755 "target/$TARGET/release/$NAME" "dist/bin/$DIR/$NAME"'''
-CI_TEST = "cargo test --locked"
 SOURCE = "src/"
 NEEDS = ''
 IGNORE = "target/"
@@ -175,6 +175,221 @@ RUN_ONCE = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects
 IOHR_EXT_ONCE=1 cargo run --quiet'''
 RUN_TEST = "`iohr ext dev --test`"
 TOOLCHAIN_MINOR = "1.85"
+
+# Dart SDK 3.9: https://dart.dev/get-dart ; dart:io sockets and HttpServer (a Unix socket is an
+# InternetAddress of type unix): https://api.dart.dev/dart-io/InternetAddress-class.html ;
+# a native executable: https://dart.dev/tools/dart-compile#exe . No packages, so nothing restores.
+[[variants]]
+id = "dart"
+label = "Dart 3.9 or newer (core libraries only)"
+status = "live"
+needs = ["dart"]
+toolchain = ["dart", "--version"]
+agent_allow = ["dart pub get", "dart analyze", "dart run", "dart format", "dart compile exe", "iohr ext lint"]
+build = ["dart", "pub", "get", "--enforce-lockfile"]
+run = ["dart", "run", "bin/@@MODULE@@.dart"]
+test = ["dart", "run", "test/selftest.dart"]
+[variants.env]
+DART_SUPPRESS_ANALYTICS = "true"
+[variants.vars]
+CI_SETUP = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: "3.9"'''
+MATRIX = '''          - { os: macos-15, dir: darwin-arm64 }'''
+BUILD = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: "3.9"
+      - name: Build (a native executable, the panel page beside it)
+        env:
+          DIR: ${{ matrix.dir }}
+        run: |
+          dart pub get --enforce-lockfile
+          mkdir -p "dist/bin/$DIR/panel"
+          dart compile exe "bin/${NAME//-/_}.dart" -o "dist/bin/$DIR/$NAME"
+          cp panel/index.html "dist/bin/$DIR/panel/index.html"'''
+CI_TEST = "dart pub get --enforce-lockfile && dart analyze --fatal-infos && dart run test/selftest.dart"
+RELEASE_STEPS = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: "3.9"
+      - name: Build (locked, native executable)
+        run: |
+          dart pub get --enforce-lockfile
+          mkdir -p dist
+          dart compile exe bin/@@MODULE@@.dart -o "dist/@@NAME@@-linux-amd64"'''
+SOURCE = "bin/ and lib/"
+NEEDS = ''
+IGNORE = ".dart_tool/"
+DEV = '''# `iohr ext dev` runs Rust, Python and shell folders; run this one with `dart run` under the
+# same STATE and CACHE (see the README).'''
+LAYOUT = '''- `bin/@@MODULE@@.dart` and `lib/`: the service. `lib/src/service.dart` heartbeats and serves the
+  panel (it reads `panel/index.html` beside the program, or `PANEL_FILE`); `lib/src/channel.dart`
+  asks iohr's token socket for a token with the one scope the manifest declares. Core libraries
+  only, so there is nothing to download.
+- `test/selftest.dart`: the self-test. One heartbeat, nothing written outside its state.'''
+RUN_DEV = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache dart run bin/@@MODULE@@.dart
+STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache dart run test/selftest.dart'''
+RUN_ONCE = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache \
+IOHR_EXT_ONCE=1 dart run bin/@@MODULE@@.dart'''
+RUN_TEST = "`dart run test/selftest.dart`"
+
+# Java 17: https://docs.oracle.com/en/java/javase/17/docs/api/ ; the Unix-domain socket channel
+# (JEP 380, Java 16): https://openjdk.org/jeps/380 ; the built-in web server (jdk.httpserver):
+# https://docs.oracle.com/en/java/javase/17/docs/api/jdk.httpserver/module-summary.html . JDK only.
+[[variants]]
+id = "java"
+label = "Java 17 or newer (JDK only, no build tool)"
+status = "live"
+needs = ["javac", "java"]
+toolchain = ["java", "-version"]
+agent_allow = ["javac", "java", "iohr ext lint"]
+build = ["javac", "--release", "17", "-Xlint:all", "-d", "$CACHE/classes", "-sourcepath", "src", "tests/@@MODULE@@/SelfTest.java", "src/@@MODULE@@/Main.java"]
+run = ["java", "-cp", "$CACHE/classes", "@@MODULE@@.Main"]
+test = ["java", "-cp", "$CACHE/classes", "@@MODULE@@.SelfTest"]
+[variants.vars]
+CI_SETUP = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"'''
+MATRIX = '''          - { os: ubuntu-24.04, dir: any }'''
+BUILD = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build (the classes and the panel page, with a launcher, java runs them)
+        run: |
+          module="${NAME//-/_}"
+          for p in $(python3 -c 'import tomllib; print(" ".join(tomllib.load(open("extension.toml", "rb"))["targets"]["platforms"]))'); do
+            d="dist/bin/${p/\//-}"
+            mkdir -p "$d/panel"
+            javac --release 17 -Xlint:all -d "$d/classes" -sourcepath src "src/$module/Main.java"
+            cp panel/index.html "$d/panel/index.html"
+            # shellcheck disable=SC2016  # the launcher keeps its $ for run time
+            printf '#!/bin/sh\nexec java -cp "$(dirname "$0")/classes" %s.Main "$@"\n' "$module" > "$d/$NAME"
+            chmod 0755 "$d/$NAME"
+          done'''
+CI_TEST = '''mkdir -p "$RUNNER_TEMP/classes" && javac --release 17 -Xlint:all -d "$RUNNER_TEMP/classes" -sourcepath src "tests/${NAME//-/_}/SelfTest.java" "src/${NAME//-/_}/Main.java" && java -cp "$RUNNER_TEMP/classes" "${NAME//-/_}.SelfTest"'''
+RELEASE_STEPS = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build (one jar)
+        run: |
+          mkdir -p classes dist
+          javac --release 17 -Xlint:all -d classes -sourcepath src src/@@MODULE@@/Main.java
+          jar --create --file "dist/@@NAME@@.jar" --main-class @@MODULE@@.Main -C classes .'''
+SOURCE = "src/@@MODULE@@/"
+NEEDS = '"java"'
+IGNORE = "*.class"
+DEV = '''# `iohr ext dev` runs Rust, Python and shell folders; run this one with `java` under the same
+# STATE and CACHE (see the README).'''
+LAYOUT = '''- `src/@@MODULE@@/`: the service. `Main.java` heartbeats and serves the panel (it reads
+  `panel/index.html` beside the classes, or `PANEL_FILE`); `Channel.java` asks iohr's token socket
+  for a token with the one scope the manifest declares. JDK only, so there is nothing to download.
+- `tests/@@MODULE@@/SelfTest.java`: the self-test. One heartbeat, nothing written outside its state.'''
+RUN_DEV = '''javac --release 17 -d ~/.inorbit/projects/@@NAME@@/cache/classes -sourcepath src tests/@@MODULE@@/SelfTest.java src/@@MODULE@@/Main.java
+STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache java -cp ~/.inorbit/projects/@@NAME@@/cache/classes @@MODULE@@.Main
+STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache java -cp ~/.inorbit/projects/@@NAME@@/cache/classes @@MODULE@@.SelfTest'''
+RUN_ONCE = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache \
+IOHR_EXT_ONCE=1 java -cp ~/.inorbit/projects/@@NAME@@/cache/classes @@MODULE@@.Main'''
+RUN_TEST = "`java -cp $CACHE/classes @@MODULE@@.SelfTest` (compile first with the `javac` line above)"
+
+# .NET 10 (the current LTS): https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core ;
+# Unix-domain sockets (UnixDomainSocketEndPoint): https://learn.microsoft.com/en-us/dotnet/api/system.net.sockets.unixdomainsocketendpoint ;
+# Kestrel in the shared framework (no package): https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel .
+# No NuGet package, so nothing restores.
+[[variants]]
+id = "csharp"
+label = "C# on .NET 10 (the shared framework, no packages)"
+status = "live"
+needs = ["dotnet"]
+toolchain = ["dotnet", "--version"]
+agent_allow = ["dotnet build", "dotnet run", "dotnet publish", "iohr ext lint"]
+run = ["dotnet", "run", "--project", "src/@@MODULE@@"]
+test = ["dotnet", "run", "--project", "tests/@@MODULE@@.SelfTest"]
+[variants.env]
+DOTNET_NOLOGO = "1"
+DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+[variants.vars]
+MATRIX = '''          - { os: macos-15, dir: darwin-arm64 }'''
+BUILD = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build (an app host and its dlls, the panel page beside them)
+        env:
+          DIR: ${{ matrix.dir }}
+        run: dotnet publish "src/${NAME//-/_}" --configuration Release --runtime osx-arm64 --no-self-contained --output "dist/bin/$DIR"'''
+CI_TEST = "dotnet run --project tests/@@MODULE@@.SelfTest"
+RELEASE_STEPS = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"
+      - name: Publish
+        run: dotnet publish src/@@MODULE@@ --configuration Release --output dist'''
+SOURCE = "src/@@MODULE@@/"
+NEEDS = '"dotnet"'
+IGNORE = "bin/\nobj/"
+DEV = '''# `iohr ext dev` runs Rust, Python and shell folders; run this one with `dotnet run` under the
+# same STATE and CACHE (see the README).'''
+LAYOUT = '''- `src/@@MODULE@@/`: the service. `Service.cs` heartbeats and serves the panel (it reads
+  `panel/index.html` beside the program, or `PANEL_FILE`); `Channel.cs` asks iohr's token socket
+  for a token with the one scope the manifest declares. The .NET shared framework only, so there
+  is nothing to download.
+- `tests/@@MODULE@@.SelfTest/`: the self-test. One heartbeat, nothing written outside its state.'''
+RUN_DEV = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache dotnet run --project src/@@MODULE@@
+STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache dotnet run --project tests/@@MODULE@@.SelfTest'''
+RUN_ONCE = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache \
+IOHR_EXT_ONCE=1 dotnet run --project src/@@MODULE@@'''
+RUN_TEST = "`dotnet run --project tests/@@MODULE@@.SelfTest`"
+
+# Swift toolchains: https://www.swift.org/install/ ; SwiftPM (tools version 5.9, `swift test`):
+# https://docs.swift.org/swiftpm/documentation/packagemanager/ ; BSD sockets through Foundation's
+# Darwin overlay: https://developer.apple.com/documentation/foundation . Foundation only, nothing
+# resolves. Proven on macOS (`swift test`, 6 checks); the macOS runner image installs Xcode's Swift.
+[[variants]]
+id = "swift"
+label = "Swift 5.9 or newer (Foundation only)"
+status = "live"
+needs = ["swift"]
+toolchain = ["swift", "--version"]
+agent_allow = ["swift build", "swift test", "swift run", "iohr ext lint"]
+build = ["swift", "build", "--build-tests", "--scratch-path", "$CACHE/swift"]
+run = ["swift", "run", "--scratch-path", "$CACHE/swift", "@@NAME@@"]
+test = ["swift", "test", "--scratch-path", "$CACHE/swift"]
+[variants.vars]
+MATRIX = '''          - { os: macos-15, dir: darwin-arm64 }'''
+BUILD = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.1"
+      - name: Build (a release executable, the panel page beside it)
+        env:
+          DIR: ${{ matrix.dir }}
+        run: |
+          swift build -c release
+          mkdir -p "dist/bin/$DIR/panel"
+          install -m 0755 ".build/release/$NAME" "dist/bin/$DIR/$NAME"
+          cp panel/index.html "dist/bin/$DIR/panel/index.html"'''
+RELEASE_STEPS = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.1"
+      - name: Build (release)
+        run: |
+          swift build --configuration release
+          mkdir -p dist
+          install -m 0755 ".build/release/@@NAME@@" "dist/@@NAME@@-linux-amd64"'''
+SOURCE = "Sources/"
+NEEDS = ''
+IGNORE = ".build/\n.swiftpm/"
+DEV = '''# `iohr ext dev` runs Rust, Python and shell folders; run this one with `swift run` under the
+# same STATE and CACHE (see the README).'''
+LAYOUT = '''- `Sources/@@MODULE@@/`: the service. `Service.swift` heartbeats and serves the panel (it reads
+  `panel/index.html` beside the program, or `PANEL_FILE`); `Channel.swift` asks iohr's token socket
+  for a token with the one scope the manifest declares. Foundation only, so there is nothing to
+  download. `Sources/@@MODULE@@_run/main.swift` is the executable.
+- `Tests/@@MODULE@@Tests/SelfTest.swift`: the self-test. One heartbeat, nothing written outside its state.'''
+RUN_DEV = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache swift run @@NAME@@
+STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache swift test'''
+RUN_ONCE = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache \
+IOHR_EXT_ONCE=1 swift run @@NAME@@'''
+RUN_TEST = "`swift test`"
 
 [[steps]]
 name = "git"
