@@ -1,6 +1,6 @@
 # The service template as data (PRD 0088.1, ADR 0221): a small HTTP service with health and
 # readiness probes, structured logs that carry a trace id, one span per request, request
-# metrics, graceful shutdown and a test that boots it. Go, Python, Rust and TypeScript, each on
+# metrics, graceful shutdown and a test that boots it. Go, Python, Rust, TypeScript, Java, C#, Dart and Swift, each on
 # its standard library alone, so a fresh project installs nothing. The enterprise floor (CI,
 # signed and attested release, SBOM, dependency updates, secret scan) comes from `floor`.
 #
@@ -105,3 +105,152 @@ LAYOUT = '''- `src/main.ts`: reads HOST and PORT, starts the server and stops it
 - `src/obs.ts`: JSON logs, W3C `traceparent` spans, Prometheus text metrics.
 - `tests/service.test.ts`: the passes-on-init test.
 - `package-lock.json`: the lockfile.'''
+
+# Java: JDK 17 (the long-term-support release the SDK's own java/ module targets, java/pom.xml maven.compiler.release 17;
+# https://openjdk.org/projects/jdk/17/). Standard library only: javac and java, no build tool.
+[[variants]]
+id = "java"
+label = "Java 17 or newer (standard library only)"
+status = "live"
+needs = ["javac", "java"]
+toolchain = ["java", "-version"]
+agent_allow = ["javac", "java"]
+smoke = "test"
+build = ["javac", "-d", "$CACHE/classes", "src/app/Obs.java", "src/app/Service.java", "src/app/Main.java", "tests/ServiceTest.java"]
+test = ["java", "-cp", "$CACHE/classes", "ServiceTest"]
+[variants.vars]
+CI_SETUP = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"'''
+CI_TEST = '''javac -d out src/app/*.java tests/*.java && java -cp out ServiceTest'''
+RELEASE_STEPS = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build the jar
+        run: |
+          mkdir -p dist out
+          javac -d out src/app/*.java
+          git rev-parse --short=12 HEAD > out/commit.txt
+          jar --create --file "dist/@@NAME@@.jar" --main-class app.Main -C out .'''
+SOURCE = "src/app/, tests in tests/"
+IGNORE = '''out/
+*.class'''
+RUN_TEST = "`javac -d out src/app/*.java tests/*.java && java -cp out ServiceTest`"
+README_TEST = "javac -d out src/app/*.java tests/*.java && java -cp out ServiceTest"
+RUN = "javac -d out src/app/*.java && java -cp out app.Main"
+TOOLCHAIN_MINOR = "17"
+LAYOUT = '''- `src/app/Main.java`: reads HOST and PORT, starts the service and stops it cleanly on SIGINT or SIGTERM (a JVM shutdown hook).
+- `src/app/Service.java`: the routes (`/healthz`, `/readyz`, `/metrics`, `/v1/hello`) on the JDK's own HTTP server, and the one place a request is traced, logged and counted.
+- `src/app/Obs.java`: JSON logs, W3C `traceparent` spans, Prometheus text metrics.
+- `tests/ServiceTest.java`: the passes-on-init test (a plain `main`, no test framework).'''
+
+# C#: .NET SDK 10 (LTS, https://dotnet.microsoft.com/platform/support/policy/dotnet-core), pinned by global.json
+# (rollForward latestFeature). Standard library only; the test is a console project that runs itself, no test package.
+[[variants]]
+id = "csharp"
+label = "C# on .NET 10 or newer (standard library only)"
+status = "live"
+needs = ["dotnet"]
+toolchain = ["dotnet", "--version"]
+agent_allow = ["dotnet build", "dotnet test", "dotnet run"]
+smoke = "test"
+test = ["dotnet", "run", "--project", "tests/Tests.csproj", "--artifacts-path", "$CACHE/artifacts"]
+[variants.env]
+DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+DOTNET_NOLOGO = "1"
+DOTNET_CLI_HOME = "$CACHE/dotnet"
+[variants.vars]
+CI_SETUP = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json'''
+CI_TEST = '''dotnet run --project tests/Tests.csproj'''
+RELEASE_STEPS = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Publish
+        run: dotnet publish src --configuration Release --output dist'''
+SOURCE = "src/, tests in tests/"
+IGNORE = '''bin/
+obj/
+artifacts/'''
+RUN_TEST = "`dotnet run --project tests/Tests.csproj`"
+README_TEST = "dotnet run --project tests/Tests.csproj"
+RUN = "dotnet run --project src"
+TOOLCHAIN_MINOR = "10.0"
+LAYOUT = '''- `src/Program.cs`: reads HOST and PORT, starts the service and stops it cleanly on SIGINT or SIGTERM.
+- `src/Service.cs`: the routes (`/healthz`, `/readyz`, `/metrics`, `/v1/hello`) on `HttpListener`, and the one place a request is traced, logged and counted.
+- `src/Obs.cs`: JSON logs, W3C `traceparent` spans, Prometheus text metrics.
+- `tests/ServiceTests.cs`: the passes-on-init test (a console project that runs itself, no test package).
+- `global.json`: pins the .NET SDK.'''
+
+# Dart: SDK 3.9 or newer (https://dart.dev/get-dart, pubspec `sdk: ^3.9.0`). Standard library only (dart:io, dart:convert); the test is a plain script, no test package.
+[[variants]]
+id = "dart"
+label = "Dart 3.9 or newer (standard library only)"
+status = "live"
+needs = ["dart"]
+toolchain = ["dart", "--version"]
+agent_allow = ["dart run", "dart analyze", "dart format"]
+smoke = "test"
+test = ["dart", "run", "test/service_test.dart"]
+[variants.env]
+DART_SUPPRESS_ANALYTICS = "true"
+[variants.vars]
+CI_TEST = '''dart analyze && dart run test/service_test.dart'''
+RELEASE_STEPS = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: stable
+      - name: Compile
+        run: |
+          mkdir -p dist
+          dart compile exe bin/main.dart -DCOMMIT="$(git rev-parse --short=12 HEAD)" -o "dist/@@NAME@@-linux-amd64"'''
+SOURCE = "bin/, lib/, tests in test/"
+IGNORE = '''.dart_tool/
+*.exe'''
+RUN_TEST = "`dart run test/service_test.dart`"
+README_TEST = "dart run test/service_test.dart"
+RUN = "dart run bin/main.dart"
+TOOLCHAIN_MINOR = "3.9"
+LAYOUT = '''- `bin/main.dart`: reads HOST and PORT, starts the service and stops it cleanly on SIGINT or SIGTERM.
+- `lib/service.dart`: the routes (`/healthz`, `/readyz`, `/metrics`, `/v1/hello`) on `dart:io`'s `HttpServer`, and the one place a request is traced, logged and counted.
+- `lib/obs.dart`: JSON logs, W3C `traceparent` spans, Prometheus text metrics.
+- `test/service_test.dart`: the passes-on-init test (a plain script, no test package).'''
+
+# Swift: 6.0 or newer with SwiftPM (https://www.swift.org/install/, Package.swift tools-version 6.0). Foundation and XCTest only.
+[[variants]]
+id = "swift"
+label = "Swift 6.0 or newer (Foundation only)"
+status = "live"
+needs = ["swift"]
+toolchain = ["swift", "--version"]
+agent_allow = ["swift build", "swift test", "swift run"]
+smoke = "test"
+test = ["swift", "test", "--scratch-path", "$CACHE/build"]
+[variants.vars]
+CI_SETUP = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.0"'''
+RELEASE_STEPS = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.0"
+      - name: Build (release)
+        run: |
+          if [ -f Sources/Cli/Commit.swift ]; then
+            sed -i "s/let stampedCommit = \"\"/let stampedCommit = \"$(git rev-parse --short=12 HEAD)\"/" Sources/Cli/Commit.swift
+          fi
+          swift build --configuration release
+          mkdir -p dist
+          install -m 0755 ".build/release/@@NAME@@" "dist/@@NAME@@-linux-amd64"'''
+SOURCE = "Sources/, tests in Tests/"
+IGNORE = '''.build/
+.swiftpm/'''
+RUN_TEST = "`swift test`"
+README_TEST = "swift test"
+RUN = "swift run @@NAME@@"
+TOOLCHAIN_MINOR = "6.0"
+LAYOUT = '''- `Sources/App/main.swift`: reads HOST and PORT, starts the service and stops it cleanly on SIGINT or SIGTERM.
+- `Sources/Service/Service.swift`: the routes (`/healthz`, `/readyz`, `/metrics`, `/v1/hello`) on plain POSIX sockets, and the one place a request is traced, logged and counted.
+- `Sources/Service/Obs.swift`: JSON logs, W3C `traceparent` spans, Prometheus text metrics.
+- `Tests/ServiceTests/ServiceTests.swift`: the passes-on-init test (XCTest).'''

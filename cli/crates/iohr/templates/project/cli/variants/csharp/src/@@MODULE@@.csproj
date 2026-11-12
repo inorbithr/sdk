@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>@@NAME@@</AssemblyName>
+    <RootNamespace>App</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <!-- The commit a build comes from: the SDK appends SourceRevisionId to the informational
+       version ("0.1.0+0123456789ab"), and the program reads it back for `version`. Without git
+       (a source archive) it stays empty and the program says "unknown". -->
+  <Target Name="StampCommit" BeforeTargets="InitializeSourceControlInformation" Condition="'$(SourceRevisionId)' == ''">
+    <Exec Command="git rev-parse --short=12 HEAD" ConsoleToMSBuild="true" StandardOutputImportance="low" StandardErrorImportance="low" IgnoreExitCode="true" ContinueOnError="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="SourceRevisionId" />
+      <Output TaskParameter="ExitCode" PropertyName="GitExit" />
+    </Exec>
+    <PropertyGroup Condition="'$(GitExit)' != '0'">
+      <SourceRevisionId></SourceRevisionId>
+    </PropertyGroup>
+  </Target>
+</Project>
