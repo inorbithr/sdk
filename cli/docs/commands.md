@@ -56,6 +56,7 @@ ends its `--help` with real examples.
 |---|---|---|
 | `iohr ask ...` | Ask your own AI agent about this folder | [Asking your agent](ask.md) |
 | `iohr asks count \| list \| show \| approve \| deny \| question \| decide \| key ...` | The asks agents file for you | [Asks](ask.md#the-asks-agents-file-for-you) |
+| `iohr handoff show \| compact \| clear [--json]` | The note an agent run leaves in `.inorbit/handoff.md` when it stops early (`ask --allow-edits` or `project init`): what was asked, the files changed, what is left, and one line per earlier run (newest 6, older ones counted). `show` prints it, `compact` re-folds it, `clear` deletes it; the next `ask --allow-edits` goes on from it. No sign-in, no network | [Projects](projects.md#describe-it-your-agent-builds-it) |
 | `iohr permissions list \| allow \| deny \| remove \| check` | What your agent may run or open when you ask it something | [Permissions](ask.md#permission-rules) |
 | `iohr context [DIR] [--full] [--json]` | The IO.md files a `?` or `??` question would load from DIR (default: here), the way a `CLAUDE.md` works: a table of each file with its bytes, how many were sent and why one was cut or left out, farthest first and the nearest winning; `--full` adds the text that would be sent, `--json` the same as data. Reads files only; asks no model and sends nothing | [IO.md](projects.md#iomd-instructions-for-the-folder) |
 | `iohr shell hook zsh` | The `?` prompt for zsh | [The `?` prompt](ask.md#the--prompt-in-zsh) |
