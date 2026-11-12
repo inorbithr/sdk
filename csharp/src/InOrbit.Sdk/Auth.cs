@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -25,7 +26,8 @@ public sealed class Token
         ExpiresAt = expiresAt;
     }
 
-    /// <summary>The bearer token. Never log it.</summary>
+    /// <summary>The bearer token. Never log it: <see cref="ToString"/> and JSON show it as <c>&lt;redacted&gt;</c>.</summary>
+    [JsonConverter(typeof(RedactedJsonConverter))]
     public string Access { get; }
 
     /// <summary>When it expires, if the provider knows.</summary>
@@ -33,7 +35,7 @@ public sealed class Token
 
     /// <summary>Never the token.</summary>
     /// <returns><c>Token(&lt;redacted&gt;)</c>.</returns>
-    public override string ToString() => "Token(<redacted>)";
+    public override string ToString() => $"Token({Redaction.Marker})";
 }
 
 /// <summary>Hands out a valid token, and hears when the API refused the last one.</summary>
@@ -66,7 +68,7 @@ public sealed class StaticToken : ITokenProvider
 
     /// <summary>Never the token.</summary>
     /// <returns><c>StaticToken(&lt;redacted&gt;)</c>.</returns>
-    public override string ToString() => "StaticToken(<redacted>)";
+    public override string ToString() => $"StaticToken({Redaction.Marker})";
 }
 
 /// <summary>How to build <see cref="ClientCredentials"/>: a key id, its secret or a file holding it, and the scopes.</summary>
@@ -75,7 +77,8 @@ public sealed record ClientCredentialsOptions
     /// <summary>The key's id (<c>ak_…</c>).</summary>
     public required string KeyId { get; init; }
 
-    /// <summary>The key's secret. Give this or <see cref="KeySecretFile"/>.</summary>
+    /// <summary>The key's secret. Give this or <see cref="KeySecretFile"/>. <see cref="ToString"/> and JSON show it as <c>&lt;redacted&gt;</c>.</summary>
+    [JsonConverter(typeof(RedactedJsonConverter))]
     public string? KeySecret { get; init; }
 
     /// <summary>A file holding the secret, read before every token exchange, so a rotated secret is used at the next refresh.</summary>
@@ -92,7 +95,7 @@ public sealed record ClientCredentialsOptions
 
     /// <summary>Never the secret.</summary>
     /// <returns>The key id and a redacted secret.</returns>
-    public override string ToString() => $"ClientCredentialsOptions({KeyId}, secret: <redacted>)";
+    public override string ToString() => $"ClientCredentialsOptions({KeyId}, secret: {Redaction.Marker})";
 }
 
 /// <summary>
@@ -177,7 +180,7 @@ public sealed class ClientCredentials : ITokenProvider, IDisposable
 
     /// <summary>Never the secret.</summary>
     /// <returns>The key id and a redacted secret.</returns>
-    public override string ToString() => $"ClientCredentials({_keyId}, secret: <redacted>)";
+    public override string ToString() => $"ClientCredentials({_keyId}, secret: {Redaction.Marker})";
 
     /// <inheritdoc/>
     public void Dispose()
@@ -387,7 +390,7 @@ public sealed class CachedToken : ITokenProvider
 
     /// <summary>Never the token.</summary>
     /// <returns><c>CachedToken(&lt;redacted&gt;)</c>.</returns>
-    public override string ToString() => "CachedToken(<redacted>)";
+    public override string ToString() => $"CachedToken({Redaction.Marker})";
 
     private async Task<Held> FetchAsync()
     {

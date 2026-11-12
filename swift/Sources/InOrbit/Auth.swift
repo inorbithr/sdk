@@ -92,6 +92,10 @@ public actor ClientCredentialsProvider: TokenProvider {
                 response = try await withTimeout(timeout) { [transport] in try await transport.send(request) }
             } catch is CancellationError {
                 throw CancellationError()
+            } catch is BodyTooLarge {
+                throw AuthError(
+                    status: 0, error: "",
+                    message: "the token exchange for key \(keyId) answered more than 16 MiB; check the token URL")
             } catch {
                 if retry < maxRetries {
                     try await sleep(RetryPolicy.delay(retry: retry, retryAfter: nil))
