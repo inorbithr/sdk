@@ -347,10 +347,12 @@ async fn run(
     parent_env: Vec<(OsString, OsString)>,
 ) -> Result<Ran, Skip> {
     let mut c = shell(command);
+    let (trust, dirs) = env::trusted(repo);
     c.current_dir(repo)
         .env_clear()
         .envs(env::scrub(parent_env))
         .envs(env::contained())
+        .env(trust, dirs)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -461,11 +463,13 @@ pub(crate) mod tests {
     const TWO_STREAMS_OUT: &[u8] = b"hello\r\noops\r\n";
 
     /// Exits 1 when either credential reached the shell or the containment is missing
-    /// (`gh` signed out, git with no credential helper), else prints `clean`. cmd.exe
+    /// (`gh` signed out, git with no credential helper, mise trusting the checkout), else
+    /// prints `clean`. cmd.exe
     /// keeps an unset `%NAME%` as literal text, so the Windows form uses `if defined`.
     #[cfg(not(windows))]
     const SCRUBBED: &str = "test -z \"$GH_TOKEN$FOO_SECRET\" \
         && test \"$GH_CONFIG_DIR\" = /nonexistent/iohr-gh \
+        && case \":$MISE_TRUSTED_CONFIG_PATHS:\" in *\":$(pwd -P):\"*) ;; *) false;; esac \
         && test \"$GIT_CONFIG_KEY_0=$GIT_CONFIG_VALUE_0\" = credential.helper= \
         && echo clean";
     #[cfg(not(windows))]

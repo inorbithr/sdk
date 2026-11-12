@@ -471,6 +471,19 @@ pub(crate) const ALL: &[(&[&str], &[Example])] = &[
         ],
     ),
     (
+        &["doctor"],
+        &[
+            ex(
+                &["doctor"],
+                "Check this machine and say how to fix what fails.",
+            ),
+            ex(
+                &["doctor", "--fix"],
+                "Also run the safe fixes (restart a stopped MCP bridge).",
+            ),
+        ],
+    ),
+    (
         &["upgrade"],
         &[
             ex(

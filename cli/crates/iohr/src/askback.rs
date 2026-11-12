@@ -18,11 +18,13 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::ask_template::{self, Answer, IoHeader, Template};
+use crate::card::Look;
 use crate::error::Error;
 use crate::memory::drift;
 use crate::memory::store::{Kind, Remembered, Store, remember};
 use crate::memory::text::has_secret;
-use crate::ui::{Choice, Ui};
+use crate::ui::Choice;
 
 /// Questions the model may ask in one answer.
 pub(crate) const MAX_QUESTIONS: usize = 2;
@@ -337,48 +339,70 @@ fn plain(e: &Error) -> String {
 /// takes that choice, `o` types their own, `s` skips that question, and Esc or `q` dismisses
 /// all of them (nothing is kept). None when nothing was answered.
 pub(crate) fn ask_person(questions: &[Question]) -> Option<Vec<(Question, String)>> {
-    let ui = Ui::detect(false);
-    let pick = |value: String, label: &str, hint: &str, key: char| Choice {
-        value,
-        label: label.to_owned(),
-        hint: hint.to_owned(),
-        available: true,
-        key: Some(key),
-    };
     let mut answers = Vec::new();
     for q in questions {
-        let mut choices: Vec<Choice> = q
-            .choices
-            .iter()
-            .zip('1'..)
-            .map(|(c, key)| pick(c.clone(), c, "", key))
-            .collect();
-        choices.push(pick("\u{0}other".to_owned(), "Other", "type your own", 'o'));
-        choices.push(pick("\u{0}skip".to_owned(), "Skip", "keep nothing", 's'));
-        let first = q.choices[0].clone();
-        match Ui::select_keyed(&q.ask, &choices, &first) {
-            Ok(Some(v)) if v == "\u{0}skip" => {}
-            Ok(Some(v)) if v == "\u{0}other" => {
-                let typed = ui.input("Your answer", "", |v| {
-                    if v.is_empty() || v.chars().count() > ANSWER_MAX {
-                        Err(format!("one to {ANSWER_MAX} characters"))
-                    } else if v.chars().any(char::is_control) {
-                        Err("no control characters".to_owned())
-                    } else {
-                        Ok(())
-                    }
-                });
-                match typed {
-                    Ok(t) => answers.push((q.clone(), t)),
-                    Err(_) => return None,
-                }
-            }
-            Ok(Some(v)) => answers.push((q.clone(), v)),
+        let rows = rows_of(q);
+        let t = template(q, &rows, ask_template::term_cols(), Look::detect(true));
+        let first = q.choices.first().cloned().unwrap_or_default();
+        match ask_template::ask_or_type(&t, &first, &check_answer) {
+            Ok(Answer::Row(v)) if v == SKIP => {}
+            Ok(Answer::Row(v) | Answer::Typed(v)) => answers.push((q.clone(), v)),
             // Esc, q, Ctrl-C or no terminal: dismissed.
-            Ok(None) | Err(_) => return None,
+            Ok(Answer::Dismissed) | Err(_) => return None,
         }
     }
     (!answers.is_empty()).then_some(answers)
+}
+
+/// The value of the row that keeps nothing.
+const SKIP: &str = "\u{0}skip";
+
+/// What a typed answer must be: one to [`ANSWER_MAX`] characters, no control characters.
+fn check_answer(v: &str) -> Result<(), String> {
+    if v.is_empty() || v.chars().count() > ANSWER_MAX {
+        Err(format!("one to {ANSWER_MAX} characters"))
+    } else if v.chars().any(char::is_control) {
+        Err("no control characters".to_owned())
+    } else {
+        Ok(())
+    }
+}
+
+/// The rows of one question: its choices keyed `1`.., then Other (`o`) and Skip (`s`).
+fn rows_of(q: &Question) -> Vec<Choice> {
+    let mut rows: Vec<Choice> = q
+        .choices
+        .iter()
+        .zip('1'..)
+        .map(|(c, key)| Choice {
+            value: c.clone(),
+            label: c.clone(),
+            hint: String::new(),
+            available: true,
+            key: Some(key),
+        })
+        .collect();
+    rows.push(ask_template::other_row('o'));
+    rows.push(Choice {
+        value: SKIP.to_owned(),
+        label: "Skip".to_owned(),
+        hint: "keep nothing".to_owned(),
+        available: true,
+        key: Some('s'),
+    });
+    rows
+}
+
+/// The question drawn in Io's card: the AI header, the question in bold, the rows. An AI
+/// question is never drawn as a plain step of ours.
+fn template<'a>(q: &Question, rows: &'a [Choice], cols: usize, look: Look) -> Template<'a> {
+    let mut t = Template::new("Io asks", rows);
+    t.io = Some(IoHeader {
+        badge: " AI question ",
+        meta: "keeps nothing unless you answer",
+    });
+    t.body = ask_template::body_lines(&format!("**{}**", q.ask.replace("**", "")), cols, look);
+    t
 }
 
 /// The questions as plain lines for a terminal that cannot ask (a pipe, a script): the
@@ -387,16 +411,12 @@ pub(crate) fn ask_person(questions: &[Question]) -> Option<Vec<(Question, String
 pub(crate) fn plain_lines(questions: &[Question]) -> Vec<String> {
     let mut out = Vec::new();
     for q in questions {
-        let choices: Vec<String> = q
-            .choices
-            .iter()
-            .enumerate()
-            .map(|(i, c)| format!("[{}] {c}", i + 1))
-            .collect();
+        let rows = rows_of(q);
+        let t = Template::new("", &rows[..q.choices.len()]);
         out.push(format!(
             "Question for you: {}  {}  [other]",
             q.ask,
-            choices.join("  ")
+            t.plain_line().trim()
         ));
     }
     if !out.is_empty() {
@@ -620,5 +640,51 @@ mod tests {
         assert!(lines[0].contains("[1] A CLI tool  [2] A web service  [3] A library  [other]"));
         assert!(lines[1].contains("iohr memory remember"));
         assert_eq!(plain_lines(&[]), Vec::<String>::new());
+    }
+
+    fn q() -> Question {
+        split(BLOCK).1.remove(0)
+    }
+
+    #[test]
+    fn a_question_is_drawn_in_ios_card_with_its_rows_and_other_and_skip() {
+        let look = Look {
+            fancy: true,
+            truecolor: false,
+        };
+        let q = q();
+        let rows = rows_of(&q);
+        let t = template(&q, &rows, 80, look);
+        let out: Vec<String> = ask_template::lines(&t, 0, 80, 40, look)
+            .iter()
+            .map(|l| console::strip_ansi_codes(l).into_owned())
+            .collect();
+        assert!(
+            out[0].contains("Io") && out[0].contains("AI question"),
+            "{out:?}"
+        );
+        let all = out.join("\n");
+        assert!(all.contains("What is this project for?"), "{all}");
+        for want in ["[1]", "A CLI tool", "[3]", "A library", "Other", "Skip"] {
+            assert!(all.contains(want), "{want}: {all}");
+        }
+    }
+
+    #[test]
+    fn the_plain_fallback_lists_the_same_rows() {
+        let l = plain_lines(&[q()]);
+        assert!(
+            l[0].starts_with("Question for you: What is this project for?  [1] A CLI tool"),
+            "{l:?}"
+        );
+        assert!(l[0].ends_with("[other]"), "{l:?}");
+    }
+
+    #[test]
+    fn a_typed_answer_is_one_to_the_limit_without_control_characters() {
+        assert!(check_answer("an API").is_ok());
+        assert!(check_answer("").is_err());
+        assert!(check_answer("a\u{7}b").is_err());
+        assert!(check_answer(&"x".repeat(ANSWER_MAX + 1)).is_err());
     }
 }

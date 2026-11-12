@@ -106,8 +106,10 @@ default `.inorbit/state` is ignored for you. The flag and the prompt go through 
 (`project::place::Layout`), so they agree.
 
 Init shows the preview and then does the work, and each question is asked once across the
-two: the place, the copy offer and the crawl notice are answered in the preview and carried
-into the run, never put again after "Ready?".
+two: the place, the copy offer, the shape, the crawl notice, the toolchain upgrade, the
+crawler install, the extension offers and the agent offer are all answered before "Ready?"
+and carried into the run. Nothing is asked after Create: the run only acts and prints
+progress (a debug build panics if a question is put after Create).
 
 A dry run records and writes nothing and says what it would do, including the place line.
 
@@ -119,7 +121,8 @@ the answer is work the Mac app and the phone see as well. The answer is written 
 `[project] shape` in `inorbit.toml` and as one fact in the project's notes, which `?` and
 `??` read.
 
-- At a terminal init asks inline, records the answer and marks the item done.
+- At a terminal init asks inline, before the review (and keeps the answer if you go back
+  and change something), records the answer and marks the item done.
 - `--shape monolith|microservices|combined` (or `IOHR_INIT_SHAPE`) answers without
   asking, with the same result.
 - Without a terminal and without the flag the item stays open (`proposed`), for the Mac
@@ -165,9 +168,9 @@ The picker offers these, in this order, after "Describe it" (below):
 |---|---|---|---|
 | `blank` | The smallest project: one runnable file, Roles and memory, no CI unless `--ci github` | Python, TypeScript, Go, Rust, Java, C#, Dart, Swift | the language's test command |
 | `service` (the default) | An HTTP service: `/healthz`, `/readyz`, `/metrics` (Prometheus text), `/v1/hello`, structured JSON logs with a `trace_id`, graceful shutdown, standard library only | Go, Python, Rust, TypeScript, Java, C#, Dart, Swift | its tests, which boot the server |
-| `agent` | An agent loop with a step, tool-call and token budget, a tool allow-list, approval for risky tools, and a log that never holds arguments or results; the model is a labelled stub | Python (`uv`), TypeScript | its tests |
+| `agent` | An agent loop with a step, tool-call and token budget, a tool allow-list, approval for risky tools, and a log that never holds arguments or results; the model is a labelled stub | Python (`uv`), TypeScript, Go, Rust, Java, C#, Swift, Dart (each on its standard library alone; no agent SDK to pin) | its tests |
 | `cli` | A command line with text and `--json` output, exit codes 0, 1 and 2, golden files, and a version that carries the commit | Go, Rust, Python, TypeScript, Java, C#, Dart, Swift | its tests, goldens included |
-| `mcp-server` | An MCP server on the official SDK, pinned exactly with a lockfile and built for the 2026-07-28 revision: one read-only tool with a typed output, one resource, deterministic `tools/list`, input limits | Python (`uv`, `mcp` 2.3.0), TypeScript (`@modelcontextprotocol/server` 2.4.0) | its tests, which start the server over stdio: `server/discover`, a `tools/list`, a `tools/call`, and a legacy-mode `initialize`. Needs the network once, to install the SDK |
+| `mcp-server` | An MCP server on the official SDK, pinned exactly with a lockfile and built for the 2026-07-28 revision: one read-only tool with a typed output, one resource, deterministic `tools/list`, input limits | Python (`uv`, `mcp` 2.3.0), TypeScript (`@modelcontextprotocol/server` 2.4.0), Go (`go-sdk` 1.8.0), Rust (`rmcp` 3.9.0), Java (`io.modelcontextprotocol.sdk:mcp` 2.1.0), C# (`ModelContextProtocol` 2.4.0), Swift (`swift-sdk` 0.12.1), Dart (`dart_mcp` 0.5.2, the Dart team's, not the modelcontextprotocol organisation's) | its tests, which start the server over stdio: `server/discover`, a `tools/list`, a `tools/call` and a legacy-mode `initialize` for the SDKs that speak 2026-07-28 (Python, TypeScript, Go, Rust, C#); Java, Swift and Dart speak up to 2025-11-25, so their tests check `initialize`, `tools/list` and `tools/call`. Needs the network once, to install the SDK |
 | `evals` | An offline eval suite: a JSONL dataset, a solver, deterministic scorers, a pass bar in `thresholds.toml`, `docs/how-to-grade.md` and an `evals.yml` workflow; the solver is a labelled stub (`stub: true`) | Python (standard library only) | its tests: the fixture meets the bar with the network refused, and lowering one expected answer fails the run and names the case |
 | `extension` | A private macOS extension that heartbeats and serves a tiny local panel (the former `demo`) | Python, TypeScript, Go, Rust | one heartbeat read back, with the token ask refused |
 
@@ -187,7 +190,8 @@ The 2026-07-28 MCP revision is stateless: `initialize` and `notifications/initia
 gone and a server answers `server/discover` (spec changelog,
 modelcontextprotocol.io/specification/2026-07-28/changelog). The `mcp-server` self-tests use
 the discover path, and one legacy-mode client still does the old `initialize` so a client
-that has not moved keeps working.
+that has not moved keeps working. The picker line lists the languages from each template's live
+variants, so adding a variant adds the language to it.
 A template that is coming refuses and names what is live. A variant is `live` only when its
 smoke test passes; it is `coming` until then. `iohr project templates` is the same as
 `template list`, kept for older scripts.
@@ -390,8 +394,8 @@ iohr project init my-shop --no-crawl
 `inorbit/agent` extension (`iohr agent atlas crawl`), and keeps what it found in the
 project. Nothing is sent to InOrbit.
 
-- **Consent.** At a terminal, a web address in the `--describe` text is asked about first
-  (default no). `--crawl URL` is the consent, and with `--json`, `--yes` or no terminal
+- **Consent.** At a terminal, a web address in the `--describe` text is asked about before
+  the review (default no), as is installing the crawler when it is missing. `--crawl URL` is the consent, and with `--json`, `--yes` or no terminal
   nothing is read unless you pass it. `--no-crawl` never reads.
 - **Limits.** Before it starts, init says what it will do: the host you gave only,
   robots.txt honoured, at most `--crawl-pages` pages (default 200) and `--crawl-minutes`
@@ -408,14 +412,13 @@ project. Nothing is sent to InOrbit.
   `TERM=dumb` or no terminal nothing is drawn. An `agent` extension from before RFC 0163
   does not know `--rate` or `--progress`: init runs it again without them and it crawls at
   its own pace with the spinner only.
-- **Other names in the same domain.** The crawl stays on that host. When a page links to
+- **Other names in the same domain.** The crawl stays on that host. A page that links to
   another name in the same domain (`blog.example.com` from `example.com`; from
-  `www.example.com` that also means the apex and its siblings), init asks once per name at
-  a terminal: yes, no, or yes to all, default no. A yes runs one more pass on that name
-  alone, inside what is left of the same limits, and its raw record is in
-  `.inorbit/crawl/<host>/more/<name>/`. With `--yes`, `--json` or no terminal, init follows
-  none, and the summary lists the names it left out. `--crawl-subdomains` is the yes to all
-  given in advance: the first pass is allowed the host and `*.host`, and nothing is asked.
+  `www.example.com` that also means the apex and its siblings) is not followed, and the
+  summary lists the names it left out. Init does not ask about them, because they are only
+  known once the crawl has run and nothing is asked after Create. `--crawl-subdomains`
+  is the yes given in advance: the first pass is allowed the host and `*.host`. Run init again
+  with it, or crawl a name on its own, to read one.
 
 What it keeps:
 
