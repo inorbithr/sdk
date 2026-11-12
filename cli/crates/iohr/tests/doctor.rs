@@ -56,7 +56,10 @@ fn a_signed_out_machine_fails_with_the_fix_for_it() {
     assert_eq!(finding(&v, "auth")["status"], "signed_out");
     assert_eq!(finding(&v, "auth")["offer"], "iohr login");
     assert_eq!(finding(&v, "config")["status"], "ok");
-    assert_eq!(finding(&v, "disk")["status"], "ok");
+    // Free space is read with statvfs, so only Unix reports it.
+    if cfg!(unix) {
+        assert_eq!(finding(&v, "disk")["status"], "ok");
+    }
     // No bridge is installed in this home, so there is nothing to report about it.
     assert!(
         v["findings"]
