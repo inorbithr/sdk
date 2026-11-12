@@ -15,6 +15,7 @@
 
 mod auto;
 mod entry;
+mod incidents;
 mod reader;
 mod work;
 
@@ -22,10 +23,11 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use super::cells::{ACC, AMBER, BoxSpec, FAINT, KEY, Line, MUTE, Span, TXT, bold, one_wide, sp};
-use super::input::OpenKey;
+use super::input::{HIDE_LABEL, OpenKey};
 use super::workloads::{Snapshot, Workload};
 use crate::card::Rgb;
 use crate::commands::asks::{PanelAsk, PanelAuto};
+use crate::commands::incident_settings::PanelIncidents;
 
 /// Where a piece of data stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +87,7 @@ pub(super) enum View {
     Run,
     Status,
     Auto,
+    Incidents,
     Help,
 }
 
@@ -122,6 +125,8 @@ pub(super) enum Effect {
     AutoOn,
     /// Turn auto mode off.
     AutoOff,
+    /// Turn the account's incident auto-resolution on or off.
+    IncidentsAutoResolve(bool),
     /// Say this to the session (a workload id).
     Message {
         id: String,
@@ -138,17 +143,18 @@ pub(super) enum Effect {
     },
     /// Interrupt the session (the person confirmed).
     StopWork(String),
-    /// Fold the chat box or bring it back (Option+h, or Ctrl-]).
+    /// Fold the chat box or bring it back (Option+h, Alt+h off macOS; Ctrl-] too).
     ChatToggle,
     /// Stop the panel: the shell goes on without it.
     Stop,
 }
 
 /// The menu: label, key, view it opens.
-const MENU: [(&str, char, View); 8] = [
+const MENU: &[(&str, char, View)] = &[
     ("Auto mode", 'a', View::Auto),
     ("Approvals", 'p', View::Approvals),
     ("Workloads", 'w', View::Workloads),
+    ("Incidents", 'i', View::Incidents),
     ("Run", 'r', View::Run),
     ("Status", 's', View::Status),
     ("Chat box", 'c', View::Rest),
@@ -169,6 +175,10 @@ pub(super) struct Model {
     pub(super) auto: Source<PanelAuto>,
     /// The phone was asked to turn it on and has not answered.
     auto_asked: bool,
+    /// The account's incident settings (auto-resolve).
+    pub(super) incidents: Source<PanelIncidents>,
+    /// A first press asked for the second that turns auto-resolve on.
+    incidents_confirm: bool,
     confirm: Option<String>,
     /// A session whose stop awaits the second key.
     stop_confirm: Option<String>,
@@ -199,6 +209,8 @@ impl Model {
             asks: Source::Loading,
             auto: Source::Loading,
             auto_asked: false,
+            incidents: Source::Loading,
+            incidents_confirm: false,
             confirm: None,
             stop_confirm: None,
             entry: None,
@@ -306,6 +318,7 @@ impl Model {
             View::Workloads => self.work_key(key),
             View::Workload => self.work_open_key(key),
             View::Auto => self.auto_key(key),
+            View::Incidents => self.incidents_key(key),
             View::Reader => {
                 self.reader_key(key);
                 Effect::None
@@ -408,7 +421,7 @@ impl Model {
         }
         self.view = view;
         self.note = None;
-        if matches!(view, View::Approvals | View::Workloads) {
+        if matches!(view, View::Approvals | View::Workloads | View::Incidents) {
             Effect::Refresh
         } else {
             Effect::None
@@ -485,7 +498,7 @@ impl Model {
             View::Approvals => 50,
             View::Workloads => 60,
             View::Workload | View::Reader => 72,
-            View::Auto => 56,
+            View::Auto | View::Incidents => 56,
             _ => 42,
         }
     }
@@ -503,6 +516,7 @@ impl Model {
             View::Workloads => self.workloads(width),
             View::Workload => self.workload(width),
             View::Auto => self.auto_view(),
+            View::Incidents => self.incidents_view(),
             View::Reader => self.reader(),
             View::Run => Self::coming("Run", "run a command with an agent from here"),
             View::Status => Self::coming("Status", "platform and agent status"),
@@ -553,9 +567,10 @@ impl Model {
             mode,
             waiting,
             self.work_menu_right(),
+            self.incidents_menu_right(),
             ("›".into(), MUTE),
             ("›".into(), MUTE),
-            (self.open_key.hide_label().into(), MUTE),
+            (HIDE_LABEL.into(), MUTE),
             (String::new(), MUTE),
             (String::new(), MUTE),
         ];
@@ -699,7 +714,7 @@ impl Model {
             row(open_key.label(), "open or close this panel"),
             row("↑↓ ⏎", "move and open"),
             row("esc", "back, then close"),
-            row(open_key.hide_label(), "fold or bring back the chat box"),
+            row(HIDE_LABEL, "fold or bring back the chat box"),
             row("a d q o", "phone-approve, deny, ask, read"),
             row("d y", "deny an ask, then confirm"),
             row("", "your command line is kept as is"),
@@ -759,7 +774,7 @@ mod tests {
         }
     }
 
-    fn model(n: usize) -> Model {
+    pub(super) fn model(n: usize) -> Model {
         let mut m = Model::new(false);
         m.set_asks(Source::Ready(
             (0..n)
@@ -779,7 +794,7 @@ mod tests {
         }
     }
 
-    fn rows(m: &Model) -> Vec<String> {
+    pub(super) fn rows(m: &Model) -> Vec<String> {
         let f = super::super::cells::lay_out(&m.spec(m.width()), 0, 0);
         f.cells
             .iter()
@@ -823,6 +838,33 @@ mod tests {
         );
     }
 
+    /// Terminals that send Option-i as the dead key `ˆ` commit it with the next key the person
+    /// presses, so it can arrive in the same read as Down (observed through the reader and the
+    /// model: `ˆ` then `ESC [ B` closed the menu and the Down was lost). Beside other input it is
+    /// that key's companion, not a press of the menu key.
+    #[test]
+    fn down_moves_the_open_menu_when_a_dead_key_arrives_in_the_same_read() {
+        use super::super::input::{Input, Reader};
+        let mut m = model(1);
+        let mut r = Reader::default();
+        m.key(Key::Menu);
+        for read in ["\u{2c6}\x1b[B", "\x1b[B\u{2c6}"] {
+            for i in r.feed(read.as_bytes()) {
+                if let Input::Key(k) = i {
+                    m.key(k);
+                }
+            }
+            assert!(m.open(), "{read:?} closed the menu");
+        }
+        assert_eq!(m.menu_sel, 2, "both Downs moved the selection");
+        for i in r.feed("\u{2c6}".as_bytes()) {
+            if let Input::Key(k) = i {
+                m.key(k);
+            }
+        }
+        assert!(!m.open(), "the dead key alone is still the menu key");
+    }
+
     #[test]
     fn the_menu_key_opens_and_closes_and_rest_ignores_every_other_key() {
         let mut m = model(1);
@@ -843,7 +885,7 @@ mod tests {
         let mut m = model(2);
         m.key(Key::Menu);
         m.key(Key::Up);
-        assert_eq!(m.menu_sel, 7, "wraps to Stop panel");
+        assert_eq!(m.menu_sel, MENU.len() - 1, "wraps to Stop panel");
         m.key(Key::Down);
         assert_eq!(m.menu_sel, 0);
         let text = rows(&m);
@@ -865,7 +907,7 @@ mod tests {
         let mut m = model(0);
         m.key(Key::Menu);
         let text = rows(&m).join("\n");
-        assert!(text.contains("Chat box") && text.contains("\u{2325}h"));
+        assert!(text.contains("Chat box") && text.contains(HIDE_LABEL));
         assert_eq!(m.key(Key::Char('c')), Effect::ChatToggle);
         assert_eq!(m.view, View::Rest, "the menu closes so the box is in view");
     }
@@ -1152,6 +1194,7 @@ mod tests {
             View::Run,
             View::Status,
             View::Auto,
+            View::Incidents,
             View::Help,
             View::Reader,
         ] {

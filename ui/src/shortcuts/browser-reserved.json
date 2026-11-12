@@ -1,0 +1,235 @@
+{
+  "note": "Keys the browser or the system owns. No binding may take one, unless its scope is named in allowIn (a text-editing key inside the one surface that edits). Written as CmdOrCtrl: Cmd on a Mac, Ctrl elsewhere; the test treats Cmd and Ctrl alike.",
+  "keys": [
+    {
+      "accel": "CmdOrCtrl+T",
+      "why": "new tab"
+    },
+    {
+      "accel": "CmdOrCtrl+N",
+      "why": "new window"
+    },
+    {
+      "accel": "CmdOrCtrl+W",
+      "why": "close tab"
+    },
+    {
+      "accel": "CmdOrCtrl+Q",
+      "why": "quit"
+    },
+    {
+      "accel": "CmdOrCtrl+Shift+T",
+      "why": "reopen closed tab"
+    },
+    {
+      "accel": "CmdOrCtrl+Shift+N",
+      "why": "private window"
+    },
+    {
+      "accel": "CmdOrCtrl+Shift+W",
+      "why": "close window"
+    },
+    {
+      "accel": "CmdOrCtrl+Shift+P",
+      "why": "private window (Firefox)"
+    },
+    {
+      "accel": "CmdOrCtrl+Tab",
+      "why": "next tab"
+    },
+    {
+      "accel": "Ctrl+PageUp",
+      "why": "previous tab"
+    },
+    {
+      "accel": "Ctrl+PageDown",
+      "why": "next tab"
+    },
+    {
+      "accel": "CmdOrCtrl+1",
+      "why": "switch tab"
+    },
+    {
+      "accel": "CmdOrCtrl+2",
+      "why": "switch tab"
+    },
+    {
+      "accel": "CmdOrCtrl+3",
+      "why": "switch tab"
+    },
+    {
+      "accel": "CmdOrCtrl+4",
+      "why": "switch tab"
+    },
+    {
+      "accel": "CmdOrCtrl+5",
+      "why": "switch tab"
+    },
+    {
+      "accel": "CmdOrCtrl+6",
+      "why": "switch tab"
+    },
+    {
+      "accel": "CmdOrCtrl+7",
+      "why": "switch tab"
+    },
+    {
+      "accel": "CmdOrCtrl+8",
+      "why": "switch tab"
+    },
+    {
+      "accel": "CmdOrCtrl+9",
+      "why": "last tab"
+    },
+    {
+      "accel": "CmdOrCtrl+0",
+      "why": "reset zoom"
+    },
+    {
+      "accel": "CmdOrCtrl+=",
+      "why": "zoom in"
+    },
+    {
+      "accel": "CmdOrCtrl+-",
+      "why": "zoom out"
+    },
+    {
+      "accel": "CmdOrCtrl+,",
+      "why": "browser settings (Safari, Chrome on a Mac)"
+    },
+    {
+      "accel": "CmdOrCtrl+[",
+      "why": "history back"
+    },
+    {
+      "accel": "CmdOrCtrl+]",
+      "why": "history forward"
+    },
+    {
+      "accel": "CmdOrCtrl+L",
+      "why": "address bar"
+    },
+    {
+      "accel": "CmdOrCtrl+D",
+      "why": "bookmark"
+    },
+    {
+      "accel": "CmdOrCtrl+R",
+      "why": "reload"
+    },
+    {
+      "accel": "CmdOrCtrl+Shift+R",
+      "why": "hard reload"
+    },
+    {
+      "accel": "CmdOrCtrl+F",
+      "why": "find in page"
+    },
+    {
+      "accel": "CmdOrCtrl+G",
+      "why": "find next"
+    },
+    {
+      "accel": "CmdOrCtrl+P",
+      "why": "print"
+    },
+    {
+      "accel": "CmdOrCtrl+S",
+      "why": "save page"
+    },
+    {
+      "accel": "CmdOrCtrl+O",
+      "why": "open file"
+    },
+    {
+      "accel": "CmdOrCtrl+U",
+      "why": "view source"
+    },
+    {
+      "accel": "CmdOrCtrl+J",
+      "why": "downloads"
+    },
+    {
+      "accel": "CmdOrCtrl+H",
+      "why": "history, or hide the app on a Mac"
+    },
+    {
+      "accel": "CmdOrCtrl+M",
+      "why": "minimise (Mac)"
+    },
+    {
+      "accel": "CmdOrCtrl+Y",
+      "why": "history (Windows, Linux)"
+    },
+    {
+      "accel": "CmdOrCtrl+Alt+I",
+      "why": "developer tools"
+    },
+    {
+      "accel": "Alt+ArrowLeft",
+      "why": "history back"
+    },
+    {
+      "accel": "Alt+ArrowRight",
+      "why": "history forward"
+    },
+    {
+      "accel": "F1",
+      "why": "help"
+    },
+    {
+      "accel": "F3",
+      "why": "find next"
+    },
+    {
+      "accel": "F5",
+      "why": "reload"
+    },
+    {
+      "accel": "F6",
+      "why": "address bar"
+    },
+    {
+      "accel": "F7",
+      "why": "caret browsing"
+    },
+    {
+      "accel": "F11",
+      "why": "full screen"
+    },
+    {
+      "accel": "F12",
+      "why": "developer tools"
+    },
+    {
+      "accel": "CmdOrCtrl+A",
+      "why": "select all",
+      "allowIn": ["canvas", "decisions"]
+    },
+    {
+      "accel": "CmdOrCtrl+C",
+      "why": "copy",
+      "allowIn": ["canvas", "decisions"]
+    },
+    {
+      "accel": "CmdOrCtrl+V",
+      "why": "paste",
+      "allowIn": ["canvas", "decisions"]
+    },
+    {
+      "accel": "CmdOrCtrl+X",
+      "why": "cut",
+      "allowIn": ["canvas", "decisions"]
+    },
+    {
+      "accel": "CmdOrCtrl+Z",
+      "why": "undo",
+      "allowIn": ["canvas", "decisions"]
+    },
+    {
+      "accel": "CmdOrCtrl+Shift+Z",
+      "why": "redo",
+      "allowIn": ["canvas", "decisions"]
+    }
+  ]
+}

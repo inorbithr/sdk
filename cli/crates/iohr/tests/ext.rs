@@ -1038,6 +1038,8 @@ async fn init_without_a_terminal_hints_the_extension_and_installs_nothing() {
             "made",
             "--template",
             "coordinated",
+            "--set",
+            "license=MIT",
             "--yes",
             "--no-smoke",
             "--dir",
@@ -1172,6 +1174,53 @@ async fn a_private_registry_challenge_is_answered_with_the_configured_credential
     );
 }
 
+/// A challenge naming a token service on another origin gets an anonymous token request:
+/// the configured credential stays with the registry's own origin.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_service_on_another_origin_is_asked_without_the_credential() {
+    let b = Box_::new().await;
+    let key = KeyPair::generate_ecdsa_p256().unwrap();
+    b.trust(&key);
+    let a = Artifact::new("agent", "1.0.0", &[], b"prog");
+    let elsewhere = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"token": "PULLTOKEN"})),
+        )
+        .mount(&elsewhere)
+        .await;
+    let challenge = format!(r#"Bearer realm="{}/token",service="test""#, elsewhere.uri());
+    Mock::given(method("GET"))
+        .and(|r: &Request| {
+            r.url.path().starts_with("/v2/")
+                && r.headers.get("authorization").and_then(|v| v.to_str().ok())
+                    != Some("Bearer PULLTOKEN")
+        })
+        .respond_with(
+            ResponseTemplate::new(401).insert_header("www-authenticate", challenge.as_str()),
+        )
+        .mount(&b.server)
+        .await;
+    publish(&b.server, "agent", "1.0.0", &a, Some(&key)).await;
+
+    let o = b
+        .cmd(&["ext", "install", "agent@1.0.0"])
+        .env("IOHR_EXT_REGISTRY_AUTH", "user:pass")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let asked = elsewhere.received_requests().await.unwrap();
+    assert!(!asked.is_empty(), "the token service was never asked");
+    assert!(
+        asked
+            .iter()
+            .all(|r| !r.headers.contains_key("authorization")),
+        "the credential went to another origin"
+    );
+}
+
 #[cfg(unix)]
 mod run {
     use std::os::unix::fs::PermissionsExt as _;
@@ -1296,6 +1345,61 @@ mod run {
         assert!(
             !Path::new(&socket).parent().unwrap().exists(),
             "the channel was left behind"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_extension_gets_no_credential_variable_and_no_iohr_on_path() {
+        let b = Box_::new().await;
+        let key = KeyPair::generate_ecdsa_p256().unwrap();
+        b.trust(&key);
+        let work = b.dir.path().join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let other_bin = b.dir.path().join("other-bin");
+        std::fs::create_dir_all(&other_bin).unwrap();
+        let fake = other_bin.join("iohr");
+        std::fs::write(&fake, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let program = format!(
+            "#!/bin/sh\nenv > '{d}/env.txt'\n\
+             if command -v iohr >/dev/null 2>&1; then echo found; else echo absent; fi \
+             > '{d}/iohr.txt'\nexit 0\n",
+            d = work.display()
+        );
+        let a = Artifact::new("probe", "1.0.0", &["agents:write"], program.as_bytes());
+        publish(&b.server, "probe", "1.0.0", &a, Some(&key)).await;
+        let o = b.run(&["ext", "install", "probe@1.0.0"]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+
+        let mut path = vec![other_bin.clone()];
+        path.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        let out = b
+            .cmd(&["probe"])
+            .env("PATH", std::env::join_paths(path).unwrap())
+            .env("IOHR_TOKEN", token(&["agents:write"]))
+            .env("INORBIT_TOKEN", "TOKENSIGNATUREMARKER")
+            .env("INORBIT_TOKEN_FILE", "TOKENSIGNATUREMARKER")
+            .env("INORBIT_KEY_SECRET", "TOKENSIGNATUREMARKER")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+        let env = std::fs::read_to_string(work.join("env.txt")).unwrap();
+        for k in ["IOHR_TOKEN=", "INORBIT_TOKEN", "INORBIT_KEY_"] {
+            assert!(
+                !env.lines().any(|l| l.starts_with(k)),
+                "the extension saw {k}: {env}"
+            );
+        }
+        assert!(!env.contains("TOKENSIGNATUREMARKER"), "{env}");
+        assert!(!env.contains(other_bin.to_str().unwrap()), "{env}");
+        assert_eq!(
+            std::fs::read_to_string(work.join("iohr.txt"))
+                .unwrap()
+                .trim(),
+            "absent"
         );
     }
 
@@ -1648,6 +1752,8 @@ mod init_crawl {
                 "made",
                 "--template",
                 "coordinated",
+                "--set",
+                "license=MIT",
                 "--yes",
                 "--no-smoke",
                 "--no-sync",
@@ -2111,6 +2217,8 @@ mod init_crawl {
             "made",
             "--template",
             "coordinated",
+            "--set",
+            "license=MIT",
             "--yes",
             "--no-smoke",
             "--no-sync",
@@ -2246,6 +2354,8 @@ mod init_crawl {
             "made",
             "--template",
             "coordinated",
+            "--set",
+            "license=MIT",
             "--yes",
             "--no-smoke",
             "--no-sync",

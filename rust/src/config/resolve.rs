@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 use base64::Engine as _;
 use serde_json::{Map, Value, json};
 
-use crate::secret::Secret;
+use crate::secret::{REDACTED, Secret};
 
 /// The built-in pipeline, outermost first (`docs/config.md` section 7.2).
 pub const PIPELINE: [&str; 12] = [
@@ -32,8 +32,6 @@ pub const PIPELINE: [&str; 12] = [
 
 /// The largest config file read (section 4.1).
 const MAX_FILE: u64 = 1024 * 1024;
-
-const REDACTED: &str = "<redacted>";
 
 /// The keys of a profile table the command line owns (section 4.2).
 const CLI_KEYS: [&str; 5] = ["kind", "account", "storage", "issuer", "client_id"];

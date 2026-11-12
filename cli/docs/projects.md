@@ -9,9 +9,9 @@ InOrbit. The built-in roles and memory it writes are on
 ## `iohr project init`
 
 ```sh
-iohr project init my-shop         # the coordinated template: a Planner plan comes with it
-iohr project init demo --template demo
-iohr project create my-shop --template coordinated --dir ~/work/my-shop --json
+iohr project init my-shop --set license=MIT   # the service template: a Planner plan comes with it
+iohr project init my-tool --template cli --lang rust --set license=Apache-2.0
+iohr project create my-shop --template agent --dir ~/work/my-shop --set license=MIT --json
 ```
 
 `iohr project init NAME` (also `iohr init NAME` and `iohr project create NAME`, the same
@@ -21,11 +21,10 @@ half:
 - a folder from a template: `--dir` if you pass it, else a menu of places at a terminal
   (`./NAME`, this folder when it is empty, beside the git repository you are in so the
   project does not nest, and `[project] root` in `config.toml` when set), else `./NAME`.
-  The default template, `coordinated`, is a private macOS service that heartbeats and
-  serves a tiny panel, with the manifest of `iohr ext init`, plus a `coordination.toml`
-  that names the project's Planner plan and an `ask` example you can file with
-  `iohr coordinator asks create`. `--template demo` is the same without the
-  `coordination.toml`;
+  The default template is `service` (see [Templates](#templates)); every template but
+  `blank` also writes the [enterprise floor](#the-enterprise-floor), and every template
+  has a `coordination.toml` that names the project's Planner plan and an `ask` example
+  you can file with `iohr coordinator asks create`;
 - a git repository with one commit;
 - the project's own state under `~/.inorbit/projects/NAME/`, never in the repository;
 - a Keychain slot reserved by name;
@@ -40,8 +39,8 @@ still refused. The template's `rust-version` is the toolchain you have installed
 agent started with `--describe` is told to keep it as the minimum.
 
 At a terminal, `init` is guided. It asks for the name when it is missing (the folder's name
-is the default), offers the templates as a menu (templates that are coming are listed dimmed
-and cannot be chosen), confirms the folder, shows each step as a spinner that ends ok, warn
+is the default), offers the templates as a menu (a template that is coming is listed dimmed and
+cannot be chosen, and only shown with `init --experimental`), confirms the folder, shows each step as a spinner that ends ok, warn
 or fail, folds what waits on an API into one line (`--verbose` lists it), and ends with the
 next commands. `--template` and `--yes` skip the menu and the confirmation. Without a
 terminal, or with `--json`, `NO_COLOR` or `TERM=dumb`, nothing is drawn or asked: the plain
@@ -50,9 +49,14 @@ question, Code asking before it opens the folder, is said once in the ending.
 
 ### The Planner plan
 
-The coordinated template adds one step, "The project's Planner plan". `init` makes the
+Every template has one step, "The project's Planner plan" (`blank` too). `init` makes the
 plan, or finds the one it made before (its `external_id` is `project:NAME`, so a second run
 makes no second plan), and writes its `plan_...` id under `[plan]` in `coordination.toml`.
+
+A project with no `coordination.toml` (the blank template) gets the same step: the plan is
+made or found, because the project's shape item is filed in it, but there is no file to
+write the id into, and the step says so ("the id is not written down"). The step always
+ends with a check mark or a reason, never nothing.
 
 | Flag | What it does |
 |---|---|
@@ -65,6 +69,67 @@ Planner step is skipped, it prints how to set the id later (`iohr login`, then
 `[plan]`), and the exit code is 0. A session that exists but cannot be used (a token for
 another audience, an expired one) is skipped the same way, and the message names the real
 reason instead of "not signed in".
+
+### Where the project keeps its data
+
+By default the ADRs and notes (`memory/`) and the crawl live in the project's `.inorbit/`
+and the machine state (the registry entry and caches) in `~/.inorbit/projects/NAME`. On the
+first init at a terminal, `init` asks where all of it should go, and writes the answer as
+`[project] data` in `inorbit.toml`:
+
+| Answer | Notes, crawl | State |
+|---|---|---|
+| `project` (the default offered) | `<project>/.inorbit/memory`, `.inorbit/crawl` | `<project>/.inorbit/state`, `cache` (ignored by git through `.inorbit/.gitignore`) |
+| `home` | `~/.inorbit/projects/NAME/memory`, `crawl` | `~/.inorbit/projects/NAME` |
+| a folder you type | `<folder>/memory`, `<folder>/crawl` | `<folder>/state`, `cache` |
+| nothing recorded | `<project>/.inorbit/memory`, `.inorbit/crawl` | `~/.inorbit/projects/NAME` |
+
+The last row is the layout every project had before this question existed, and it stays
+as it is: no project changes until its owner chooses. The atlas stays in the project in
+both places. The notes store, the crawl, the knowledge base and the project registry ask one
+resolver (`project::place::Layout`), so they move together; the other writers (role notes,
+handoff, permissions) still use the project's `.inorbit/` and follow in a later change.
+
+| Flag | What it does |
+|---|---|
+| `--keep-in project\|home\|PATH` | Answer the question. Also `IOHR_INIT_KEEP_IN`; the flag wins, then the variable, then what `inorbit.toml` records, then the question. With `--yes`, `--json` or no terminal and none of these, nothing is asked or recorded |
+| `--copy-data` | When the place changes, copy what the old place holds into the new one. At a terminal it is offered instead. Nothing is ever deleted and nothing already in the new place is overwritten |
+
+The question has a third choice, "Somewhere else...", which asks for a folder. `~` is your
+home and a relative path starts at the project folder (write `./project` for a folder
+literally named `project`, which would otherwise read as the first answer). The folder is
+made when you confirm, not before, and the path is recorded as typed in `[project] data`
+(`~/vault/shop`, `kept/here`), so a project moved to another machine resolves it again. An
+unwritable place (a file, or a path under a file) is refused with the reason, at the prompt
+and for `--keep-in PATH`. A folder inside the project is yours to ignore in git (init does not add it to a `.gitignore`); only the
+default `.inorbit/state` is ignored for you. The flag and the prompt go through one resolver
+(`project::place::Layout`), so they agree.
+
+Init shows the preview and then does the work, and each question is asked once across the
+two: the place, the copy offer, the shape, the crawl notice, the toolchain upgrade, the
+crawler install, the extension offers and the agent offer are all answered before "Ready?"
+and carried into the run. Nothing is asked after Create: the run only acts and prints
+progress (a debug build panics if a question is put after Create).
+
+A dry run records and writes nothing and says what it would do, including the place line.
+
+### The project's shape
+
+Init asks once whether the project is a monolith, microservices or combined, and files the
+question as an item (`project-shape`, kind `question`) in the project's Planner plan, so
+the answer is work the Mac app and the phone see as well. The answer is written as
+`[project] shape` in `inorbit.toml` and as one fact in the project's notes, which `?` and
+`??` read.
+
+- At a terminal init asks inline, before the review (and keeps the answer if you go back
+  and change something), records the answer and marks the item done.
+- `--shape monolith|microservices|combined` (or `IOHR_INIT_SHAPE`) answers without
+  asking, with the same result.
+- Without a terminal and without the flag the item stays open (`proposed`), for the Mac
+  app or the phone to answer; nothing is recorded in the project yet.
+- Signed out or offline, an answer is still kept in the project and the step says the item
+  was not filed. Without a plan (`--no-plan`) there is nowhere to file it, and it says so.
+- A dry run asks nothing.
 
 ## IO.md: instructions for the folder
 
@@ -92,18 +157,70 @@ PRD 0193 is meant to join it as another kind of file rather than a second reader
 ```sh
 iohr project template list        # name, status, origin, the default (*) and what it is
 iohr project template list --json
-iohr project template show demo   # what it asks, its languages, which files it writes, its steps
+iohr project template list --all  # also the hidden ones: demo and coordinated
+iohr project template show cli    # what it asks, its languages, which files it writes, its steps
 cd "$(iohr project template path my-sensor)"   # the folder of one of yours
 ```
 
-The built-in templates are `coordinated`, `demo` and `blank`; `macos-app` and `ui-panel`
-are `coming` and refuse until they exist. `iohr project templates` is the same as
+The picker offers these, in this order, after "Describe it" (below):
+
+| Template | What you get | Languages | Its own check (the smoke step) |
+|---|---|---|---|
+| `blank` | The smallest project: one runnable file, Roles and memory, no CI unless `--ci github` | Python, TypeScript, Go, Rust | the language's test command |
+| `service` (the default) | An HTTP service: `/healthz`, `/readyz`, `/metrics` (Prometheus text), `/v1/hello`, structured JSON logs with a `trace_id`, graceful shutdown, standard library only | Go, Python, Rust, TypeScript | its tests, which boot the server |
+| `agent` | An agent loop with a step, tool-call and token budget, a tool allow-list, approval for risky tools, and a log that never holds arguments or results; the model is a labelled stub | Python (`uv`), TypeScript, Go, Rust, Java, C#, Swift, Dart (each on its standard library alone; no agent SDK to pin) | its tests |
+| `cli` | A command line with text and `--json` output, exit codes 0, 1 and 2, golden files, and a version that carries the commit | Go, Rust, Python | its tests, goldens included |
+| `mcp-server` | An MCP server on the official SDK, pinned exactly with a lockfile and built for the 2026-07-28 revision: one read-only tool with a typed output, one resource, deterministic `tools/list`, input limits | Python (`uv`, `mcp` 2.3.0), TypeScript (`@modelcontextprotocol/server` 2.4.0), Go (`go-sdk` 1.8.0), Rust (`rmcp` 3.9.0), Java (`io.modelcontextprotocol.sdk:mcp` 2.1.0), C# (`ModelContextProtocol` 2.4.0), Swift (`swift-sdk` 0.12.1), Dart (`dart_mcp` 0.5.2, the Dart team's, not the modelcontextprotocol organisation's) | its tests, which start the server over stdio: `server/discover`, a `tools/list`, a `tools/call` and a legacy-mode `initialize` for the SDKs that speak 2026-07-28 (Python, TypeScript, Go, Rust, C#); Java, Swift and Dart speak up to 2025-11-25, so their tests check `initialize`, `tools/list` and `tools/call`. Needs the network once, to install the SDK |
+| `evals` | An offline eval suite: a JSONL dataset, a solver, deterministic scorers, a pass bar in `thresholds.toml`, `docs/how-to-grade.md` and an `evals.yml` workflow; the solver is a labelled stub (`stub: true`) | Python (standard library only) | its tests: the fixture meets the bar with the network refused, and lowering one expected answer fails the run and names the case |
+| `extension` | A private macOS extension that heartbeats and serves a tiny local panel (the former `demo`) | Python, TypeScript, Go, Rust | one heartbeat read back, with the token ask refused |
+
+Not offered yet, and said so: `macos-app` and `ui-panel` are `coming` and show only with
+`init --experimental` (the menu) or `template list --all`.
+
+The 2026-07-28 MCP revision is stateless: `initialize` and `notifications/initialized` are
+gone and a server answers `server/discover` (spec changelog,
+modelcontextprotocol.io/specification/2026-07-28/changelog). The `mcp-server` self-tests use
+the discover path, and one legacy-mode client still does the old `initialize` so a client
+that has not moved keeps working. The picker line lists the languages from each template's live
+variants, so adding a variant adds the language to it.
+A template that is coming refuses and names what is live. A variant is `live` only when its
+smoke test passes; it is `coming` until then. `iohr project templates` is the same as
 `template list`, kept for older scripts.
 
+`demo` and `coordinated` are the old defaults. They stay reachable by name (an existing
+config or script keeps working) and hidden from the picker; `template list --all` shows
+them. `demo` is `extension` under its old name, and `coordinated` is `demo`.
+
 Which template is used: `--template`, else `template` under `[project]` in `config.toml`
-(`template = "demo"`; you edit it, `iohr config` does not write it), else `coordinated`. A
+(`template = "cli"`; you edit it, `iohr config` does not write it), else `service`. A
 described project uses `blank`, whatever `[project]` says. A configured template that is
 coming refuses too.
+
+### The enterprise floor
+
+Every template but `blank` extends one shared floor, so what a team needs on day one is
+there and the same everywhere:
+
+| File | What it is |
+|---|---|
+| `.github/workflows/ci.yml` | `permissions: contents: read`, every action pinned to a full commit SHA, the template's own tests, a CycloneDX SBOM, and a secret scan |
+| `.github/workflows/release.yml` | On a tag: build, keyless `cosign` signing and build provenance attestation |
+| `.github/dependabot.yml` | Dependency and action updates, with the lockfile the language uses |
+| `.github/CODEOWNERS` | Who reviews; `@CHANGE-ME` until you set `--set code_owner=@team` |
+| `SECURITY.md` | How to report a vulnerability, to the contact init asks for (`--set security_contact=...`) |
+| `AGENTS.md` | Points an agent to `IO.md`, the file this project's instructions live in |
+| `.env.example` | Names only, never a value; `.env` is in `.gitignore` |
+| the licence | Asked as an SPDX identifier (`MIT`, `Apache-2.0`, `AGPL-3.0-only`, `LicenseRef-Proprietary`) and written into the project's metadata. There is no default: `--yes` without `--set license=ID` stops and names the key |
+
+`--ci none` writes none of the three files under `.github/workflows/` and `dependabot.yml`;
+the rest of the floor stays. `--ci github` is the default for every template but `blank`,
+which writes no CI unless you pass it. The files are generated from the template, so there is no
+claim in them that the project is compliant with anything; they are the things a review
+looks for.
+
+Each template has its own observability: the service its probes, metrics and traces; the
+agent a log of tool names and outcomes only; the extension its heartbeat; the cli its exit
+codes and a `--json` mode.
 
 ### Templates are data
 
@@ -114,8 +231,8 @@ one is compiled in except the built-ins, which are the same folders embedded
 ```toml
 id = "my-sensor"
 description = "what it is"
-status = "live"          # or "coming"
-extends = "demo"         # optional: its files, questions and steps come first; yours replace by path
+status = "live"          # or "coming", or "hidden" (reachable by name, not offered)
+extends = "service"      # optional: its files, questions and steps come first; yours replace by path
 agent_prompt = "Make @@NAME@@ read @@KIND@@."   # optional, used by the agent step and --describe
 
 [[questions]]
@@ -133,7 +250,7 @@ name = "git"             # git, register, smoke, or agent (labelled AI)
 ```
 
 Files are filled by the same `@@KEY@@` renderer as the built-ins (`@@NAME@@`, `@@ID@@`,
-`@@MODULE@@`, `@@CREATED_AT@@` plus your question keys), and path segments are filled too
+`@@MODULE@@`, `@@CREATED_AT@@`, `@@PROJECT_KIND@@` (the `kind` the template sets, written into `inorbit.toml`) plus your question keys), and path segments are filled too
 (`notes-@@KIND@@.md`). The shape follows copier's `copier.yml` (questions with a type,
 choices, default and `when`; layering) and cargo-generate's `cargo-generate.toml`
 (placeholders with a type, prompt, choices and regex).
@@ -144,7 +261,7 @@ The template comes from, in order: `--template PATH` (a folder), then
 branch or tag.
 
 ```sh
-iohr project template new my-sensor [--extends demo]   # a working template in ~/.inorbit/templates
+iohr project template new my-sensor [--extends service]   # a working template in ~/.inorbit/templates
 iohr project template lint ./my-sensor                 # checks keys, `when`, regexes, placeholders, a sample render
 iohr project template schema                           # the JSON Schema of template.toml
 iohr project template show my-sensor [--json]          # questions, `when`, files, the agent step
@@ -160,8 +277,9 @@ key.
 
 `iohr project init my-tool --template blank --lang rust` writes the smallest project in your
 language and nothing about InOrbit services: `README.md` (the name and a one-line
-description from your words), `.gitignore`, `inorbit.toml`, `.inorbit/space`, and a
-skeleton with one trivial test:
+description from your words), `.gitignore`, `SECURITY.md`, `.github/CODEOWNERS`,
+`inorbit.toml`, `.inorbit/space`, and a skeleton with one trivial test (no CI, SBOM or
+release files unless you pass `--ci github`):
 
 | Language | Skeleton |
 |---|---|
@@ -263,8 +381,8 @@ iohr project init my-shop --no-crawl
 `inorbit/agent` extension (`iohr agent atlas crawl`), and keeps what it found in the
 project. Nothing is sent to InOrbit.
 
-- **Consent.** At a terminal, a web address in the `--describe` text is asked about first
-  (default no). `--crawl URL` is the consent, and with `--json`, `--yes` or no terminal
+- **Consent.** At a terminal, a web address in the `--describe` text is asked about before
+  the review (default no), as is installing the crawler when it is missing. `--crawl URL` is the consent, and with `--json`, `--yes` or no terminal
   nothing is read unless you pass it. `--no-crawl` never reads.
 - **Limits.** Before it starts, init says what it will do: the host you gave only,
   robots.txt honoured, at most `--crawl-pages` pages (default 200) and `--crawl-minutes`
@@ -281,14 +399,13 @@ project. Nothing is sent to InOrbit.
   `TERM=dumb` or no terminal nothing is drawn. An `agent` extension from before RFC 0163
   does not know `--rate` or `--progress`: init runs it again without them and it crawls at
   its own pace with the spinner only.
-- **Other names in the same domain.** The crawl stays on that host. When a page links to
+- **Other names in the same domain.** The crawl stays on that host. A page that links to
   another name in the same domain (`blog.example.com` from `example.com`; from
-  `www.example.com` that also means the apex and its siblings), init asks once per name at
-  a terminal: yes, no, or yes to all, default no. A yes runs one more pass on that name
-  alone, inside what is left of the same limits, and its raw record is in
-  `.inorbit/crawl/<host>/more/<name>/`. With `--yes`, `--json` or no terminal, init follows
-  none, and the summary lists the names it left out. `--crawl-subdomains` is the yes to all
-  given in advance: the first pass is allowed the host and `*.host`, and nothing is asked.
+  `www.example.com` that also means the apex and its siblings) is not followed, and the
+  summary lists the names it left out. Init does not ask about them, because they are only
+  known once the crawl has run and nothing is asked after Create. `--crawl-subdomains`
+  is the yes given in advance: the first pass is allowed the host and `*.host`. Run init again
+  with it, or crawl a name on its own, to read one.
 
 What it keeps:
 
@@ -331,6 +448,24 @@ pages are not fetched a second time.
   patterns) and facts are lines in `.inorbit/crawl/<host>/facts.jsonl`, beside the page
   facts (`kind`, `site`, `url`, `crawled`, plus the chunk each came from). The sections,
   with their extractive summary, are a "Site model" part of the one "Site crawl" study.
+
+- **Claims and evidence.** Every page the build read is an evidence record in the same
+  file, keyed by the SHA-256 of its bytes, with the URL it was read at and where the kept
+  copy is. Every fact becomes a claim whose proof tree ends at that page. Running the
+  crawl again adds no rows; a page that changed makes the old claim stale (kept, never
+  deleted) and adds a new one. `iohr atlas claims [--site S]` lists them and
+  `iohr atlas claims --prove ID` prints the proof tree, the evidence digest and whether
+  the kept page still hashes to it. "Verified" means the page bytes contain the fact, not
+  that the fact is true.
+- **The file is private.** `.inorbit/crawl` is created owner-only (`0700`). A folder an
+  older build made open to others is closed to `0700` in place, once, and says so on
+  stderr (the folder path only); a symlink, a folder owned by someone else, or a chmod
+  that fails is refused with the `chmod 700` to run.
+  One process writes at a time (a second says so and exits), a
+  write is a transaction, a store over 2 GiB refuses more writes, and the database opens
+  with no network listener and no outside file access. The tables are migrated by number
+  (version 2 adds `evidence`, `claims` and `claim_evidence`); a store written by an older
+  build opens untouched, and one written by a newer build is refused rather than damaged.
 
 `iohr atlas search QUERY`, `iohr atlas facts` and `iohr atlas index` read all of this
 (`--site` picks a crawled site, `--json` gives data), and `?` and `??` add the best five
@@ -391,7 +526,7 @@ read (default `false`), but no background loop exists, so only `iohr sync` sends
 ## Try it without changing anything
 
 ```sh
-iohr project init my-shop --template demo --dry-run --yes
+iohr project init my-shop --template service --set license=MIT --dry-run --yes
 ```
 
 `--dry-run` (alias `--plan`) runs the whole flow, questions, defaults and `when` skips

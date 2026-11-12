@@ -21,7 +21,9 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ${{ vars.CI_LIGHT_RUNNER || 'ubuntu-latest' }}
+    # GitHub-hosted always: it runs on pull requests from forks, which never reach our own
+    # runners. A public repository's hosted minutes are free.
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

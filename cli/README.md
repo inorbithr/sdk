@@ -14,7 +14,10 @@ latest release receives fixes ([support policy](../SUPPORT.md)). The latest rele
 These pages describe `main`. A change merged after the latest release ships with the next
 one. `iohr-preview` is the same program under another name, built ahead of a release and
 not published as a package; today it carries the `?` modes, `--role`, the extension offer
-in `iohr project init` and `iohr ext show` with no name before a release does.
+in `iohr project init`, `iohr ext show` with no name, the drawn lists (with a count and the next command under each), show views,
+the checks card (`doctor`, `lab check`, `memory check` and `drift`, `sdk check`, `ext
+verify`), errors drawn as a block on a terminal, and the root help's examples and Get
+started line before a release does.
 
 ## Install
 
@@ -53,7 +56,7 @@ Operate), and every command ends its `--help` with real examples.
 |---|---|
 | [Install and upgrade](docs/install.md) | Homebrew, the install scripts, APT, from source, `iohr upgrade`, checking a release |
 | [Sign in](docs/sign-in.md) | `iohr login`, accounts and teams, API tokens, `IOHR_TOKEN`, profiles, `iohr auth token` for other programs |
-| [Command reference](docs/commands.md) | Every command and its flags, the global flags, the help, usage errors and exit codes |
+| [Command reference](docs/commands.md) | Every command (`iohr doctor` included) and its flags, the global flags, the help, usage errors and exit codes |
 | [SDKs and the API](docs/sdk.md) | `iohr sdk add`, `config`, `generate`, `check` and `examples`; `iohr api` and `iohr openapi` |
 | [Domains and connections](docs/domains-and-connections.md) | Proving a domain with DNS, connecting apps with a key or a browser sign-in, grants |
 | [Extensions](docs/extensions.md) | Finding, installing, verifying and pinning extensions; building one with `iohr ext init`, `dev` and `lint` |

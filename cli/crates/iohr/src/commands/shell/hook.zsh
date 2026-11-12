@@ -40,6 +40,8 @@
 # and asks it at once, so one Enter sends it. Outside the panel, or with `[panel] chat = "off"`,
 # none of this is bound or sent and `?` is typed as before.
 if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
+  # Tells iohr that `?` works in this shell, so a failed command may offer `? why did that fail`.
+  export IOHR_ASK_HOOK=1
   typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa _iohr_ask_cmd _iohr_ask_link _iohr_ask_undo _iohr_ask_access _iohr_ask_steps _iohr_ask_live
   # The command that failed under the last ask, its exit status, and the output attached to it
   # from the menu (a private file and how it came: captured or pasted).

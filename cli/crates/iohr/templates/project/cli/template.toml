@@ -1,0 +1,83 @@
+# The cli template as data (PRD 0088.1): a command line with text and JSON output, exit codes
+# that mean something, a golden-output test and a version that says which commit it was built
+# from. Go, Rust and Python, each on its standard library alone. The enterprise floor (CI,
+# signed and attested release, SBOM, dependency updates, secret scan) comes from `floor`.
+#
+# The test of each variant is the passes-on-init check: golden output in text and JSON
+# (`golden/`), the exit codes, and a version line that carries a commit. A variant is `live`
+# only when that test passes.
+id = "cli"
+description = "A command line with text and JSON output, exit codes and a version with the commit"
+status = "live"
+extends = "floor"
+kind = "cli"
+default_variant = "go"
+agent_prompt = "This folder is a fresh InOrbit project from the `@@TEMPLATE@@` template: a command line in @@LANGUAGE_LABEL@@ (@@SOURCE@@). Build what is described below by editing this folder. Every command keeps text and --json output, errors go to stderr, exit codes stay 0 (ok), 1 (failure) and 2 (usage), every output has a golden file under golden/, keep the project free of secrets, and keep the test passing (@@RUN_TEST@@)."
+
+[[variants]]
+id = "go"
+label = "Go 1.26 or newer (standard library only)"
+status = "live"
+needs = ["go"]
+toolchain = ["go", "version"]
+agent_allow = ["go build", "go test", "go vet"]
+smoke = "test"
+test = ["go", "test", "./..."]
+[variants.vars]
+SOURCE = "main.go, main_test.go"
+IGNORE = "/@@NAME@@"
+RUN_TEST = "`go test ./...`"
+README_TEST = "go vet ./... && go test ./..."
+RUN = "go run . greet Ada"
+INSTALL = "go install ."
+TOOLCHAIN_MINOR = "1.26"
+LAYOUT = '''- `main.go`: the program. `run` takes the arguments and the two output streams, so a test reads both; `main` only passes the real ones and exits with its result.
+- `main_test.go`: the passes-on-init test.'''
+
+[[variants]]
+id = "rust"
+label = "Rust 1.85 or newer (standard library only)"
+status = "live"
+needs = ["cargo"]
+toolchain = ["rustc", "--version"]
+agent_allow = ["cargo build", "cargo test", "cargo fmt", "cargo clippy"]
+smoke = "test"
+test = ["cargo", "test", "--quiet", "--locked"]
+[variants.vars]
+SOURCE = "src/"
+IGNORE = "target/"
+RUN_TEST = "`cargo test --locked`"
+README_TEST = "cargo test --locked"
+RUN = "cargo run --quiet -- greet Ada"
+INSTALL = "cargo install --path . --locked"
+TOOLCHAIN_MINOR = "1.85"
+LAYOUT = '''- `src/lib.rs`: the program. `run` takes the arguments and the two output streams, so a test reads both.
+- `src/main.rs`: passes the real streams and exits with the result.
+- `build.rs`: stamps the commit into the binary (`git rev-parse`, else `GITHUB_SHA`, else `unknown`).
+- `tests/cli.rs`: the passes-on-init test.
+- `Cargo.lock`: the lockfile; CI and the release build with `--locked`.'''
+
+[[variants]]
+id = "python"
+label = "Python 3.12 or newer (standard library only)"
+status = "live"
+needs = ["python3"]
+toolchain = ["python3", "--version"]
+agent_allow = ["python3 -m unittest", "python3 -m py_compile", "uv lock", "uv build"]
+smoke = "test"
+test = ["python3", "-m", "unittest", "discover", "-s", "tests"]
+[variants.env]
+PYTHONPATH = "$DIR/src"
+PYTHONDONTWRITEBYTECODE = "1"
+[variants.vars]
+SOURCE = "src/@@MODULE@@/, tests in tests/"
+IGNORE = "__pycache__/\n*.pyc\n.venv/\n*.egg-info/"
+RUN_TEST = "`python3 -m unittest discover -s tests` with PYTHONPATH=src"
+README_TEST = "PYTHONPATH=src python3 -m unittest discover -s tests"
+RUN = "PYTHONPATH=src python3 -m @@MODULE@@ greet Ada"
+INSTALL = "uv tool install ."
+TOOLCHAIN_MINOR = "3.12"
+LAYOUT = '''- `src/@@MODULE@@/cli.py`: the program. `run` takes the arguments and the two output streams, so a test reads both.
+- `src/@@MODULE@@/__main__.py`: passes the real streams and exits with the result.
+- `tests/test_cli.py`: the passes-on-init test.
+- `uv.lock`: the lockfile (`uv lock` refreshes it).'''

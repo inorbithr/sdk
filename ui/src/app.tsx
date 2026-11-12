@@ -1,19 +1,80 @@
-import { House, PanelRight, Puzzle } from "lucide-react";
-import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  ArrowLeftRight,
+  Atom,
+  FileText,
+  House,
+  LayoutGrid,
+  ListChecks,
+  Orbit,
+  PanelRight,
+  PenTool,
+  Puzzle,
+  Radar,
+  Settings as SettingsIcon,
+  Wrench,
+} from "lucide-react";
+import { lazy, type MouseEvent, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
+import { CANVAS, canvasRoute } from "./canvas/canvas-route.ts";
+import { Decisions } from "./decisions/page.tsx";
+import {
+  applyLayout,
+  applySpan,
+  arrangeBox,
+  back,
+  dockClosed,
+  type LayoutId,
+  opensDock,
+  type Place,
+  resetAll,
+  restore,
+} from "./frame/arrange.ts";
+import { arrangeMenu, layoutMenu } from "./frame/arrange-menu.ts";
 import { cn } from "./frame/cn.ts";
 import { closeContextMenu, openContextMenu, showContextMenu } from "./frame/context-menu.tsx";
 import type { MenuEntry } from "./frame/context-menu-core.ts";
 import { Dock } from "./frame/dock.tsx";
-import { closeDock, setDockWidth, toggleDock } from "./frame/dock-frame.ts";
+import { closeDock, openDock, setDockWidth, toggleDock } from "./frame/dock-frame.ts";
 import { extensionsMenu } from "./frame/extensions-menu.ts";
-import { Frame } from "./frame/frame.tsx";
+import { ARRANGE_MIN_WIDTH, Frame, useViewportWidth } from "./frame/frame.tsx";
+import { GridPicker } from "./frame/grid-picker.tsx";
 import { PanelFrame } from "./frame/panel-frame.tsx";
-import { keysOf, useFrameShortcuts } from "./frame/shortcuts.ts";
 import { toggleHidden } from "./frame/sidebar-frame.ts";
+import { Home } from "./home.tsx";
+import { accountMenu, accountName } from "./lib/accounts-core.ts";
+import { useAccounts } from "./lib/accounts-store.ts";
+import { updateArrangement as updateArr, useArrangement } from "./lib/arrange-store.ts";
+import { DECISIONS, decisionsRoute } from "./lib/decisions-route.ts";
 import { useDock } from "./lib/dock-store.ts";
 import { type Listing, loadExtensions, type Panel } from "./lib/extensions.ts";
+import { entryOf, isDown, whyClosed } from "./lib/features-core.ts";
+import { allOnline, backOnline, putDown, undoLast, useFeatures, useUndo } from "./lib/features-store.ts";
+import type { Space } from "./lib/home-core.ts";
+import { homeReads } from "./lib/home-data.ts";
+import { add as addOrbit, HOME, remove as removeOrbit } from "./lib/orbits-core.ts";
+import { updateOrbits, useOrbits } from "./lib/orbits-store.ts";
+import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
+import { PLANNER, plannerRoute } from "./lib/planner-route.ts";
+import { SENSORS, sensorsRoute } from "./lib/sensors-view.ts";
+import { useSession } from "./lib/session-store.ts";
+import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
+import { useRead } from "./lib/settings-data.ts";
+import { BINDINGS } from "./lib/shortcut-tables.ts";
 import { useSidebar } from "./lib/sidebar-store.ts";
+import { useShortcuts } from "./lib/use-shortcuts.ts";
+import { MaintenanceForm } from "./maintenance-form.tsx";
+import { PlannerPage } from "./planner/planner-page.tsx";
+import { RailAccount, SessionControl } from "./session-control.tsx";
+import { Settings } from "./settings.tsx";
+import { HelpOverlay, keysShown, Palette, type PaletteItem } from "./shortcuts-view.tsx";
+
+// The Workload page (3D orbit, room, tree): its own chunk, so three loads only on /workload.
+const Workload = lazy(() => import("./workload.tsx"));
+const WORKLOAD = "/workload";
+
+const Canvas = lazy(() => import("./canvas/canvas-page.tsx"));
+
+const SensorsPage = lazy(() => import("./sensors/sensors-page.tsx"));
 
 // The page `iohr ui serve` serves, drawn in the shell frame from the Mac app (frame/frame.tsx, RFC 0217 C5): the
 // sidebar lists Home and the installed extensions that declare a panel, the page header holds the Extensions menu,
@@ -28,12 +89,49 @@ import { useSidebar } from "./lib/sidebar-store.ts";
 export function App() {
   const [sidebar, update] = useSidebar();
   const [dock, updateDock] = useDock();
+  const raw = useSession();
+  const accounts = useAccounts(raw.session);
+  const account = { ...raw, session: accounts.session };
+  const spaces = useRead<{ spaces?: Space[] }, Space[]>(
+    accounts.active === null ? null : homeReads(accounts.active).spaces,
+    (w) => w.spaces ?? [],
+  );
+  const accountLabel = accountName(accounts.rows, accounts.active);
   const [listing, setListing] = useState<Listing | null>(null);
   const [open, setOpen] = useState(false);
   const menu = useRef<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState<string | null>(null);
   const routed = routedPanel(window.location.pathname);
+  const arr = useArrangement();
+  const orbits = useOrbits();
+  const features = useFeatures();
+  const undo = useUndo();
+  const wide = useViewportWidth() >= ARRANGE_MIN_WIDTH;
+  const [gridAt, setGridAt] = useState<HTMLElement | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const layoutButton = useRef<HTMLButtonElement>(null);
+  const inSettings = settingsRoute(window.location.pathname) !== null;
+  const inDecisions = decisionsRoute(window.location.pathname) !== null;
+  const inPlanner = plannerRoute(window.location.pathname) !== null;
+  const inCanvas = canvasRoute(window.location.pathname) !== null;
+  const inSensors = sensorsRoute(window.location.pathname);
+  const inWorkload = window.location.pathname === WORKLOAD;
+  const pageKey = inSettings
+    ? "settings"
+    : inDecisions
+      ? "decisions"
+      : inPlanner
+        ? "planner"
+        : inCanvas
+          ? "canvas"
+          : inSensors
+            ? "sensors"
+            : inWorkload
+              ? "workload"
+              : routed === null
+                ? HOME
+                : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -66,7 +164,14 @@ export function App() {
     window.location.assign("/");
   };
 
+  const extensionsDown = isDown(entryOf(features, "extensions"));
+  const homeDown = isDown(entryOf(features, "home"));
+
   const choose = (panel: Panel) => {
+    if (extensionsDown) {
+      setReason(`Extension panels: ${whyClosed(entryOf(features, "extensions"))}`);
+      return;
+    }
     if (panel.port !== undefined) {
       window.location.assign(panelRoute(panel.name));
       return;
@@ -74,7 +179,146 @@ export function App() {
     void start(panel);
   };
 
-  useFrameShortcuts({ sidebar: () => update(toggleHidden) });
+  // A pair layout shows the dock to put beside the page; a dock that was closed ends it; a stored layout that has a dock
+  // place opens the dock again, so what the layout says and what is drawn never part.
+  const pick = (id: LayoutId) => {
+    updateArr((a) => applyLayout(a, id));
+    if (opensDock(id)) updateDock(openDock);
+  };
+  const pickSpan = (p: Place) => updateArr((a) => applySpan(a, p));
+  useEffect(() => {
+    if (arr.dock !== null && !dock.open) updateDock(openDock);
+  }, [arr.dock, dock.open, updateDock]);
+  const closeTheDock = () => {
+    updateDock(closeDock);
+    updateArr(dockClosed);
+  };
+  const openGrid = () => setGridAt((at) => (at ? null : layoutButton.current));
+  const layoutActions = { layout: pick, grid: openGrid, back: () => updateArr(back) };
+
+  const [help, setHelp] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const toggleHelp = () => setHelp((h) => !h);
+  useShortcuts("global", {
+    sidebar: () => update(toggleHidden),
+    palette: () => setPalette((p) => !p),
+    shortcuts: toggleHelp,
+    "shortcuts-help": toggleHelp,
+    "go-home": () => goTo(HOME),
+    "go-settings": () => goTo("settings"),
+    ...(wide
+      ? {
+          "layout-left": () => pick("left"),
+          "layout-right": () => pick("right"),
+          "layout-top": () => pick("top"),
+          "layout-bottom": () => pick("bottom"),
+          "layout-full": () => pick("full"),
+          "layout-grid": openGrid,
+          "layout-back": () => updateArr(back),
+        }
+      : {}),
+  });
+
+  const menuAt = (button: HTMLElement, entries: MenuEntry[], label: string, align: "right" | "left" = "right") => {
+    const r = button.getBoundingClientRect();
+    openContextMenu({ x: align === "right" ? r.right : r.left, y: r.bottom + 4 }, entries, { label, trigger: button });
+  };
+
+  // The account switcher (RFC 0217.1): accounts, projects and the environment, as the Mac app's popover.
+  const openSwitcher = (button: HTMLElement) =>
+    menuAt(
+      button,
+      accountMenu({
+        rows: accounts.rows,
+        active: accounts.active,
+        projects: spaces.state === "ok" ? spaces.data.map((x) => ({ id: x.space_id, name: x.name })) : [],
+        profile: account.session?.state === "signed-in" ? account.session.profile : "",
+        signedIn: account.session?.state === "signed-in",
+        switchTo: accounts.switchTo,
+        signIn: account.signIn,
+        signOut: account.signOut,
+      }),
+      accountLabel,
+      "left",
+    );
+
+  const pages = [
+    { key: HOME, title: "Home" },
+    { key: "decisions", title: "Decisions" },
+    { key: "planner", title: "Planner" },
+    { key: "canvas", title: "Canvas" },
+    { key: "sensors", title: "Sensors" },
+    { key: "workload", title: "Explore" },
+    { key: "settings", title: "Settings" },
+    ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
+  ];
+  const goTo = (key: string) => {
+    if (key === pageKey) return;
+    if (key === HOME) {
+      window.location.assign("/");
+      return;
+    }
+    if (key === "decisions") {
+      window.location.assign(DECISIONS);
+      return;
+    }
+    if (key === "planner") {
+      window.location.assign(PLANNER);
+      return;
+    }
+    if (key === "sensors") {
+      window.location.assign(SENSORS);
+      return;
+    }
+    if (key === "settings") {
+      window.location.assign(SETTINGS);
+      return;
+    }
+    if (key === "canvas") {
+      window.location.assign(CANVAS);
+      return;
+    }
+    if (key === "workload") {
+      window.location.assign(WORKLOAD);
+      return;
+    }
+    const panel = panels.find((p) => `ext:${p.name}` === key);
+    if (panel) choose(panel);
+  };
+  const pageIds = ["home", "settings"];
+  const paletteItems: PaletteItem[] = [
+    ...pages.map((p) => {
+      const go = BINDINGS.find((b) => b.page === (p.key === HOME ? "home" : p.key));
+      return {
+        id: `go:${p.key}`,
+        label: `Go to ${p.title}`,
+        hint: go ? keysShown(go) : undefined,
+        run: () => goTo(p.key),
+      };
+    }),
+    { id: "help", label: "Keyboard shortcuts", hint: "?", run: () => setHelp(true) },
+  ];
+  const orbitActions = {
+    go: goTo,
+    add: (k: string) => updateOrbits((o) => addOrbit(o, k)),
+    remove: (k: string) => updateOrbits((o) => removeOrbit(o, k)),
+  };
+  const maintenanceActions = {
+    edit: (id: string) => setEditing(id),
+    back: backOnline,
+    allOnline,
+    undo: undo ? undoLast : null,
+    undoLabel: undo?.label ?? "",
+  };
+  const arrangeBy = (id: "page" | "dock") => (button: HTMLElement) =>
+    menuAt(
+      button,
+      arrangeMenu(arr, id, {
+        move: (to) => updateArr((a) => arrangeBox(a, id, to)),
+        reset: () => updateArr(resetAll),
+      }),
+      "Arrange",
+    );
 
   const toggleMenu = (button: HTMLElement) => {
     if (open && menu.current !== null) {
@@ -107,27 +351,100 @@ export function App() {
 
   const title = (
     <h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
-      <span className={cn(chosen && "text-muted-foreground")}>InOrbit</span>
-      {chosen ? (
+      <span className={cn((chosen || inSettings || inDecisions || inWorkload || inCanvas) && "text-muted-foreground")}>
+        InOrbit
+      </span>
+      {chosen || inSettings || inDecisions || inWorkload || inCanvas ? (
         <>
           <span className="text-muted-foreground">/</span>
-          <span className="truncate">{chosen.title}</span>
+          <span className="truncate">
+            {inDecisions
+              ? "Decisions"
+              : inSettings
+                ? "Settings"
+                : inCanvas
+                  ? "Canvas"
+                  : inWorkload
+                    ? "Explore"
+                    : chosen?.title}
+          </span>
         </>
       ) : null}
     </h1>
   );
 
+  const anyDown = isDown(entryOf(features, "home")) || isDown(entryOf(features, "extensions"));
+  const headerButton =
+    "hover:bg-accent hover:text-foreground text-muted-foreground flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[13px] [&>svg]:size-3.5";
+
   const actions = (
     <>
+      <button
+        type="button"
+        title="Maintenance"
+        aria-label="Maintenance"
+        aria-haspopup="menu"
+        data-maintenance-button
+        className={cn(headerButton, "size-7 justify-center px-0", anyDown && "bg-accent text-foreground")}
+        onClick={(e) => menuAt(e.currentTarget, maintenanceMenu(features, maintenanceActions), "Maintenance")}
+      >
+        <Wrench />
+      </button>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        data-orbits-button
+        className={headerButton}
+        onClick={(e) => menuAt(e.currentTarget, orbitsMenu(orbits, pageKey, pages, orbitActions), "Orbits")}
+      >
+        <Orbit aria-hidden="true" />
+        <span className="@max-[640px]:hidden">Orbits</span>
+      </button>
+      {wide && (
+        <>
+          <button
+            ref={layoutButton}
+            type="button"
+            title="Window layout"
+            aria-label="Layout"
+            aria-haspopup="menu"
+            data-layout-button
+            className={cn(headerButton, "size-7 justify-center px-0")}
+            onClick={(e) => menuAt(e.currentTarget, layoutMenu(arr, layoutActions), "Layout")}
+          >
+            <LayoutGrid />
+          </button>
+          <button
+            type="button"
+            className={headerButton}
+            aria-haspopup="menu"
+            data-arrange-button="page"
+            aria-label="Arrange"
+            onClick={(e) => arrangeBy("page")(e.currentTarget)}
+          >
+            <span className="@max-[640px]:hidden">Arrange</span>
+            <ArrowLeftRight aria-hidden="true" className="hidden @max-[640px]:block" />
+          </button>
+        </>
+      )}
+      <SessionControl
+        session={account.session}
+        name={accountLabel}
+        busy={account.busy}
+        onSignIn={account.signIn}
+        onOpen={openSwitcher}
+      />
       <button
         type="button"
         className="hover:bg-accent hover:text-foreground text-muted-foreground rounded-md px-2 py-1 text-[13px] disabled:opacity-50"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label="Extensions"
         disabled={listing === null}
         onClick={(e) => toggleMenu(e.currentTarget)}
       >
-        Extensions
+        <span className="@max-[640px]:hidden">Extensions</span>
+        <Puzzle aria-hidden="true" className="hidden size-4 @max-[640px]:block" />
       </button>
       <button
         type="button"
@@ -152,9 +469,22 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null}
+          active={
+            routed === null && !inSettings && !inDecisions && !inPlanner && !inSensors && !inWorkload && !inCanvas
+          }
           onClick={() => window.location.assign("/")}
         />
+        <NavItem
+          rail={rail}
+          label="Decisions"
+          icon={<FileText />}
+          active={inDecisions}
+          onClick={() => window.location.assign(DECISIONS)}
+        />
+        <NavItem rail={rail} label="Planner" icon={<ListChecks />} active={inPlanner} onClick={() => goTo("planner")} />
+        <NavItem rail={rail} label="Canvas" icon={<PenTool />} active={inCanvas} onClick={() => goTo("canvas")} />
+        <NavItem rail={rail} label="Sensors" icon={<Radar />} active={inSensors} onClick={() => goTo("sensors")} />
+        <NavItem rail={rail} label="Explore" icon={<Atom />} active={inWorkload} onClick={() => goTo("workload")} />
       </ul>
       <section aria-label="Extensions" className={cn("flex flex-col gap-0.5", rail && "items-center")}>
         {!rail && <h2 className="text-muted-foreground px-2 pb-0.5 text-[11px] font-medium">Extensions</h2>}
@@ -180,61 +510,133 @@ export function App() {
   );
 
   return (
-    <Frame
-      sidebar={sidebar}
-      update={update}
-      title={title}
-      actions={actions}
-      sidebarBody={sidebarBody}
-      dock={
-        dock.open ? (
-          <Dock
-            title="Details"
-            width={dock.width}
-            onWidth={(w) => updateDock((s) => setDockWidth(s, w))}
-            onClose={() => updateDock(closeDock)}
-          >
-            <Details listing={listing} chosen={chosen} />
-          </Dock>
-        ) : null
-      }
-    >
-      <div className={cn("h-full p-5", chosen && "flex flex-col")}>
-        {listing?.state === "error" ? (
-          <p className="notice" role="alert">
-            {listing.reason}
-          </p>
-        ) : null}
-        {reason && !chosen ? (
-          <p className="notice" role="alert">
-            {reason}
-          </p>
-        ) : null}
-        {chosen ? (
-          <PanelFrame
-            panel={chosen}
-            busy={busy}
-            reason={reason}
-            onStart={() => void start(chosen)}
-            onClose={() => void close(chosen)}
-          />
-        ) : routed !== null && listing?.state === "ok" ? (
-          <p className="notice" role="alert">
-            No installed extension named {routed} declares a panel.
-          </p>
-        ) : (
-          <section className="frame-stub" data-stub="true" aria-label="Home (stub)">
-            <p className="stub-badge">Stub</p>
-            <h2 className="mb-2 text-base font-semibold">Home</h2>
-            <p className="text-muted-foreground text-sm">
-              This is the Mac app's window frame: the sidebar, the page header and its context menu. Right-click an
-              extension for its actions, press {keysOf("sidebar")} to hide or show the sidebar, and open the dock on the
-              right with Details. Choose an extension in the sidebar or the Extensions menu to start its panel.
-            </p>
-          </section>
+    <>
+      <Frame
+        sidebar={sidebar}
+        update={update}
+        title={title}
+        actions={actions}
+        sidebarBody={sidebarBody}
+        sidebarFooter={(rail) => (
+          <div className={cn("flex flex-col gap-2", rail && "items-center")}>
+            <ul>
+              <NavItem
+                rail={rail}
+                label="Settings"
+                icon={<SettingsIcon />}
+                active={inSettings}
+                onClick={() => goTo("settings")}
+              />
+            </ul>
+            <RailAccount session={account.session} name={accountLabel} rail={rail} onOpen={openSwitcher} />
+          </div>
         )}
-      </div>
-    </Frame>
+        arrangement={arr}
+        onRestore={() => updateArr(restore)}
+        dock={(slot) =>
+          dock.open ? (
+            <Dock
+              title="Details"
+              width={dock.width}
+              onWidth={(w) => updateDock((s) => setDockWidth(s, w))}
+              onClose={closeTheDock}
+              side={slot.side}
+              fill={slot.fill}
+              headerActions={
+                wide ? (
+                  <button
+                    type="button"
+                    className={headerButton}
+                    aria-haspopup="menu"
+                    data-arrange-button="dock"
+                    onClick={(e) => arrangeBy("dock")(e.currentTarget)}
+                  >
+                    Arrange
+                  </button>
+                ) : null
+              }
+            >
+              <Details listing={listing} chosen={chosen} />
+            </Dock>
+          ) : null
+        }
+      >
+        <div className={cn("h-full p-5", chosen && "flex flex-col")}>
+          {listing?.state === "error" ? (
+            <p className="notice" role="alert">
+              {listing.reason}
+            </p>
+          ) : null}
+          {reason && !chosen ? (
+            <p className="notice" role="alert">
+              {reason}
+            </p>
+          ) : null}
+          {inDecisions ? (
+            <Decisions session={account.session} />
+          ) : inPlanner ? (
+            <PlannerPage />
+          ) : inWorkload ? (
+            <Suspense fallback={<p className="text-muted-foreground text-sm">Loading the 3D view…</p>}>
+              <Workload />
+            </Suspense>
+          ) : inSettings ? (
+            <Settings
+              session={account.session}
+              accounts={accounts}
+              busy={account.busy}
+              onSignIn={account.signIn}
+              onSignOut={account.signOut}
+              listing={listing}
+              onEdit={setEditing}
+            />
+          ) : inCanvas ? (
+            <Suspense fallback={<p className="text-muted-foreground text-sm">Opening the canvas…</p>}>
+              <Canvas />
+            </Suspense>
+          ) : inSensors ? (
+            <Suspense fallback={<p className="notice">Loading Sensors…</p>}>
+              <SensorsPage session={account.session} onSignIn={account.signIn} />
+            </Suspense>
+          ) : (routed !== null && extensionsDown) || (routed === null && homeDown) ? (
+            <section className="notice" role="status" data-maintenance-notice>
+              <h2 className="mb-1 text-base font-semibold">
+                {routed === null ? "Home" : "Extension panels"} is under maintenance
+              </h2>
+              <p className="text-sm">{whyClosed(entryOf(features, routed === null ? "home" : "extensions"))}</p>
+              {entryOf(features, routed === null ? "home" : "extensions").eta !== "" && (
+                <p className="text-muted-foreground text-sm">
+                  Back at {entryOf(features, routed === null ? "home" : "extensions").eta}
+                </p>
+              )}
+              <p className="text-muted-foreground mt-2 text-[12px]">
+                Kept in this browser. Bring it back from the wrench at the top.
+              </p>
+            </section>
+          ) : chosen ? (
+            <PanelFrame
+              panel={chosen}
+              busy={busy}
+              reason={reason}
+              onStart={() => void start(chosen)}
+              onClose={() => void close(chosen)}
+            />
+          ) : routed !== null && listing?.state === "ok" ? (
+            <p className="notice" role="alert">
+              No installed extension named {routed} declares a panel.
+            </p>
+          ) : (
+            <Home session={account.session} busy={account.busy} onSignIn={account.signIn} />
+          )}
+        </div>
+      </Frame>
+      {help ? <HelpOverlay pages={pageIds} onClose={() => setHelp(false)} /> : null}
+      {palette ? <Palette items={paletteItems} onClose={() => setPalette(false)} /> : null}
+      {gridAt ? <GridPicker at={gridAt} onPick={pickSpan} onClose={() => setGridAt(null)} /> : null}
+      {editing ? (
+        <MaintenanceForm id={editing} onSave={(why) => putDown(editing, why)} onClose={() => setEditing(null)} />
+      ) : null}
+    </>
   );
 }
 

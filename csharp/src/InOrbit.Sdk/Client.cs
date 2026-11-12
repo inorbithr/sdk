@@ -21,7 +21,8 @@ namespace InOrbit.Sdk;
 /// </summary>
 public sealed record ClientOptions
 {
-    /// <summary>An API token (from the console or <c>iohr token create</c>).</summary>
+    /// <summary>An API token (from the console or <c>iohr token create</c>). <see cref="ToString"/> and JSON show it as <c>&lt;redacted&gt;</c>.</summary>
+    [JsonConverter(typeof(RedactedJsonConverter))]
     public string? Token { get; init; }
 
     /// <summary>A file holding an API token, read again when it changes and after a 401.</summary>
@@ -30,7 +31,8 @@ public sealed record ClientOptions
     /// <summary>An API key's id.</summary>
     public string? KeyId { get; init; }
 
-    /// <summary>An API key's secret.</summary>
+    /// <summary>An API key's secret. <see cref="ToString"/> and JSON show it as <c>&lt;redacted&gt;</c>.</summary>
+    [JsonConverter(typeof(RedactedJsonConverter))]
     public string? KeySecret { get; init; }
 
     /// <summary>A file holding the key's secret, read before every token exchange.</summary>
@@ -93,7 +95,8 @@ public sealed record ClientOptions
     /// <summary>The retry quota's capacity (default 500); for tests.</summary>
     public int? RetryBudgetCapacity { get; init; }
 
-    /// <summary>A proxy URL (<c>http://</c> or <c>https://</c>), or <c>off</c> for none, the standard variables included.</summary>
+    /// <summary>A proxy URL (<c>http://</c> or <c>https://</c>), or <c>off</c> for none, the standard variables included. JSON shows its user-info as <c>&lt;redacted&gt;</c>.</summary>
+    [JsonConverter(typeof(RedactedUrlJsonConverter))]
     public string? Proxy { get; init; }
 
     /// <summary>Hosts reached without the proxy (docs/config.md section 6.2).</summary>
@@ -111,7 +114,8 @@ public sealed record ClientOptions
     /// <summary>The PEM private key for <see cref="ClientCert"/>.</summary>
     public string? ClientKey { get; init; }
 
-    /// <summary>The password of an encrypted <see cref="ClientKey"/> (PKCS#8).</summary>
+    /// <summary>The password of an encrypted <see cref="ClientKey"/> (PKCS#8). JSON shows it as <c>&lt;redacted&gt;</c>.</summary>
+    [JsonConverter(typeof(RedactedJsonConverter))]
     public string? ClientKeyPassword { get; init; }
 
     /// <summary>Client certificates with their keys (PKCS#12, the OS store, an HSM), instead of <see cref="ClientCert"/> and <see cref="ClientKey"/>.</summary>
@@ -169,7 +173,7 @@ public sealed record ClientOptions
     /// <returns>Which credential is set, and the base URL.</returns>
     public override string ToString()
     {
-        var credential = TokenProvider is not null ? "token provider" : Token is not null ? "token <redacted>" : TokenFile is not null ? $"token file {TokenFile}" : KeyId is not null ? $"key {KeyId}, secret <redacted>" : "none";
+        var credential = TokenProvider is not null ? "token provider" : Token is not null ? $"token {Redaction.Marker}" : TokenFile is not null ? $"token file {TokenFile}" : KeyId is not null ? $"key {KeyId}, secret {Redaction.Marker}" : "none";
         return $"ClientOptions({credential}, {BaseUrl?.ToString() ?? Transport.DefaultBaseUrl.ToString()})";
     }
 

@@ -54,7 +54,6 @@
     }
   }
 
-  .frame-stub,
   .panel-idle {
     max-width: 640px;
     margin: 0 auto;
@@ -93,17 +92,6 @@
     background: var(--secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-  }
-
-  .stub-badge {
-    display: inline-block;
-    margin: 0 0 8px;
-    padding: 1px 8px;
-    border-radius: 999px;
-    background: color-mix(in oklch, var(--warning) 18%, transparent);
-    color: var(--warning);
-    font-size: 12px;
-    font-weight: 600;
   }
 
   .notice {

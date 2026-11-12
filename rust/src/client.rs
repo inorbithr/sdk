@@ -17,7 +17,7 @@ use crate::auth::{
     CliToken, ClientCredentials, DEFAULT_TOKEN_URL, DynProvider, StaticToken, TokenFile,
     TokenProvider,
 };
-use crate::config::{LoadOptions, ResolvedConfig, Settings, show_duration};
+use crate::config::{LoadOptions, ResolvedConfig, Settings, is_loopback, show_duration};
 use crate::error::{ConfigError, Error, Headers, RawResponse};
 use crate::extsock::{API_ENV as EXT_API_ENV, ExtSocketToken, SOCKET_ENV as EXT_SOCKET_ENV};
 use crate::hooks::{Attempt, Hook};
@@ -27,7 +27,7 @@ use crate::middleware::{
 };
 use crate::profile::{Profile, Public, env_prefix};
 use crate::ratelimit::{Latest, RateLimit, RateLimitMode};
-use crate::secret::Secret;
+use crate::secret::{REDACTED, Secret};
 use crate::socket::{Ctx as SocketCtx, Hub};
 use crate::stream::{EventStream, Guard, QUEUE, Streams, read_sse};
 use crate::transport::Transport;
@@ -100,7 +100,7 @@ impl fmt::Display for Method {
 ///     .query("limit", "5");
 /// assert_eq!(op.path(), "/v1/radar/digests");
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Operation<'a> {
     name: &'static str,
     method: Method,
@@ -113,6 +113,37 @@ pub struct Operation<'a> {
     scopes: &'static [&'static str],
     rpc: Option<&'static str>,
     fields: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The call's shape: its name, method, path, the names of its query parameters and
+/// fields, and the body's size. Never a query value, a field value or the body, which
+/// may carry secrets.
+impl fmt::Debug for Operation<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Operation")
+            .field("name", &self.name)
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .field(
+                "query",
+                &self
+                    .query
+                    .iter()
+                    .map(|(k, _)| k.as_ref())
+                    .collect::<Vec<_>>(),
+            )
+            .field(
+                "body",
+                &self.body.as_ref().map(|b| format!("{} bytes", b.len())),
+            )
+            .field("idempotent", &self.idempotent)
+            .field("idempotency_key", &self.idempotency_key)
+            .field("template", &self.template)
+            .field("scopes", &self.scopes)
+            .field("rpc", &self.rpc)
+            .field("fields", &self.fields.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 impl<'a> Operation<'a> {
@@ -808,12 +839,7 @@ fn check_url(what: &'static str, raw: &str, origin_only: bool) -> Result<Url, Co
         what,
         reason: e.to_string(),
     })?;
-    let loopback = match url.host() {
-        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-        Some(url::Host::Domain(d)) => d == "localhost",
-        None => false,
-    };
+    let loopback = url.host_str().is_some_and(is_loopback);
     match url.scheme() {
         "https" => {}
         "http" if loopback => {}
@@ -1334,7 +1360,7 @@ impl<P: Profile> ClientBuilder<P> {
             "token_provider",
             self.provider.as_ref().map(|_| json!("custom")),
         );
-        put("token", self.token.as_ref().map(|_| json!("<redacted>")));
+        put("token", self.token.as_ref().map(|_| json!(REDACTED)));
         put("key_id", self.key.as_ref().map(|(id, _)| json!(id)));
         put("scopes", self.scopes.clone().map(Value::from));
         put(
@@ -1774,8 +1800,28 @@ mod tests {
             "https://api.inorbit.hr/v1",
             "https://u:p@api.inorbit.hr",
             "nope",
+            "http://127.example.com",
+            "http://127.0.0.1.example.com",
+            "http://localhost.example",
         ] {
             assert!(check_url("base_url", bad, true).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_operation_never_prints_its_body_or_values() {
+        let op = Operation::new(Method::Post, "/v1/keys")
+            .named("keys.create")
+            .query("password", "q-s3cr3t")
+            .field("secret", "f-s3cr3t")
+            .json(&serde_json::json!({ "key_secret": "b-s3cr3t" }))
+            .unwrap();
+        for shown in [format!("{op:?}"), format!("{op:#?}")] {
+            assert!(!shown.contains("s3cr3t"), "{shown}");
+            assert!(
+                shown.contains("/v1/keys") && shown.contains("password"),
+                "{shown}"
+            );
         }
     }
 

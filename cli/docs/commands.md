@@ -40,6 +40,7 @@ ends its `--help` with real examples.
 | `iohr atlas roles list \| import [--dry-run]` | The built-in roles and whether each is in your account | [Roles](roles-and-memory.md#built-in-roles) |
 | `iohr atlas search QUERY [--site S] [--limit N]` | The best chunks of the text of the sites you crawled, each with its page, heading path and offsets (local) | [Projects](projects.md#the-site-knowledge-base) |
 | `iohr atlas facts [--site S] [--predicate P] [--grep TEXT]` | The facts of the site model, each with the chunk it came from | [Projects](projects.md#the-site-knowledge-base) |
+| `iohr atlas claims [--site S] [--prove ID] [--limit N]` | The claims behind the facts, each with its support; `--prove` prints the proof tree down to the page and checks the page still matches its hash | [Projects](projects.md#the-site-knowledge-base) |
 | `iohr atlas index [--pages] [--site S]` | The crawled sites with pages, chunks, words, entities, facts and links; `--pages` lists the pages | [Projects](projects.md#the-site-knowledge-base) |
 | `iohr sync` | Send the project's atlas to your account | [Projects](projects.md#the-atlas-and-iohr-sync) |
 | `iohr ext ...` | Find, install, verify, pin and build extensions; `iohr <name> ...` runs one | [Extensions](extensions.md) |
@@ -61,7 +62,7 @@ ends its `--help` with real examples.
 | `iohr theme list \| show NAME` | The terminal themes of the InOrbit app (`inorbit`, `solarized-dark`, `nord`, `light`), the one that is on, and a theme's colours, font and cursor; local, no sign-in | [The terminal theme](terminal-theme.md) |
 | `iohr theme install NAME [--terminal] [--prompt] [--replace-prompt]` | Writes the Terminal.app profile `~/.inorbit/term/themes/NAME.terminal` and remembers the theme; `--terminal` opens the profile, `--prompt` turns on the zsh prompt, `--replace-prompt` replaces a prompt you set yourself | [The terminal theme](terminal-theme.md) |
 | `iohr theme off` | Turns the prompt off and forgets the chosen theme; an imported profile stays | [The terminal theme](terminal-theme.md) |
-| `iohr runner register \| run \| status \| config show \| gate-report \| run-key \| api-key \| personal-use` | This machine as a coordinator runner | [Runner](runner.md) |
+| `iohr runner register \| run \| status \| revoke \| config show \| gate-report \| run-key \| api-key \| personal-use` | This machine as a coordinator runner | [Runner](runner.md) |
 | `iohr session [DIR]`, `iohr stop [DIR]` | Open and stop a project's session | [Sessions](session-and-panel.md) |
 | `iohr coordinator ...` | The coordinator's jobs, asks and plans | [below](#iohr-coordinator) |
 | `iohr memory ...` | Memory kept as local files | [Memory](roles-and-memory.md#memory) |
@@ -74,7 +75,8 @@ ends its `--help` with real examples.
 | `iohr ui [serve] \| build \| dev \| check \| open` | Serve the built web UI on loopback, or run its package's own scripts | [below](#iohr-ui) |
 | `iohr tunnel` | A loopback SSH pipe into an environment's edge | [below](#iohr-tunnel) |
 | `iohr browser install [--print]` | Install InOrbit Trails, the browser extension | [below](#iohr-browser-install) |
-| `iohr upgrade [--check]` | Update `iohr` the way it was installed | [Upgrade](install.md#upgrade) |
+| `iohr doctor [--fix]` | Check this machine for the known problems (signed out, MCP bridge down, low disk, unreadable `config.toml`), say how to fix each, exit 1 on a failure. `--fix`, or `[doctor] auto_fix = true`, runs the safe fixes (restart a stopped bridge); the `?` card shows what it found | [below](#iohr-doctor) |
+| `iohr upgrade [--check] [--no-extensions] [--yes]` | Update `iohr` the way it was installed, then every installed extension; `--no-extensions` leaves extensions alone | [Upgrade](install.md#upgrade) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell | |
 | `iohr help [COMMAND]` | The help | [below](#the-help) |
 
@@ -97,11 +99,61 @@ Kept but hidden from the help: `iohr packages` (now `iohr ext packages`),
 Results go to stdout (tables, or JSON with `--json`) and notes to stderr, so a pipe gets
 only data.
 
+On a terminal, lists and `show` views are drawn: the header in the help colour, ids dimmed so
+names lead, a `STATUS` or `STATE` cell as a mark and its word (a green check for `active` or
+`done`, an amber `!` for `pending` or `expiring`, a red cross for `failed` or `revoked`; a word
+not on that list stays plain), keys dimmed, and every line indented two spaces as `iohr
+doctor` is. Under `NO_COLOR`, `TERM=dumb`, `--json` or a pipe the bytes are the same as
+before: columns two spaces apart, no indent, no marks.
+
+A list (`token list`, `connections list`, `domains list`, `ext list` and the other `list`
+commands) ends on a terminal with a line that counts it and, where one fits, names the next
+command (`2 tokens · new one: iohr token create`). An empty list there is one line, such as
+`No tokens yet. Next: iohr token create`. A list wider than the terminal has its widest
+columns cut to fit, each cut cell ending in `…`, down to 12 columns or the header's width; an
+`ID` column is never cut, a `PATH` cell loses its start instead (`…/a/IO.md`) so the file it
+names stays, and `--json` or a pipe gives every cell whole. `iohr context` draws its file table
+the same way. Plain output keeps the
+table alone, and an empty list keeps its header line, so scripts read the same bytes.
+
+The other checks are drawn the same way on a terminal: `iohr lab check`, `iohr memory check`,
+`iohr memory drift` (its code part), `iohr sdk check` and `iohr ext verify`. Each problem is a
+row with its mark, where it is, what is wrong, and labelled lines under it (the `rule` that
+found it, the operations a moved profile gained `+` and lost `-`, the `fix`). A memory finding
+is an amber `!`, since it fails only under `--strict`. The last line says what was checked and
+what needs doing (`12 documents checked · 3 to fix`), or a green check with `nothing found`.
+The plain lines, tables and `--json` stay as they are under `NO_COLOR`, `TERM=dumb` or a pipe.
+
+## `iohr doctor`
+
+Looks at four things and prints one line each: `ok`, or `FAIL` with the fix on the next line.
+On a terminal each line starts with a coloured mark (a green check or a red cross), the fix
+sits under the line it fixes, a passing line is dimmed, and a count closes the list
+(`3 ok · 1 to fix`). Under `NO_COLOR`, `TERM=dumb`, `--json` or a pipe the output is the plain
+lines above, unchanged, so scripts read the same text.
+
+| Check | Fails when | Fix |
+|---|---|---|
+| `auth` | no usable sign-in on this machine | `iohr login` (shown, never run) |
+| `bridge` | the MCP bridge job exists but nothing answers on its port | restart it (the one safe fix) |
+| `disk` | less than 2 GiB free | free space (shown, never run) |
+| `config` | `config.toml` does not parse | edit it (shown, never run; `iohr` never rewrites it) |
+
+A machine without the bridge installed is not a failure. `--json` prints status codes
+(`ok`, `signed_out`, `down`, `low`, `invalid`) and counts, never file contents or tokens. Exit
+1 when a check fails after any fix. Turn on the safe fixes for good with
+[`[doctor] auto_fix = true`](../../docs/config.md#49-the-doctor-table); the `?` and `??` card
+then also names what it found, from the local checks only (it never asks the Keychain).
+
 ## The help
 
 `iohr --help` groups the commands the way `gh` does: Sign-in, Account, Build, Agents and
 Operate. `-h` prints one line per command and `--help` the long text. The help is coloured
 on a terminal, and plain under `NO_COLOR`, `--json` or a pipe.
+
+The root help ends with three examples, a `Get started: iohr login, then iohr doctor` line
+and every [exit code](#exit-codes). `--sign-in` and the `--via-*` attribution flags show
+only in `--help`, not in `-h`.
 
 ## Usage errors
 
@@ -133,6 +185,33 @@ Everything goes to stderr. Under `--json` it is one line in the platform's error
 ```
 
 With no terminal, `NO_COLOR` or `TERM=dumb` it is plain text.
+
+## Other errors
+
+Any other error (a refused call, a file that cannot be written) also goes to stderr. On a
+colour terminal it is drawn as a block: a red mark and the message, then a line each for
+the API's error code and HTTP status, the request id, and a hint when `iohr` has one:
+
+```text
+✗ the token cannot read this account's keys
+  code     forbidden · HTTP 403
+  request  req_01H...
+  hint     an API token needs the account:read scope
+```
+
+In a zsh with the `?` hook (`iohr shell hook zsh`), the block ends with one more line,
+`? why did that fail`, which you can type to ask your own agent about the command. It is
+not shown when `INORBIT_ASK=0`.
+
+With no terminal, `NO_COLOR` or `TERM=dumb` it stays one plain line, `iohr: <message>`,
+with the hint on the line after it. Under `--json` it is one line in the same envelope as a
+usage error: `code` is the API's code for a refused call (else `failed`, `unauthenticated`,
+`connection`, `timeout` and the like), and a `failure` detail carries the other lines, the
+HTTP status, the request id and the hint when there are any:
+
+```json
+{"code":"forbidden","error":"the token cannot read this account's keys","details":[{"type":"failure","notes":[],"status":403,"request_id":"req_01H...","hint":"an API token needs the account:read scope"}]}
+```
 
 ## Exit codes
 
@@ -245,12 +324,59 @@ browser (`IOHR_NO_BROWSER` prints the address instead).
 one first, so a failed install leaves the old UI as it was. `mise run cli:preview-install`
 builds the UI and runs this, so `iohr-preview ui serve` works from any folder.
 
-- GET and HEAD only. The `Host` must be this listener's own address or `localhost` on its
+- Pages are GET and HEAD only. The `Host` must be this listener's own address or `localhost` on its
   port. Paths cannot leave the folder or follow a link.
 - `/api/*` answers only this listener's own pages (`Sec-Fetch-Site`, `Origin`).
   `GET /api/extensions` lists the installed extensions that declare a `[panel]` (name,
   version, title, entry) from the same store `iohr ext install` writes, and starts none of
   them.
+- Reaching the page takes a per-launch secret (RFC 0217, round 4). `iohr ui open` and
+  `serve --open` put it in the first address (`/?launch=...`); the server answers `303` to
+  `/` and sets a session cookie (`HttpOnly`, `SameSite=Strict`, named by the port), and
+  every other request without that cookie is `401`. The secret is one-shot: only a GET or
+  HEAD can use it, the first use spends it, and a second use is `401`. The server then makes
+  a fresh one and rewrites it in `ui/serving.json` (private), so the next `open` still gets
+  in. `serve` never prints the secret; `open` prints the address only when no browser could
+  be opened.
+- Error text the page can see (a failed sign-in, a failed proxy call) goes through the same
+  redaction as `iohr ask` output: values after a secret's name, bearer values, JWTs, tokens
+  and URLs are replaced.
+- The page never holds a credential. `iohr ui serve` signs in as `iohr login` does (the
+  same profile, the same credential store; `--profile`, `--env` and `IOHR_TOKEN` apply) and
+  calls the API for the page: `GET /api/session` says who (never a token),
+  `POST /api/session/login` starts `iohr login --web` (the system browser, PKCE) and
+  `POST /api/session/logout` is `iohr logout`, and `/api/proxy/v1/...` forwards one call
+  to the API with that credential. Each needs the page's own `x-iohr-token` header.
+  The proxy is under `/v1/`, with plain path segments, and never takes the WebSocket path.
+- Reads (`GET`, `HEAD`) need the token and this page's origin. Writes (`POST`, `PUT`,
+  `PATCH`, `DELETE`) need the same plus `Sec-Fetch-Site: same-origin` and an `Origin`
+  equal to the serve's own address; the token travels in the header only, never a cookie
+  or an address. A write goes only to the areas a view manages (accounts, approvals, atlas,
+  coordinator, decisions), takes a JSON body of at most 1 MiB
+  that arrives within 10 s (`Content-Type: application/json`, no chunked bodies; `DELETE`
+  and reads take none) and is answered within 125 s. Bodies and tokens are never logged.
+- A `GET` with `Accept: text/event-stream` passes the API's server-sent events through
+  as they arrive: each event is flushed at once, the API's resume cursor (`sse_id`)
+  becomes the event `id`, a `: keepalive` comment goes out every 15 s, and a stream with no
+  event for 5 minutes is closed (the page reconnects). At most 4 streams run per serve
+  (the 5th gets `429`; a browser keeps six connections per origin); a stream ends when the
+  page goes away or the serve stops. The page's client is `apiStream` in `ui/src/lib/api.ts`
+  (reconnect with backoff, one shared connection per identical stream) and `useLive`.
+- `GET /api/live` is one WebSocket for all of the page's streams, so six open streams do
+  not use up the browser's six connections. It is for the routes the API has a socket
+  call for (coordinator picture, asks, thread and open items, approval events, atlas
+  signals, events); `apiStream` uses it for those and reads every other path, and any
+  stream when the socket cannot open, as server-sent events. The serve carries the calls
+  to the API on one `/v1/ws` through the SDK's `Streams::Socket`. The upgrade needs the
+  session cookie, the `Host`, `Sec-Fetch-Site: same-origin` and an exact `Origin`. A
+  browser cannot set a header on a WebSocket handshake, so the per-serve token is the first
+  frame (`{"type":"auth","token"}`, constant-time compare, nothing is read before it; a
+  wrong one closes the socket). Then `{"type":"call","id","path":"/v1/..."}` and
+  `{"type":"cancel","id"}` go in; `data`, `end` and `error` frames (with the call's `id`)
+  come out, `unmapped` for a path with no socket call. A socket takes one of the 4 stream
+  slots, carries at most 16 calls, accepts frames of at most 64 KiB, is pinged every 15 s,
+  and closes after 5 minutes with nothing either way or when the serve stops. Nothing it
+  carries is logged.
 - A taken `--port` is an error. A running `serve` records its address in the data folder
   (`ui/serving.json`, private) and removes it when it stops.
 

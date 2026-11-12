@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,13 +24,13 @@ const DefaultTokenURL = "https://auth.inorbit.hr/oauth2/token" //nolint:gosec //
 const (
 	tokenRetries = 2
 	tokenTimeout = 30 * time.Second
-	redacted     = "<redacted>"
 )
 
 // Token is a bearer token and, when known, when it stops working.
 type Token struct {
-	// Access is the token. Never log it.
-	Access string
+	// Access is the token. Never log it: every way to print, log or encode a Token shows
+	// it as <redacted>.
+	Access string `json:"-"`
 
 	// ExpiresAt is when it expires; the zero time when the provider does not know.
 	ExpiresAt time.Time
@@ -40,6 +41,24 @@ func (Token) String() string { return "Token(" + redacted + ")" }
 
 // GoString never shows the token.
 func (t Token) GoString() string { return t.String() }
+
+// Format never shows the token, whatever the verb (%v, %+v, %d, %x and the rest).
+func (t Token) Format(st fmt.State, _ rune) { formatRedacted(st, t) }
+
+// LogValue never shows the token in a log/slog record.
+func (t Token) LogValue() slog.Value { return logRedacted(t) }
+
+// MarshalJSON writes the token as <redacted> and its expiry, never the token.
+func (t Token) MarshalJSON() ([]byte, error) {
+	out := struct {
+		Access    string     `json:"access"`
+		ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	}{Access: redacted}
+	if !t.ExpiresAt.IsZero() {
+		out.ExpiresAt = &t.ExpiresAt
+	}
+	return json.Marshal(out)
+}
 
 // TokenProvider hands out a valid token for each attempt.
 type TokenProvider interface {
@@ -73,6 +92,12 @@ func (*StaticToken) String() string { return "StaticToken(" + redacted + ")" }
 // GoString never shows the token.
 func (s *StaticToken) GoString() string { return s.String() }
 
+// Format never shows the token, whatever the verb.
+func (s *StaticToken) Format(st fmt.State, _ rune) { formatRedacted(st, s) }
+
+// LogValue never shows the token in a log/slog record.
+func (s *StaticToken) LogValue() slog.Value { return logRedacted(s) }
+
 // ClientCredentials exchanges an API key for 15-minute tokens (OAuth client
 // credentials), caches the token by CachedToken's rules (refreshed when less than a fifth
 // of its life is left or after a 401, one exchange however many calls wait for it, the
@@ -94,8 +119,9 @@ type ClientCredentialsConfig struct {
 	// KeyID is the key's id (ak_...).
 	KeyID string
 
-	// KeySecret is the key's secret; leave it empty to read KeySecretFile instead.
-	KeySecret string
+	// KeySecret is the key's secret; leave it empty to read KeySecretFile instead. Every
+	// way to print, log or encode the config shows it as <redacted>.
+	KeySecret string `json:"-"`
 
 	// KeySecretFile is a file holding the secret, read before every token exchange.
 	KeySecretFile string
@@ -111,6 +137,40 @@ type ClientCredentialsConfig struct {
 
 	// UserAgent is sent with the exchange; empty for the SDK's.
 	UserAgent string
+}
+
+// String never shows the secret.
+func (c ClientCredentialsConfig) String() string {
+	secret := ""
+	if c.KeySecret != "" {
+		secret = ", secret: " + redacted
+	}
+	return "ClientCredentialsConfig(" + c.KeyID + secret + ")"
+}
+
+// GoString never shows the secret.
+func (c ClientCredentialsConfig) GoString() string { return c.String() }
+
+// Format never shows the secret, whatever the verb.
+func (c ClientCredentialsConfig) Format(st fmt.State, _ rune) { formatRedacted(st, c) }
+
+// LogValue never shows the secret in a log/slog record.
+func (c ClientCredentialsConfig) LogValue() slog.Value { return logRedacted(c) }
+
+// MarshalJSON writes the config with the secret as <redacted>, never the secret.
+func (c ClientCredentialsConfig) MarshalJSON() ([]byte, error) {
+	out := struct {
+		KeyID         string   `json:"key_id,omitempty"`
+		KeySecret     string   `json:"key_secret,omitempty"`
+		KeySecretFile string   `json:"key_secret_file,omitempty"`
+		Scopes        []string `json:"scopes,omitempty"`
+		TokenURL      string   `json:"token_url,omitempty"`
+		UserAgent     string   `json:"user_agent,omitempty"`
+	}{KeyID: c.KeyID, KeySecretFile: c.KeySecretFile, Scopes: c.Scopes, TokenURL: c.TokenURL, UserAgent: c.UserAgent}
+	if c.KeySecret != "" {
+		out.KeySecret = redacted
+	}
+	return json.Marshal(out)
 }
 
 // NewClientCredentials returns a provider for one key. scopes is what to ask for, a
@@ -153,6 +213,12 @@ func (c *ClientCredentials) String() string {
 
 // GoString never shows the secret.
 func (c *ClientCredentials) GoString() string { return c.String() }
+
+// Format never shows the secret, whatever the verb.
+func (c *ClientCredentials) Format(st fmt.State, _ rune) { formatRedacted(st, c) }
+
+// LogValue never shows the secret in a log/slog record.
+func (c *ClientCredentials) LogValue() slog.Value { return logRedacted(c) }
 
 // Token returns a cached token while four fifths of its life are left, else a fresh
 // one; concurrent callers share one exchange.

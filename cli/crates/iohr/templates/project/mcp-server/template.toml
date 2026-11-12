@@ -1,0 +1,232 @@
+# The MCP server template as data (PRD 0088.1, ADR 0221): a server on the official MCP SDK, not on
+# one of ours, at a version that names the 2026-07-28 revision of the protocol: Python `mcp` 2.3.0
+# and TypeScript `@modelcontextprotocol/server` 2.4.0 (both pinned exactly). Stdio only: no HTTP
+# listener, no port, no credential. The enterprise floor (CI, signed and attested release, SBOM,
+# dependency updates, secret scan) comes from `floor`.
+#
+# 2026-07-28 removed the `initialize` handshake (a client calls `server/discover`, or just calls)
+# and the SDKs still answer `initialize` for hosts on 2025-11-25. So the test of each variant,
+# the passes-on-init check, starts the server as a child process over stdio and speaks to it
+# with the SDK's own client: a connection on 2026-07-28, a connection through the older
+# handshake, `tools/list` (named tool, same order twice, cache fields), `tools/call` (structured
+# result), a refused bad argument, and the rule every tool must meet (a description, a
+# read-only or destructive annotation, bounded inputs). A variant is `live` only when that test
+# passes.
+id = "mcp-server"
+description = "An MCP server on the official SDK, protocol revision 2026-07-28, over stdio"
+status = "live"
+extends = "floor"
+kind = "mcp-server"
+default_variant = "python"
+agent_prompt = "This folder is a fresh InOrbit project from the `@@TEMPLATE@@` template: an MCP server in @@LANGUAGE_LABEL@@ on the official MCP SDK (@@SOURCE@@), stdio only. Build what is described below by editing this folder. Give every tool a description, an annotation that says whether it only reads, and bounded inputs; never write to stdout except through the SDK (stdout is the protocol); never log a tool argument or result; never add a credential to the project; and keep the test passing (@@RUN_TEST@@)."
+
+[[variants]]
+id = "python"
+label = "Python 3.12 or newer on uv, official `mcp` SDK 2.3.0"
+status = "live"
+needs = ["uv"]
+toolchain = ["uv", "--version"]
+agent_allow = ["uv run", "uv lock", "uv build", "uv sync"]
+smoke = "test"
+test = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tests"]
+[variants.vars]
+SOURCE = "src/@@MODULE@@/, tests in tests/"
+IGNORE = "__pycache__/\n*.pyc\n.venv/\n*.egg-info/\ndist/"
+RUN_TEST = "`uv run --locked python -m unittest discover -s tests`"
+README_TEST = "uv run --locked python -m unittest discover -s tests"
+RUN = "uv run --locked python -m @@MODULE@@"
+TOOLCHAIN_MINOR = "3.12"
+CI_SETUP = "      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3"
+CI_TEST = "uv run --locked python -m unittest discover -s tests"
+LAYOUT = '''- `src/@@MODULE@@/server.py`: the server, one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `src/@@MODULE@@/__main__.py`: starts the server over stdio, the way a host does.
+- `tests/test_server.py`: the passes-on-init test; it starts the server and speaks to it with the SDK's client.
+- `pyproject.toml`: the SDK pinned to an exact version.
+- `uv.lock`: the lockfile (`uv lock` refreshes it).'''
+
+[[variants]]
+id = "typescript"
+label = "TypeScript on Node 22.18 or newer, official @modelcontextprotocol/server 2.4.0"
+status = "live"
+needs = ["node", "npm"]
+toolchain = ["node", "--version"]
+agent_allow = ["node --test", "node --check", "npm test", "npm ci"]
+# Node runs the TypeScript as it is (22.18 or newer); only the dependencies are installed,
+# from the lockfile, with no install scripts, before the test.
+build = ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"]
+smoke = "test"
+test = ["node", "--test", "tests/**/*.test.ts"]
+[variants.vars]
+SOURCE = "src/, tests in tests/"
+IGNORE = "node_modules/"
+RUN_TEST = "`npm ci --ignore-scripts && node --test 'tests/**/*.test.ts'`"
+README_TEST = "npm ci --ignore-scripts && node --test 'tests/**/*.test.ts'"
+RUN = "node src/main.ts"
+TOOLCHAIN_MINOR = "22.18"
+CI_TEST = "npm ci --ignore-scripts && node --test 'tests/**/*.test.ts'"
+LAYOUT = '''- `src/server.ts`: the server, one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `src/main.ts`: starts the server over stdio, the way a host does. Node runs the TypeScript as it is (22.18 or newer): nothing to build.
+- `tests/server.test.ts`: the passes-on-init test; it starts the server and speaks to it with the SDK's client.
+- `package.json`: the SDK pinned to an exact version.
+- `package-lock.json`: the lockfile.'''
+
+# Go: the official SDK, github.com/modelcontextprotocol/go-sdk v1.8.0 (the `mcp` package; its
+# README and mcp/shared.go name 2026-07-28 as the latest revision it speaks, with `server/discover`
+# and the `initialize` handshake still answered). The Go module proxy serves it.
+[[variants]]
+id = "go"
+label = "Go 1.26 or newer, official github.com/modelcontextprotocol/go-sdk 1.8.0"
+status = "live"
+needs = ["go"]
+toolchain = ["go", "version"]
+agent_allow = ["go build", "go test", "go vet", "go mod tidy"]
+smoke = "test"
+test = ["go", "test", "./..."]
+[variants.vars]
+SOURCE = "server.go, main.go, server_test.go"
+IGNORE = "/@@NAME@@"
+RUN_TEST = "`go test ./...`"
+README_TEST = "go vet ./... && go test ./..."
+RUN = "go run ."
+TOOLCHAIN_MINOR = "1.26"
+LAYOUT = '''- `server.go`: the server, one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `main.go`: starts the server over stdio, the way a host does.
+- `server_test.go`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
+- `go.mod`, `go.sum`: the SDK pinned to an exact version, and its checksums.'''
+
+# Rust: rmcp 3.9.0, "the official Rust SDK for the Model Context Protocol" (its crates.io page
+# and README, repository modelcontextprotocol/rust-sdk; spec 2026-07-28, edition 2024, needs Rust
+# 1.88). The server uses its `#[tool]` macros and the stdio transport; the test its child-process
+# client and `ClientLifecycleMode::Discover`. Cargo.lock is checked in and built with --locked.
+[[variants]]
+id = "rust"
+label = "Rust 1.88 or newer, official rmcp 3.9.0"
+status = "live"
+needs = ["cargo"]
+toolchain = ["rustc", "--version"]
+agent_allow = ["cargo build", "cargo test", "cargo fmt", "cargo clippy"]
+smoke = "test"
+test = ["cargo", "test", "--quiet", "--locked"]
+[variants.vars]
+SOURCE = "src/, tests in tests/"
+IGNORE = "target/"
+RUN_TEST = "`cargo test --locked`"
+README_TEST = "cargo test --locked"
+RUN = "cargo run --quiet"
+TOOLCHAIN_MINOR = "1.88"
+LAYOUT = '''- `src/server.rs`: the server, one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `src/main.rs`: starts the server over stdio, the way a host does.
+- `tests/server.rs`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
+- `Cargo.toml`: the SDK pinned to an exact version. `Cargo.lock`: the lockfile; CI builds with `--locked`.'''
+
+# Java: the official SDK, io.modelcontextprotocol.sdk:mcp 2.1.0 (the modelcontextprotocol/java-sdk
+# release on Maven Central; its `mcp` artifact brings mcp-core and the Jackson 3 mapper). This is
+# the latest stable release; it speaks up to 2025-11-25, so this variant tests the `initialize`
+# handshake. 2026-07-28 (server/discover, ttlMs, cacheScope) is in 2.2.0-M1 and -M2, milestones
+# that are not pinned here: the test gains those checks when 2.2 is released. Maven resolves the
+# exact version; there is no lockfile in Maven.
+[[variants]]
+id = "java"
+label = "Java 17 or newer with Maven, official io.modelcontextprotocol.sdk:mcp 2.1.0"
+status = "live"
+needs = ["mvn", "java"]
+toolchain = ["java", "-version"]
+agent_allow = ["mvn test", "mvn package", "mvn -q test", "mvn verify"]
+smoke = "test"
+test = ["mvn", "--batch-mode", "--no-transfer-progress", "--quiet", "test"]
+[variants.vars]
+SOURCE = "src/main/java/, tests in src/test/java/"
+IGNORE = "target/"
+RUN_TEST = "`mvn test`"
+README_TEST = "mvn test"
+RUN = "mvn -q compile exec:java"
+TOOLCHAIN_MINOR = "17"
+LAYOUT = '''- `src/main/java/app/Server.java`: the server, one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `src/main/java/app/Main.java`: starts the server over stdio, the way a host does.
+- `src/test/java/app/ServerTest.java`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
+- `pom.xml`: the SDK pinned to an exact version.'''
+
+# C#: the official C# SDK, NuGet `ModelContextProtocol` 2.4.0 (its README: "The official C# SDK for
+# the Model Context Protocol", repository modelcontextprotocol/csharp-sdk; checked 2026-11-11 on
+# api.nuget.org), pinned with an exact range and a lock file. It speaks 2026-07-28 and still
+# answers `initialize`; both are in the test. The SDK gives no `maxLength` for a string unless
+# the parameter says [MaxLength] (it does) and does not refuse unknown arguments, so the tool
+# does (the test covers it).
+[[variants]]
+id = "csharp"
+label = ".NET 10 SDK, official ModelContextProtocol 2.4.0"
+status = "live"
+needs = ["dotnet"]
+toolchain = ["dotnet", "--version"]
+agent_allow = ["dotnet test", "dotnet build", "dotnet run", "dotnet restore"]
+smoke = "test"
+test = ["dotnet", "test", "--nologo", "--verbosity", "quiet"]
+[variants.vars]
+SOURCE = "src/App/, tests in tests/App.Tests/"
+IGNORE = "bin/\nobj/"
+RUN_TEST = "`dotnet test`"
+README_TEST = "dotnet test"
+RUN = "dotnet run --project src/App"
+TOOLCHAIN_MINOR = "10.0"
+LAYOUT = '''- `src/App/Tools.cs`: one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `src/App/Program.cs`: starts the server over stdio, the way a host does.
+- `tests/App.Tests/ServerTests.cs`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
+- `src/App/App.csproj`: the SDK pinned to an exact version (`packages.lock.json` beside it).
+- `App.slnx`: the solution, so `dotnet test` at the root finds both projects.'''
+
+# Swift: the official Swift SDK, github.com/modelcontextprotocol/swift-sdk release 0.12.1 (the
+# modelcontextprotocol organisation's repository; Swift 6.0+, package tools 6.1; checked
+# 2026-11-11), pinned `exact` with Package.resolved committed. 0.12.1 speaks up to 2025-11-25,
+# so this variant tests the `initialize` handshake; the 2026-07-28 checks come with an SDK that
+# has them. The SDK does not check arguments against the schema, so the handler does (the test
+# covers a long, a missing, an extra and a wrongly typed argument). Its client returns the text
+# of a result, so the test reads that.
+[[variants]]
+id = "swift"
+label = "Swift 6.1 or newer on SwiftPM, official swift-sdk 0.12.1"
+status = "live"
+needs = ["swift"]
+toolchain = ["swift", "--version"]
+agent_allow = ["swift test", "swift build", "swift run", "swift package resolve"]
+smoke = "test"
+test = ["swift", "test"]
+[variants.vars]
+SOURCE = "Sources/App/, tests in Tests/AppTests/"
+IGNORE = ".build/\n.swiftpm/"
+RUN_TEST = "`swift test`"
+README_TEST = "swift test"
+RUN = "swift run @@NAME@@"
+TOOLCHAIN_MINOR = "6.1"
+LAYOUT = '''- `Sources/App/Server.swift`: one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `Sources/App/main.swift`: starts the server over stdio, the way a host does.
+- `Tests/AppTests/ServerTests.swift`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
+- `Package.swift`: the SDK pinned to an exact version (`Package.resolved` beside it).'''
+
+# Dart: `dart_mcp` 0.5.2, pub.dev/packages/dart_mcp (published 2026-06-29 from the Dart team's
+# github.com/dart-lang/ai monorepo, pkgs/dart_mcp; checked 2026-11-11). It is the Dart team's
+# MCP package, not one branded "official MCP SDK" by the modelcontextprotocol organisation;
+# Dart has none from that organisation, so this is the most standard one. Dart SDK ^3.7,
+# pinned exactly with pubspec.lock committed. It speaks up to 2025-11-25, so this variant
+# tests the `initialize` handshake; the 2026-07-28 checks come with an SDK that has them. The
+# SDK validates the arguments against the schema itself (`additionalProperties: false` refuses
+# an extra one).
+[[variants]]
+id = "dart"
+label = "Dart 3.7 or newer on pub, dart_mcp 0.5.2"
+status = "live"
+needs = ["dart"]
+toolchain = ["dart", "--version"]
+agent_allow = ["dart test", "dart run", "dart pub get", "dart analyze", "dart format"]
+smoke = "test"
+test = ["dart", "test"]
+[variants.vars]
+SOURCE = "lib/, bin/, tests in test/"
+IGNORE = ".dart_tool/\nbuild/"
+RUN_TEST = "`dart test`"
+README_TEST = "dart test"
+RUN = "dart run bin/main.dart"
+TOOLCHAIN_MINOR = "3.7"
+LAYOUT = '''- `lib/server.dart`: one tool (`word_count`) and one resource (`about://server`). Replace them with yours.
+- `bin/main.dart`: starts the server over stdio, the way a host does.
+- `test/server_test.dart`: the passes-on-init test; it starts the server as a child process and speaks to it with the SDK's client.
+- `pubspec.yaml`: the SDK pinned to an exact version (`pubspec.lock` beside it).'''

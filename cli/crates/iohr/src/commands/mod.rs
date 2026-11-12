@@ -14,11 +14,13 @@ mod connectors;
 pub(crate) mod coordinator;
 mod coordinator_plan;
 mod decisions;
+mod doctor;
 mod domains;
-mod ext;
+pub(crate) mod ext;
 mod ext_catalogue;
 mod ext_packages;
 mod folder_context;
+pub(crate) mod incident_settings;
 mod init_crawl;
 mod init_extensions;
 mod lab;
@@ -28,7 +30,9 @@ mod openapi;
 mod permissions;
 mod profile;
 mod project;
+mod project_place;
 mod project_plan;
+mod project_shape;
 mod project_space;
 mod project_template;
 mod runner;
@@ -140,7 +144,8 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
-        Command::Upgrade { check } => upgrade::run(g, &env, check, out).await,
+        Command::Doctor { fix } => doctor::run(g, &env, fix, out).await,
+        Command::Upgrade(args) => upgrade::run(g, &env, &args, out).await,
         Command::SignBinary { path } => upgrade::sign_binary(&env, &path),
         Command::Ask(args) => ask::run(g, &env, *args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,

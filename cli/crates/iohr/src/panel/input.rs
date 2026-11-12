@@ -13,6 +13,15 @@ const MENU_KEYS: [&[u8]; 4] = [b"\x1bi", "\u{2c6}".as_bytes(), b"\x1b[105;3u", b
 /// older key, kept as an alias.
 const HIDE_KEYS: [&[u8]; 4] = [b"\x1bh", "\u{2d9}".as_bytes(), b"\x1b[104;3u", b"\x1d"];
 
+/// What the chat box calls its hide key, in every terminal: `⌥h` on macOS and `Alt+h` elsewhere.
+/// The forms above catch Option+h even where Option types characters, so the name never changes
+/// with the terminal.
+pub(super) const HIDE_LABEL: &str = if cfg!(target_os = "macos") {
+    "\u{2325}h"
+} else {
+    "Alt+h"
+};
+
 /// The byte Ctrl-G sends.
 const CTRL_G: &[u8] = b"\x07";
 
@@ -37,9 +46,6 @@ const DEAD_KEY_TERMINALS: [&str; 6] = [
 pub(super) struct OpenKey {
     ctrl_g: bool,
     label: &'static str,
-    /// What the chat box's hide key is called: `⌥h`, or `^]` where the menu key falls back to
-    /// `^G` (the terminals where Option does not reach the shell as itself).
-    hide_label: &'static str,
 }
 
 impl OpenKey {
@@ -54,7 +60,6 @@ impl OpenKey {
             } else {
                 "\u{2325}i"
             },
-            hide_label: if dead { "^]" } else { "\u{2325}h" },
         }
     }
 
@@ -66,11 +71,6 @@ impl OpenKey {
     /// The key as the pill and the help name it.
     pub(super) fn label(self) -> &'static str {
         self.label
-    }
-
-    /// The chat box's hide key as the box names it.
-    pub(super) fn hide_label(self) -> &'static str {
-        self.hide_label
     }
 
     /// Whether this input is exactly the chat box's hide and show key, in any of its forms.
@@ -282,6 +282,9 @@ fn scan(bytes: &[u8]) -> (Vec<Input>, usize) {
                     chars.next();
                 }
             },
+            // The dead key Option-i types is the menu key alone; committed with the next key
+            // (Down, a letter) it is that key's companion and the panel's menu stays as it is.
+            '\u{2c6}' if bytes != "\u{2c6}".as_bytes() => {}
             '\u{2c6}' | '\x07' => out.push(Input::Key(Key::Menu)),
             '\r' | '\n' => out.push(Input::Key(Key::Enter)),
             '\x7f' | '\x08' => out.push(Input::Key(Key::Backspace)),
@@ -322,6 +325,19 @@ mod tests {
     }
 
     #[test]
+    fn a_dead_key_is_the_menu_key_only_when_it_is_the_whole_read() {
+        assert_eq!(parse("\u{2c6}".as_bytes()), [Key::Menu]);
+        assert_eq!(parse("\u{2c6}\x1b[B".as_bytes()), [Key::Down]);
+        assert_eq!(parse("\x1b[B\u{2c6}".as_bytes()), [Key::Down]);
+        assert_eq!(parse(b"\x1bi"), [Key::Menu]);
+        assert_eq!(
+            parse(b"\x1b[B\x07"),
+            [Key::Down, Key::Menu],
+            "Ctrl-G is one byte, never a companion"
+        );
+    }
+
+    #[test]
     fn the_hide_key_is_option_h_in_its_forms_with_ctrl_close_bracket_as_alias() {
         let k = OpenKey::default();
         assert!(OpenKey::is_hide(b"\x1bh"));
@@ -346,15 +362,16 @@ mod tests {
     }
 
     #[test]
-    fn the_hide_key_is_named_option_h_where_the_menu_key_is_not_a_fallback() {
-        assert_eq!(OpenKey::detect(None, false).hide_label(), "\u{2325}h");
-        assert_eq!(
-            OpenKey::detect(Some("tmux"), false).hide_label(),
+    fn the_hide_key_has_one_name_in_every_terminal() {
+        let name = if cfg!(target_os = "macos") {
             "\u{2325}h"
-        );
-        for t in DEAD_KEY_TERMINALS {
-            assert_eq!(OpenKey::detect(Some(t), false).hide_label(), "^]", "{t}");
-        }
+        } else {
+            "Alt+h"
+        };
+        assert_eq!(HIDE_LABEL, name);
+        // Option+h's dead-key form is caught, so the terminals where Option types characters
+        // need no other name for it.
+        assert!(OpenKey::is_hide("\u{2d9}".as_bytes()));
     }
 
     #[test]

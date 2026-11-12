@@ -2,6 +2,8 @@
 //! covered and to tell the alternate screen), and a scanner that says whether a chunk of the
 //! child's output ended between sequences (the only time the proxy may paint).
 
+use std::num::NonZeroU16;
+
 use super::cells::Rect;
 
 /// The child's screen as the terminal shows it.
@@ -85,6 +87,7 @@ impl Screen {
     pub(super) fn restore(&self, rect: Rect) -> Vec<u8> {
         let screen = self.parser.screen();
         let (rows, cols) = screen.size();
+        let (rows, cols) = (rows.get(), cols.get());
         let at = |n: usize| u16::try_from(n).unwrap_or(u16::MAX).min(cols);
         let left = at(rect.left);
         let right = at(rect.left + rect.width);
@@ -151,8 +154,9 @@ fn write_sgr(out: &mut Vec<u8>, cell: &vt100::Cell) {
     out.extend_from_slice(sgr.as_bytes());
 }
 
-fn clamp(n: usize) -> u16 {
-    u16::try_from(n).unwrap_or(u16::MAX).max(1)
+/// A terminal size as vt100 takes it: at least 1, at most what a `u16` holds.
+pub(super) fn clamp(n: usize) -> NonZeroU16 {
+    NonZeroU16::new(u16::try_from(n).unwrap_or(u16::MAX)).unwrap_or(NonZeroU16::MIN)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -269,14 +273,14 @@ mod tests {
             height: 2,
             width: 5,
         });
-        let mut check = vt100::Parser::new(5, 20, 0);
+        let mut check = vt100::Parser::new(clamp(5), clamp(20), 0);
         check.process(b"\x1b[1;1H~~~~~~~~~~~~~~~\x1b[2;1H~~~~~~~~~~~~~~~");
         check.process(&bytes);
         assert_eq!(check.screen().contents_between(0, 6, 0, 11), "world");
         assert_eq!(check.screen().contents_between(0, 0, 0, 6), "~~~~~~");
         // Blank cells of the model overwrite what the panel drew, and colours come back.
         assert_eq!(check.screen().contents_between(1, 6, 1, 11).trim(), "");
-        let mut red = vt100::Parser::new(5, 20, 0);
+        let mut red = vt100::Parser::new(clamp(5), clamp(20), 0);
         red.process(b"\x1b[2;1H~~~~~");
         red.process(&s.restore(Rect {
             top: 1,

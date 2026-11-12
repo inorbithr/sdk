@@ -119,6 +119,7 @@ fn init_args<'a>(dir: &'a str, extra: &[&'a str]) -> Vec<&'a str> {
         "--lang",
         "python",
         "--no-smoke",
+        "--no-plan",
         "--yes",
         "--dir",
         dir,

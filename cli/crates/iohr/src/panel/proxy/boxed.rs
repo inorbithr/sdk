@@ -220,27 +220,59 @@ impl Proxy {
     }
 
     /// What the terminal gets of the shell's output: while the box's rows are reserved, a
-    /// program's bare `ESC [ r` (reset the scroll region) means its own height, not the
-    /// screen's, so it is rewritten to the region's.
-    pub(super) fn terminal_copy(&self, chunk: &[u8]) -> Vec<u8> {
+    /// program's scroll region that reaches below them (a bare `ESC [ r`, which means the
+    /// screen's height, or a bottom row past the shell's) is rewritten to end at the region's
+    /// bottom, so the box never scrolls with the output. A region sequence a chunk ends in the
+    /// middle of is held for the next chunk (it is the only way one slips through unseen).
+    pub(super) fn terminal_copy(&mut self, chunk: &[u8]) -> Vec<u8> {
+        let mut bytes = std::mem::take(&mut self.csi_held);
+        bytes.extend_from_slice(chunk);
         if !self.reserved {
-            return chunk.to_vec();
+            return bytes;
         }
-        let region = format!("\x1b[1;{}r", self.child_rows()).into_bytes();
-        let mut out = Vec::with_capacity(chunk.len());
+        let child = self.child_rows();
+        let mut out = Vec::with_capacity(bytes.len());
         let mut i = 0;
-        while i < chunk.len() {
-            let rest = &chunk[i..];
-            if rest.starts_with(b"\x1b[r") {
-                out.extend_from_slice(&region);
-                i += 3;
-            } else if rest.starts_with(b"\x1b[;r") {
-                out.extend_from_slice(&region);
-                i += 4;
-            } else {
-                out.push(chunk[i]);
+        while i < bytes.len() {
+            if bytes[i] != 0x1b || bytes.get(i + 1).is_some_and(|b| *b != b'[') {
+                out.push(bytes[i]);
                 i += 1;
+                continue;
             }
+            // `ESC [`, parameters, then the final byte.
+            let params = bytes[(i + 2).min(bytes.len())..]
+                .iter()
+                .take_while(|b| b.is_ascii_digit() || **b == b';')
+                .count();
+            let end = i + 2 + params;
+            if bytes.len() < i + 2 || end >= bytes.len() {
+                // The chunk ends inside it: hold it (bounded; a long run is not a region).
+                if bytes.len() - i <= 16 {
+                    self.csi_held = bytes[i..].to_vec();
+                } else {
+                    out.extend_from_slice(&bytes[i..]);
+                }
+                break;
+            }
+            if bytes[end] == b'r' {
+                let text = String::from_utf8_lossy(&bytes[i + 2..end]).into_owned();
+                let mut it = text.split(';');
+                let top = it
+                    .next()
+                    .and_then(|t| t.parse::<usize>().ok())
+                    .filter(|t| *t > 0);
+                let bottom = it
+                    .next()
+                    .and_then(|t| t.parse::<usize>().ok())
+                    .filter(|b| *b > 0);
+                if bottom.is_none_or(|b| b > child) {
+                    out.extend_from_slice(format!("\x1b[{};{child}r", top.unwrap_or(1)).as_bytes());
+                    i = end + 1;
+                    continue;
+                }
+            }
+            out.extend_from_slice(&bytes[i..=end]);
+            i = end + 1;
         }
         out
     }
@@ -361,7 +393,7 @@ impl Session {
     }
 
     /// The person's keys, when the box has a say in them. Returns whether it took them.
-    /// Option+h (or Ctrl-]) folds and brings back the box (on the alternate screen it is the program's);
+    /// Option+h (Alt+h off macOS; Ctrl-] too) folds and brings back the box (on the alternate screen it is the program's);
     /// Esc stops a running answer; with the focus, the box reads the keys, except the
     /// panel's own menu key and mouse reports.
     pub(super) fn chat_input(&mut self, bytes: &[u8]) -> bool {

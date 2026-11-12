@@ -24,8 +24,7 @@ use crate::environments::{self, Environment, Environments};
     long_about,
     propagate_version = true,
     max_term_width = 100,
-    styles = crate::ui::clap_styles(),
-    after_help = "Exit codes: 0 ok, 1 a finding or a failure, 2 usage, 3 not signed in, 4 forbidden."
+    styles = crate::ui::clap_styles()
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -74,6 +73,7 @@ pub struct Global {
         long,
         global = true,
         env = "IOHR_SIGN_IN",
+        hide_short_help = true,
         value_enum,
         value_name = "WHO"
     )]
@@ -81,7 +81,13 @@ pub struct Global {
     /// With `--sign-in io`: the role named in the `x-iohr-via` attribution header, such as
     /// `improver`. Attribution only, it grants nothing. Not `--via`, which `iohr ask` uses for
     /// where an answer comes from.
-    #[arg(long, global = true, env = "IOHR_VIA_ROLE", value_name = "NAME")]
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_ROLE",
+        value_name = "NAME",
+        hide_short_help = true
+    )]
     pub via_role: Option<String>,
     /// The old name of `--via-role`, kept so scripts keep working. The header it sets is
     /// unchanged (`personality=...`).
@@ -94,10 +100,22 @@ pub struct Global {
     )]
     pub via_personality: Option<String>,
     /// With `--sign-in io`: the agent session named in `x-iohr-via`.
-    #[arg(long, global = true, env = "IOHR_VIA_SESSION", value_name = "ID")]
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_SESSION",
+        value_name = "ID",
+        hide_short_help = true
+    )]
     pub via_session: Option<String>,
     /// With `--sign-in io`: the coordinator job named in `x-iohr-via`.
-    #[arg(long, global = true, env = "IOHR_VIA_JOB", value_name = "ID")]
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_JOB",
+        value_name = "ID",
+        hide_short_help = true
+    )]
     pub via_job: Option<String>,
     /// Where profiles are kept (default: the platform's config directory).
     #[arg(long, global = true, env = "IOHR_CONFIG_DIR", hide = true)]
@@ -243,9 +261,21 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ),
     (
         "Operate",
-        &["ui", "tunnel", "browser", "upgrade", "completion", "help"],
+        &[
+            "ui",
+            "tunnel",
+            "browser",
+            "doctor",
+            "upgrade",
+            "completion",
+            "help",
+        ],
     ),
 ];
+
+/// The exit codes, as the root help ends with them. They are a contract (`Error::exit_code`).
+pub const EXIT_CODES: &str = "Exit codes: 0 ok, 1 a finding or a failure, 2 usage, 3 not signed in, \
+     4 forbidden, 75 a runner stopped to restart after an upgrade.";
 
 /// The command tree `main` parses with: [`Cli`]'s, with the root help grouped by
 /// [`GROUPS`] and colour off under `--json` (a pipe and `NO_COLOR` are clap's own rules).
@@ -269,10 +299,7 @@ pub fn command(json: bool) -> clap::Command {
         format!("{}{text}{}", style.render(), style.render_reset())
     };
     for (path, list) in crate::examples::ALL {
-        if path.is_empty() {
-            continue;
-        }
-        let text = crate::examples::block(
+        let mut text = crate::examples::block(
             list,
             &crate::examples::Style {
                 head: &|t| paint(head, t),
@@ -280,6 +307,16 @@ pub fn command(json: bool) -> clap::Command {
                 note: &str::to_owned,
             },
         );
+        if path.is_empty() {
+            // The root also says where to begin and what its exit codes mean.
+            let _ = write!(
+                text,
+                "\n\n{} {}, then {}\n\n{EXIT_CODES}",
+                paint(head, "Get started:"),
+                paint(lit, "iohr login"),
+                paint(lit, "iohr doctor"),
+            );
+        }
         cmd = with_after_help(cmd, path, &text);
     }
     let listed: Vec<(String, String)> = cmd
@@ -411,18 +448,29 @@ pub enum Command {
     /// machine, and what is installed. The same as `iohr ext packages`.
     #[command(hide = true)]
     Packages,
+    /// Check this machine for the known problems with iohr and say how to fix each.
+    ///
+    /// Looks for a sign-in that is gone, the MCP bridge not answering, a nearly full disk
+    /// and a `config.toml` that does not parse. Exits 1 when something fails. `--fix` runs
+    /// the safe fixes (those that only restart something already down) now; with
+    /// `[doctor] auto_fix = true` in `config.toml` they also run on their own, and the `?`
+    /// card tells you what it found. Every other fix is shown, never run.
+    Doctor {
+        /// Run the safe fixes for this run.
+        #[arg(long)]
+        fix: bool,
+    },
     /// Update iohr to the newest release.
     ///
     /// Update this `iohr` to the newest release, the way it was installed: Homebrew runs
     /// `brew upgrade inorbithr/tap/iohr` (and says `brew trust inorbithr/tap` when
     /// Homebrew refuses the tap); a copy from the install script is downloaded, checked
     /// against the release's checksums and attestations and replaced in place; anything
-    /// else gets the command to run. `--check` only reports. Needs no sign-in.
-    Upgrade {
-        /// Only say whether a newer release exists and what would run; change nothing.
-        #[arg(long)]
-        check: bool,
-    },
+    /// else gets the command to run. Then every installed extension is upgraded to its
+    /// newest release, one at a time: one that fails does not stop the others, and one
+    /// whose release declares new privileges is left for a person unless --yes (or a
+    /// terminal) confirms them. `--check` only reports. Needs no sign-in.
+    Upgrade(UpgradeArgs),
     /// Sign a built iohr the way releases are signed (the preview install, `cli:preview-install`).
     ///
     /// Signs the binary at PATH with this Mac's Apple Development or Developer ID
@@ -632,6 +680,21 @@ pub enum LabCommand {
     /// front matter, status logs, and the redaction rules on public documents. Reads
     /// only the files named, makes no network call, needs no sign-in.
     Check(LabCheck),
+}
+
+/// The flags of `iohr upgrade`.
+#[derive(Debug, Args)]
+pub struct UpgradeArgs {
+    /// Only say whether a newer release exists and what would run; change nothing.
+    #[arg(long)]
+    pub check: bool,
+    /// Upgrade iohr only, not the installed extensions.
+    #[arg(long)]
+    pub no_extensions: bool,
+    /// Confirm the new privileges of an extension release without asking (needed
+    /// without a terminal).
+    #[arg(long, short = 'y')]
+    pub yes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -867,6 +930,20 @@ pub enum RunnerCommand {
         /// ask nothing.
         #[arg(long, conflicts_with_all = ["proof", "label"])]
         show: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Revoke a runner: it claims and reports nothing from then on (`RevokeRunner`).
+    ///
+    /// Looks the runner up in the account first and refuses an id that is not there or
+    /// is already revoked. A runner that is online is refused unless `--force-online`:
+    /// revoking a live runner stops its work.
+    Revoke {
+        /// The runner's id (`rnr_` and 26 characters), from `iohr runner status`.
+        runner_id: String,
+        /// Revoke it although it is online.
+        #[arg(long)]
+        force_online: bool,
         #[command(flatten)]
         account: AccountArg,
     },
@@ -1838,6 +1915,26 @@ pub enum AtlasCommand {
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
     },
+    /// The claims made from the facts, and with `--prove ID` why one is believed.
+    ///
+    /// A claim is a fact with its proof: the page it was read from, kept by its digest.
+    /// `verified` says a deterministic reader found the value in those bytes; it does not
+    /// say the value is true. A claim whose page changed or whose fact went is `stale`, and
+    /// stays listed.
+    Claims {
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// Show the proof of this claim: its tree, the evidence and where it was read.
+        #[arg(long, value_name = "ID")]
+        prove: Option<String>,
+        /// The most claims to show.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
     /// List the crawled sites: pages, chunks, tokens, entities, facts and sections.
     Index {
         /// List the pages of the sites instead of the sites.
@@ -2322,6 +2419,26 @@ pub struct InitPlanArgs {
     pub no_plan: bool,
 }
 
+/// What `project init --ci` takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InitCi {
+    /// Write the GitHub Actions workflows and the dependency updates.
+    Github,
+    /// Write none of them.
+    None,
+}
+
+impl InitCi {
+    /// The answer the template reads.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Github => "github",
+            Self::None => "none",
+        }
+    }
+}
+
 /// The flags of `project init`: one struct, boxed in [`ProjectCommand::Init`] because the
 /// variant is far larger than its siblings (clippy `large_enum_variant`, seen on Windows where
 /// `PathBuf` is wider).
@@ -2335,7 +2452,7 @@ pub struct InitArgs {
     /// The template: an id (`iohr project template list` shows them), a folder
     /// (`./my-template`), or a git repository (`gh:owner/repo[//subdir][@ref]`,
     /// `git:URL[//subdir][@ref]`). Default: `[project] template` in iohr's config.toml,
-    /// else coordinated. A template that is coming says so and refuses. At a terminal, leaving
+    /// else service. A template that is coming says so and refuses. At a terminal, leaving
     /// it out offers the templates as a menu.
     #[arg(long)]
     pub template: Option<String>,
@@ -2404,6 +2521,14 @@ pub struct InitArgs {
     /// Skip the smoke test (it runs the project once with the language's own runtime).
     #[arg(long)]
     pub no_smoke: bool,
+    /// The CI files: `github` writes the workflows, the release and the dependency updates
+    /// (every template but `blank`, which writes none unless you say `github`); `none`
+    /// writes none of them. The rest of the enterprise floor stays.
+    #[arg(long, value_enum)]
+    pub ci: Option<InitCi>,
+    /// Also show the templates that are not ready (coming) in the menu.
+    #[arg(long)]
+    pub experimental: bool,
     /// Do not write the starter IO.md at the project root.
     ///
     /// `IO.md` is the file `?` and `??` read for context in this folder, like a CLAUDE.md:
@@ -2417,6 +2542,32 @@ pub struct InitArgs {
     /// Reading a public site on this machine (the agent extension's crawler).
     #[command(flatten)]
     pub crawl: InitCrawlArgs,
+    /// Where the project keeps what iohr learns about it, and what shape it has.
+    #[command(flatten)]
+    pub place_args: InitPlaceArgs,
+}
+
+/// Where the project's notes, crawl and state live, and the project's shape (light PRD 0210).
+#[derive(Debug, Args)]
+pub struct InitPlaceArgs {
+    /// Keep the project's notes (ADRs, memory), the crawl and the state in the project
+    /// folder (`project`: `.inorbit/`, travels with the repository), in your home folder
+    /// (`home`: `~/.inorbit/projects/NAME/`, stays on this machine) or in a folder you name
+    /// (`~/notes/shop`, `../shared`, `/srv/shop`: `~` is your home, a relative path starts at
+    /// the project; the folder is made when the run is confirmed). The answer is written to
+    /// `[project] data` in inorbit.toml and every later command follows it. At a terminal it
+    /// is asked once; without a choice the layout older versions made stays as it is.
+    #[arg(long = "keep-in", value_name = "WHERE", env = "IOHR_INIT_KEEP_IN")]
+    pub keep_in: Option<String>,
+    /// When the place changes, copy what the old place holds into the new one (nothing is
+    /// ever deleted, nothing already there is overwritten). At a terminal it is offered.
+    #[arg(long = "copy-data")]
+    pub copy_data: bool,
+    /// The project's shape: `monolith`, `microservices` or `combined`. Without it, a terminal
+    /// is asked once and anywhere else the question stays an open item in the project's
+    /// Planner plan for the Mac app or the phone to answer.
+    #[arg(long, value_name = "SHAPE", env = "IOHR_INIT_SHAPE", value_parser = ["monolith", "microservices", "combined"])]
+    pub shape: Option<String>,
 }
 
 /// The slowest, the fastest and the usual `--crawl-rate`, requests a second to one host
@@ -2594,9 +2745,14 @@ pub enum TemplateCommand {
     /// List the templates `init` accepts.
     ///
     /// The templates `init` and `create` accept: name, live or coming, where each comes
-    /// from, which one is the default (`[project] template` in config.toml, else coordinated) and
-    /// what it is. `--json` prints the same as a list.
-    List,
+    /// from, which one is the default (`[project] template` in config.toml, else service) and
+    /// what it is. `--json` prints the same as a list. `--all` adds the hidden ones (demo and
+    /// coordinated, still there by name) and the ones that are coming.
+    List {
+        /// Also the hidden and the coming templates.
+        #[arg(long)]
+        all: bool,
+    },
     /// Show what a template asks, writes and runs.
     ///
     /// Show one template: where it comes from, what it extends, every question (id, type,

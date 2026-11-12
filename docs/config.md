@@ -387,6 +387,9 @@ sync = false
 [panel]                             # the floating panel (section 4.8)
 mouse = "menu"
 chat = "on"
+
+[doctor]                            # `iohr doctor` and the `?` card (section 4.9)
+auto_fix = false
 ```
 
 Rules:
@@ -839,6 +842,20 @@ While the box or its chip shows, the panel takes mouse reports for them (the box
 them), so drag-to-select needs Option (Terminal.app, iTerm2) or Shift; with `chat = "off"` the
 `mouse` setting alone decides, as before.
 
+### 4.9 The doctor table
+
+`iohr doctor` checks this machine for the known problems and says how to fix each. It has one
+setting.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `auto_fix` | `true`: the safe fixes run on their own whenever `iohr doctor` runs, and the `?` card tells you what it found and what it did; `false`: a fix is shown, never run | `false` | `iohr doctor`, `iohr ask` (`?`, `??`) |
+
+A safe fix only restarts something that is already down (today: the MCP bridge's launchd job).
+Every other fix (signing in again, freeing disk, repairing `config.toml`) is shown and never
+run. `iohr doctor --fix` runs the safe fixes once without the setting. The file is read, never
+written by `iohr`: you edit it.
+
 ## 5. Credentials
 
 ### 5.1 The chain
@@ -1070,7 +1087,10 @@ token or a key in a repository secret. [recipes.md](recipes.md) shows both.
   caller who needs others supplies an HTTP client.
 - Answers may be compressed: the SDK sends `Accept-Encoding: gzip` where the runtime
   decodes it, and the 16 MiB cap applies to the **decoded** body, so a small compressed
-  body cannot inflate past the cap. Request bodies are not compressed.
+  body cannot inflate past the cap. The cap is applied while the body is read: past it
+  the SDK stops reading, closes the connection and raises `TooLargeError`, so an
+  oversized answer, chunked or compressed, is never held whole. Request bodies are not
+  compressed.
 - Redirects are never followed. A `3xx` is returned as an `ApiError`, and the
   `Authorization` header is never sent to another origin. A caller-supplied client gets
   its redirect policy overridden where the language allows (Go copies the client today);
