@@ -83,7 +83,20 @@ internal static class Program
                 {
                     using var c = await server.AcceptAsync();
                     var buffer = new byte[4096];
-                    var n = await c.ReceiveAsync(buffer);
+                    var n = 0;
+
+                    // Read until the whole request (head and JSON body) has arrived.
+                    while (n < buffer.Length && !Encoding.UTF8.GetString(buffer, 0, n).Contains("]}", StringComparison.Ordinal))
+                    {
+                        var got = await c.ReceiveAsync(buffer.AsMemory(n));
+                        if (got == 0)
+                        {
+                            break;
+                        }
+
+                        n += got;
+                    }
+
                     var ok = Encoding.UTF8.GetString(buffer, 0, n).Contains("identity:read", StringComparison.Ordinal);
                     var body = ok ? "{\"access_token\":\"t\",\"expires_at\":\"x\"}" : "{\"error\":\"scope\",\"message\":\"not declared\"}";
                     await c.SendAsync(Encoding.UTF8.GetBytes($"HTTP/1.1 {(ok ? "200 OK" : "403 Forbidden")}\r\ncontent-length: {body.Length}\r\n\r\n{body}"));
@@ -108,7 +121,7 @@ internal static class Program
         var latest = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(beat.RootElement.GetRawText())!
             .ToDictionary(p => p.Key, p => (object)p.Value);
         await using var panel = await Service.Serve(Env(state, cache, ("PANEL_FILE", "panel/index.html")), state, () => latest);
-        var url = JsonDocument.Parse(File.ReadAllText(Path.Combine(state, "panel.json"))).RootElement.GetProperty("url").GetString()!;
+        var url = JsonElement.Parse(File.ReadAllText(Path.Combine(state, "panel.json"))).GetProperty("url").GetString()!;
         using var http = new HttpClient();
         var api = await http.GetAsync(new Uri(url + "api/heartbeat"));
         Check(api.IsSuccessStatusCode && (await api.Content.ReadAsStringAsync()).Contains("\"beats\":1", StringComparison.Ordinal), "the panel serves the heartbeat as JSON");

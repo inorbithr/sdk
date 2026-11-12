@@ -50,8 +50,9 @@ public static class Channel
             var body = JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, string[]> { ["scopes"] = [.. scopes] });
             var head = Encoding.UTF8.GetBytes(
                 $"POST /token HTTP/1.1\r\nhost: iohr\r\ncontent-type: application/json\r\ncontent-length: {body.Length}\r\nconnection: close\r\n\r\n");
-            await socket.SendAsync(head, cts.Token).ConfigureAwait(false);
-            await socket.SendAsync(body, cts.Token).ConfigureAwait(false);
+            // One buffer: the channel sees the head and the body together.
+            byte[] request = [.. head, .. body];
+            await socket.SendAsync(request, cts.Token).ConfigureAwait(false);
             var buffer = new byte[8192];
             while (raw.Length < MaxAnswer)
             {
