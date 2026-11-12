@@ -34,6 +34,8 @@ mod input;
 #[cfg(unix)]
 mod model;
 #[cfg(unix)]
+mod phone;
+#[cfg(unix)]
 mod proxy;
 #[cfg(unix)]
 mod screen;
