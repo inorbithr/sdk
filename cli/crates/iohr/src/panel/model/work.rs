@@ -1,5 +1,5 @@
 //! The Workloads views of the panel's model: the list of the workload tree and one workload
-//! opened in place (the design of the owner's approval `apr_01M6VYDKKHBQFWY4A3N78998ZV`).
+//! opened in place (PRD 0055).
 //!
 //! The rows come from [`workloads::tree`], joined to the open asks the model already holds, so a
 //! session that an ask names shows as `needs you`. Anything the sources do not give is shown

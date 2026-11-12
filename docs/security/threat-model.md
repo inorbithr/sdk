@@ -96,7 +96,7 @@ extension process it runs (ADR 0012).
 | E | An extension asks for more than it declared | SR-27: scopes outside the manifest are refused; the person saw the scopes at install and upgrade |
 | S | Another local user connects to the token channel | Unix socket 0600 in a 0700 directory, peer uid checked; Windows named pipe with a random name, remote clients refused, write access only for the creator |
 | I | The registry credential leaks through output | It is a `Redacted` value, sent as a sensitive header to the registry and its token service only, never printed by `--verbose` (test) |
-| I | `iohr` reports installs or checks for updates | SR-25: the registry is contacted only by `ext install`, `upgrade`, `sync`; no telemetry |
+| I | `iohr` reports installs or checks for updates | SR-25: the registry is contacted only by `ext install`, `upgrade`, `sync`; no telemetry; a running runner's heartbeat and upgrade checks are disclosed in SECURITY.md, "What leaves your machine", and the upgrade can be turned off |
 | R | A team cannot show which extension code ran | SR-28: `iohr-ext.lock` with digest and signer, committed; `ext list` and `verify` |
 | E | An extension's system service holds kernel privileges the person never saw | SR-32: install shows each privilege in plain words and needs a typed `yes` or `--yes`; without a terminal it refuses; `iohr` itself grants none |
 | E | A new release quietly adds a privilege | SR-32: `upgrade` names the added ones and asks again; `sync` refuses an artifact that declares more than its lock entry records |

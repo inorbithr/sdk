@@ -1199,29 +1199,27 @@ mod tests {
         let p = std::path::Path::new(
             "/home/a/.local/share/iohr/extensions/capture/1.0.0-abc/iohr-capture",
         );
-        let c = super::service_command(p, "nevio", &super::Picks::Default);
+        let c = super::service_command(p, "agent", &super::Picks::Default);
         assert_eq!(
             super::shown(&c),
-            "sudo /home/a/.local/share/iohr/extensions/capture/1.0.0-abc/iohr-capture service install --agent-user nevio"
+            "sudo /home/a/.local/share/iohr/extensions/capture/1.0.0-abc/iohr-capture service install --agent-user agent"
         );
-        let named = super::Picks::Named(vec!["enp70s0".into(), "bond0".into()]);
-        let c = super::service_command(p, "nevio", &named);
-        assert!(
-            super::shown(&c).ends_with("--agent-user nevio --interface enp70s0 --interface bond0")
-        );
-        let c = super::service_command(p, "nevio", &super::Picks::All);
-        assert!(super::shown(&c).ends_with("--agent-user nevio --all"));
+        let named = super::Picks::Named(vec!["eth0".into(), "eth1".into()]);
+        let c = super::service_command(p, "agent", &named);
+        assert!(super::shown(&c).ends_with("--agent-user agent --interface eth0 --interface eth1"));
+        let c = super::service_command(p, "agent", &super::Picks::All);
+        assert!(super::shown(&c).ends_with("--agent-user agent --all"));
     }
 
     #[test]
     fn the_interface_answer_takes_the_suggestion_all_or_names() {
         use super::{Picks, parse_choice};
-        let s = vec!["enp70s0".to_owned()];
+        let s = vec!["eth0".to_owned()];
         assert_eq!(parse_choice("yes", &s), Some(Picks::Named(s.clone())));
         assert_eq!(parse_choice(" all ", &s), Some(Picks::All));
         assert_eq!(
-            parse_choice("enp70s0, cni0", &s),
-            Some(Picks::Named(vec!["enp70s0".into(), "cni0".into()]))
+            parse_choice("eth0, cni0", &s),
+            Some(Picks::Named(vec!["eth0".into(), "cni0".into()]))
         );
         assert_eq!(parse_choice("", &s), None);
         assert_eq!(parse_choice("no", &s), None);

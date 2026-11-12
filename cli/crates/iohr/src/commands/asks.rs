@@ -1273,9 +1273,9 @@ mod tests {
         Api::new(&server.uri(), cred, false).unwrap()
     }
 
-    const ID1: &str = "apr_01M6NZ452CGYK04BSGM9BNJD4Q";
-    const ID2: &str = "apr_01M6NZ45CZY218FHED8G63N458";
-    const ID9: &str = "apr_01M6NZ9Z0AZ5YY02R0F40YNNJ2";
+    const ID1: &str = "apr_00000000000000000000000001";
+    const ID2: &str = "apr_00000000000000000000000002";
+    const ID9: &str = "apr_00000000000000000000000009";
 
     const FAST: Pace = Pace {
         backoff: Duration::from_millis(5),
@@ -1355,13 +1355,13 @@ mod tests {
     #[test]
     fn a_decided_ask_shows_who_and_the_note() {
         let mut a = ask(ID1, "denied", "Merge #12");
-        a["decided_by"] = json!("nevio");
+        a["decided_by"] = json!("ada");
         a["decided_on"] = json!("terminal");
         a["decided_at"] = json!("2026-11-06T10:00:00Z");
         a["decision_note"] = json!("not yet");
         let t = show_text(Paint::plain(), &a);
         assert!(
-            t.contains("nevio on terminal, 2026-11-06") && t.contains("not yet"),
+            t.contains("ada on terminal, 2026-11-06") && t.contains("not yet"),
             "{t}"
         );
     }

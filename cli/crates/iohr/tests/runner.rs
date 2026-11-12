@@ -1836,7 +1836,7 @@ async fn run_key_show_reads_the_key_and_makes_and_asks_nothing() {
     assert!(text(&o).contains("no run key"), "{}", text(&o));
 
     // Make the key (an ask is filed, which this test then counts).
-    let ask = "apr_01M5Z1KKYQ16SMN4XFYS5K5RFA";
+    let ask = "apr_00000000000000000000000003";
     Mock::given(method("GET"))
         .and(path("/v1/approvals/runners"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": []})))
@@ -1934,7 +1934,7 @@ async fn run_key_is_made_once_and_enrolled_with_a_proof_of_possession() {
         .await;
     // Not enrolled, so it files a `runner_enrollment` ask (RFC 0172, amendment 1); the
     // service answers with the ask as filed, which is still pending.
-    let ask = "apr_01M5Z1KKYQ16SMN4XFYS5K5RFA";
+    let ask = "apr_00000000000000000000000003";
     Mock::given(method("POST"))
         .and(path("/v1/approvals"))
         .respond_with(move |r: &wiremock::Request| {

@@ -17,7 +17,7 @@ use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const ACCOUNT: &str = "acc_test1";
-const ID: &str = "apr_01M6NZ452CGYK04BSGM9BNJD4Q";
+const ID: &str = "apr_00000000000000000000000001";
 const SECRET_TEXT: &str = "PRIVATE-ASK-TEXT";
 
 fn token() -> String {

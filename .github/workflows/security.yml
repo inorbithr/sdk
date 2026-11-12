@@ -16,6 +16,25 @@ permissions: {}
 # repository. Until the repository is public these jobs skip; zizmor still runs on every
 # change through `mise run repo:check` in ci.yml.
 jobs:
+  # A leaked key in any commit or file fails the run. Runs on private repositories too:
+  # gitleaks itself is free, installed through mise like every other tool.
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        env:
+          MISE_YES: "1"
+        with:
+          install_args: "gitleaks"
+      - run: mise run repo:secrets
+
   zizmor:
     name: zizmor
     if: ${{ !github.event.repository.private }}

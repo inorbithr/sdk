@@ -4,8 +4,8 @@ use super::*;
 use serde_json::json;
 use std::fmt::Write as _;
 
-const DOC: &str = "ldoc_01M4P30371W9A3V5S3YCAHRTAN";
-const FROM: &str = "2561c570-bde2-4998-82b7-f4cde4ece7c6";
+const DOC: &str = "ldoc_000000000000000000000000AB";
+const FROM: &str = "0a1b2c3d-0000-4000-8000-0000000000ff";
 const ACCOUNT: &str = "0a1b2c3d-0000-4000-8000-000000000001";
 const TS: &str = "20261101T0038Z";
 
@@ -44,7 +44,7 @@ fn dry(d: u64, v: u64, c: u64) -> Output {
 }
 
 const HELP: &str = "Usage: labs:reattribute\n  --account <id>\n  --document <ldoc_id>\n";
-const APPLIED: &str = "run lrat_01M6NWQSN3GGDDS70D547AH0BG: documents=1 versions=2 comments=3\n";
+const APPLIED: &str = "run lrat_00000000000000000000000001: documents=1 versions=2 comments=3\n";
 
 struct Host {
     fake: Fake,
@@ -110,11 +110,11 @@ async fn run(h: &Host) -> Result<String, String> {
 #[test]
 fn params_and_ids_hold_at_their_edges() {
     assert!(is_document_id(DOC));
-    assert!(!is_document_id("ldoc_01m4P30371W9A3V5S3YCAHRTAN"));
-    assert!(!is_document_id("ldoc_01M4P30371W9A3V5S3YCAHRTA"));
+    assert!(!is_document_id("ldoc_000000000000000000000000ab"));
+    assert!(!is_document_id("ldoc_000000000000000000000000A"));
     assert!(is_uuid(FROM));
     assert!(!is_uuid(&FROM.to_uppercase()));
-    assert!(!is_uuid("2561c570bde24998-82b7-f4cde4ece7c6"));
+    assert!(!is_uuid("0a1b2c3d00004000-8000-0000000000ff"));
     assert!(is_evidence_ts(TS));
     assert!(!is_evidence_ts("20261101T0038"));
     assert!(!is_evidence_ts("2026110aT0038Z"));
@@ -145,7 +145,7 @@ fn only_the_proven_rows_are_counted_per_kind() {
 #[test]
 fn the_apply_line_needs_its_counts() {
     let (line, c) = applied(APPLIED).unwrap();
-    assert_eq!(line, "run lrat_01M6NWQSN3GGDDS70D547AH0BG");
+    assert_eq!(line, "run lrat_00000000000000000000000001");
     assert_eq!(c, counts(1, 2, 3));
     assert!(applied("run lrat_x: documents=1\n").is_err());
     assert!(applied("done\n").is_err());
@@ -156,7 +156,7 @@ async fn a_matching_run_moves_the_rows_and_removes_the_worktree() {
     let h = host(good());
     let out = run(&h).await.unwrap();
     assert!(
-        out.starts_with("run lrat_01M6NWQSN3GGDDS70D547AH0BG\n"),
+        out.starts_with("run lrat_00000000000000000000000001\n"),
         "{out}"
     );
     assert!(out.contains("documents 1, versions 2, comments 3"), "{out}");
