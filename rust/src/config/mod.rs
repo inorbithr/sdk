@@ -20,7 +20,9 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 pub(crate) use no_proxy::ProxyRules;
-pub(crate) use resolve::{Inputs, ProblemsText, Resolved, program_found, resolve, show_duration};
+pub(crate) use resolve::{
+    Inputs, ProblemsText, Resolved, is_loopback, program_found, resolve, show_duration,
+};
 pub use resolve::{Os, PIPELINE};
 
 use crate::error::ConfigError;

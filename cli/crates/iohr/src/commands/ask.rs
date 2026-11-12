@@ -184,6 +184,7 @@ async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Er
     let question = args.question.join(" ");
     // An editing run in a project that has a handoff note (an earlier run stopped at its cap)
     // goes on from it: the note leads the prompt.
+    let asked = question.clone();
     let (note_root, question) =
         crate::handoff::continue_from(allow_edits && !args.dry_run, question);
     let role_text = role.as_ref().map(runtime::Applied::system_text);
@@ -239,7 +240,13 @@ async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Er
     let started = Instant::now();
     let ui = Ui::detect(out.json);
     let look = look_of(ui, thinking, model);
-    let Ended { code, failure, .. } = stream(Run {
+    let Ended {
+        code,
+        failure,
+        timed_out,
+        turn_capped,
+        last_said,
+    } = stream(Run {
         agent,
         bin: &bin,
         args: &command_line,
@@ -251,6 +258,32 @@ async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Er
         timeout: None,
     })
     .await?;
+    // An editing run that stopped before it finished leaves its work on disk: write (or fold
+    // into) the handoff note so the next run in the folder goes on from it.
+    let mut note_root = note_root;
+    if allow_edits && code != 0 {
+        let why = if timed_out {
+            "it was stopped by a time limit".to_owned()
+        } else if turn_capped {
+            "it used all its turns before it finished".to_owned()
+        } else {
+            failure
+                .clone()
+                .unwrap_or_else(|| format!("it exited with code {code}"))
+        };
+        if let Some(root) = note_root.clone().or_else(crate::handoff::root_here) {
+            let me = super::shell::running_bin();
+            match crate::handoff::write(&root, &asked, &last_said, &why, &me) {
+                Ok(n) => Out::note(&format!(
+                    "iohr ask: {n} files are in the folder; {} says what is left (`{me} handoff show`)",
+                    crate::handoff::FILE
+                )),
+                Err(e) => Out::note(&format!("iohr ask: no handoff note: {e}")),
+            }
+        }
+        // The note now describes this run: it is not removed by it.
+        note_root = None;
+    }
     finish(
         &Done {
             role: role_json,

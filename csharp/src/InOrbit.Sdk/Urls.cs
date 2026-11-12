@@ -13,9 +13,7 @@ internal static class Urls
             throw new ConfigException($"{what} is not usable: it is not an absolute URL");
         }
 
-        var host = url.IdnHost.Trim('[', ']');
-        var loopback = host == "localhost" || (IPAddress.TryParse(host, out var ip) && IPAddress.IsLoopback(ip));
-        if (!(url.Scheme == Uri.UriSchemeHttps || (url.Scheme == Uri.UriSchemeHttp && loopback)))
+        if (!(url.Scheme == Uri.UriSchemeHttps || (url.Scheme == Uri.UriSchemeHttp && IsLoopback(url.IdnHost))))
         {
             throw new ConfigException($"{what} is not usable: it must use https (plain http only to this machine)");
         }
@@ -31,5 +29,12 @@ internal static class Urls
         }
 
         return url;
+    }
+
+    /// <summary>Whether <paramref name="host"/> (a URL's host, brackets or not) is this machine: <c>localhost</c> or a loopback address, never a name that only starts like one.</summary>
+    internal static bool IsLoopback(string host)
+    {
+        var h = host.Trim('[', ']').ToLowerInvariant();
+        return h == "localhost" || (IPAddress.TryParse(h, out var ip) && IPAddress.IsLoopback(ip));
     }
 }

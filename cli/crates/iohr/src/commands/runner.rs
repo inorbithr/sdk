@@ -521,7 +521,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     set.upgrade_sign.source,
                 ));
                 Upgrader {
-                    source: RealSource { policy: signing },
+                    source: RealSource {
+                        policy: signing,
+                        g: g.clone(),
+                        env: env.clone(),
+                    },
                     ledger: FileLedger {
                         path: ctx.dir.join("runner").join("last-upgrade"),
                     },

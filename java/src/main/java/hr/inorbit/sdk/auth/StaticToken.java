@@ -5,7 +5,7 @@ import java.util.Objects;
 /** A token you already hold, such as an API token from the console or {@code iohr token create}. */
 public final class StaticToken implements TokenProvider {
 
-    private final String token;
+    private final transient String token;
 
     /**
      * A provider that always hands out {@code token}.
@@ -24,6 +24,6 @@ public final class StaticToken implements TokenProvider {
     /** Never the token. */
     @Override
     public String toString() {
-        return "StaticToken(<redacted>)";
+        return "StaticToken(" + Redaction.MARKER + ")";
     }
 }

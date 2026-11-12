@@ -6,6 +6,7 @@
  */
 
 import { describe, type TokenProvider } from "./auth.js";
+import { MAX_BODY, readCapped } from "./body.js";
 import {
   AuthError,
   ConnectionError,
@@ -30,8 +31,7 @@ import {
   traceparent,
 } from "./telemetry.js";
 
-/** The largest answer read, 16 MiB. */
-export const MAX_BODY: number = 16 * 1024 * 1024;
+export { MAX_BODY };
 
 /** What one call carries between middlewares, out of the user's sight. */
 export interface CallState {
@@ -717,15 +717,15 @@ export function transport(
     }
     let bytes: Uint8Array;
     try {
-      bytes = new Uint8Array(await resp.arrayBuffer());
+      bytes = await readCapped(resp.body);
     } catch (e) {
+      if (e instanceof TooLargeError) {
+        throw e;
+      }
       if (req.signal?.aborted) {
         throw req.signal.reason;
       }
       throw new ConnectionError(host, describe(e), { cause: e });
-    }
-    if (bytes.length > MAX_BODY) {
-      throw new TooLargeError();
     }
     return {
       status: resp.status,

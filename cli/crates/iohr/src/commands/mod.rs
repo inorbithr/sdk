@@ -16,10 +16,11 @@ mod coordinator_plan;
 mod decisions;
 mod doctor;
 mod domains;
-mod ext;
+pub(crate) mod ext;
 mod ext_catalogue;
 mod ext_packages;
 mod folder_context;
+mod handoff;
 pub(crate) mod incident_settings;
 mod init_crawl;
 mod init_extensions;
@@ -140,12 +141,13 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Coordinator(cmd) => coordinator::run(g, &env, cmd, out).await,
         Command::Context(args) => folder_context::run(g, &args, out),
         Command::Memory(cmd) => memory::run(g, &env, cmd, out).await,
+        Command::Handoff(cmd) => handoff::run(&cmd, out),
         Command::Connectors(cmd) => connectors::run(g, &env, cmd, out).await,
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
         Command::Doctor { fix } => doctor::run(g, &env, fix, out).await,
-        Command::Upgrade { check } => upgrade::run(g, &env, check, out).await,
+        Command::Upgrade(args) => upgrade::run(g, &env, &args, out).await,
         Command::SignBinary { path } => upgrade::sign_binary(&env, &path),
         Command::Ask(args) => ask::run(g, &env, *args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
