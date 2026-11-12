@@ -1,0 +1,19 @@
+# The bar: what the suite must reach to pass. `python -m @@MODULE@@` exits 1 when any line
+# here is missed, and CI (`.github/workflows/evals.yml`) fails the pull request on it. Change a
+# line in its own pull request, with the reason, so the history of the bar is readable.
+#
+# Every case is scored by every scorer, 0 or 1. A case passes when all of them give 1.
+
+[bar]
+# The share of cases that pass, from 0 to 1. The fixture has 12 cases, so one wrong answer
+# (11 of 12 = 0.917) misses this bar: that is on purpose, the fixture is a regression test
+# for the harness. For a model you do not control, set the rate you can defend.
+min_pass_rate = 0.95
+# Cases where the solver raised instead of answering. An error is never a pass.
+max_errors = 0
+
+# Each scorer's own minimum mean. Every scorer in the suite must be listed here: a scorer
+# with no bar guards nothing, so the run refuses to start without one.
+[bar.scorers]
+exact = 0.95
+format = 1.0

@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.1.0-alpha.39](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.38...iohr/v0.1.0-alpha.39) (2026-11-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** iohr project init now defaults to the coordinated template (a coordination.toml and a Planner plan); pass --template demo for the previous default.
+
+### Features
+
+* **cli:** --role on ask and init applies a Role's text and model ([#441](https://github.com/inorbithr/sdk/issues/441)) ([094d1e5](https://github.com/inorbithr/sdk/commit/094d1e5c52f1ef722d62f0851fe07f56d9d879a9))
+* **cli:** ? and ?? read IO.md files up the folder chain, iohr context, init starter ([#475](https://github.com/inorbithr/sdk/issues/475)) ([22c9743](https://github.com/inorbithr/sdk/commit/22c974386e05376595f0bf58be608e809ca2875e))
+* **cli:** a local site knowledge base for the init crawl (atlas search, ?/?? sources) ([#477](https://github.com/inorbithr/sdk/issues/477)) ([45a3f25](https://github.com/inorbithr/sdk/commit/45a3f25716a60f199684e09bac4796360d31259d))
+* **cli:** answer voice leases on a warm claude session ([#470](https://github.com/inorbithr/sdk/issues/470)) ([0b57609](https://github.com/inorbithr/sdk/commit/0b57609ddc7137afe7f3a9f71901600288ec146c))
+* **cli:** API key sign-in for Claude and a claude_auth policy ([#471](https://github.com/inorbithr/sdk/issues/471)) ([b8b8aa9](https://github.com/inorbithr/sdk/commit/b8b8aa9e78dd50356d99f6dd433c86480ae3b042))
+* **cli:** approve asks from a Mac with Touch ID (RFC 0113) ([#450](https://github.com/inorbithr/sdk/issues/450)) ([36a4111](https://github.com/inorbithr/sdk/commit/36a4111a2356a8a666a90d1af0e718583da1a428))
+* **cli:** ask to read instead of "I can't", next steps as actions ([#444](https://github.com/inorbithr/sdk/issues/444)) ([ecbf7ce](https://github.com/inorbithr/sdk/commit/ecbf7ceda59137be70b6557ff97d06c1fcd785ee))
+* **cli:** bring the preview CLI work to main (modes, init sync, ext offer, perm card, roles) ([#440](https://github.com/inorbithr/sdk/issues/440)) ([dddf758](https://github.com/inorbithr/sdk/commit/dddf7583d074c732b6191f76bd2fbfbb137bd94b))
+* **cli:** claude_auth and codex_auth take any, plan or api ([#493](https://github.com/inorbithr/sdk/issues/493)) ([8d62c03](https://github.com/inorbithr/sdk/commit/8d62c03415dfb5e8a8020b9ff969926a68d76a33))
+* **cli:** edge.caddy-site-call host action adds the call site to the edge Caddy ([#492](https://github.com/inorbithr/sdk/issues/492)) ([6d9df5b](https://github.com/inorbithr/sdk/commit/6d9df5b5349e998d9f7263e96fc4cb007b153883))
+* **cli:** every ? and ?? ask is answered by the project's Roles (RFC 0213 S2) ([#454](https://github.com/inorbithr/sdk/issues/454)) ([05b5c26](https://github.com/inorbithr/sdk/commit/05b5c26b69d8e1e2d50da64d6907f09a01e042cc))
+* **cli:** generate the terminal themes from the Mac app's THEMES (RFC 0212) ([#457](https://github.com/inorbithr/sdk/issues/457)) ([559b2b1](https://github.com/inorbithr/sdk/commit/559b2b16b1225c86f4a2349fef013077a971c7be))
+* **cli:** init crawl rate and a progress bar (RFC 0163) ([#478](https://github.com/inorbithr/sdk/issues/478)) ([8c26d1d](https://github.com/inorbithr/sdk/commit/8c26d1dc3d9a4ee92fa80b4f70df5d7ab2dd8b96))
+* **cli:** init defaults to the coordinated template and builds through a Planner plan ([#435](https://github.com/inorbithr/sdk/issues/435)) ([bfb0c6c](https://github.com/inorbithr/sdk/commit/bfb0c6c5638cf9367232e0f510267983635fced3))
+* **cli:** iohr ask reads more folders (--read repeats, IOHR_ASK_READ, [ask] read, Add folder) ([#448](https://github.com/inorbithr/sdk/issues/448)) ([e337e0b](https://github.com/inorbithr/sdk/commit/e337e0b46383399a0e07f7d9d956351670596146))
+* **cli:** iohr panel, a floating menu over the shell with approvals and workloads ([#447](https://github.com/inorbithr/sdk/issues/447)) ([0465360](https://github.com/inorbithr/sdk/commit/0465360189a59115be05e895f86e74e279975924))
+* **cli:** iohr session and iohr stop, a session host for the project's Roles on a durable DuckDB queue ([#449](https://github.com/inorbithr/sdk/issues/449)) ([d40415c](https://github.com/inorbithr/sdk/commit/d40415c90b12b892427e098a729118862e38d7dc))
+* **cli:** keep one warm voice session ready for the next call ([#487](https://github.com/inorbithr/sdk/issues/487)) ([ca463f2](https://github.com/inorbithr/sdk/commit/ca463f263a07f6f27a97cd6fb807d19e37f75193))
+* **cli:** one grammar for the command line: grouped, coloured help and project template list|show|path ([094d1e5](https://github.com/inorbithr/sdk/commit/094d1e5c52f1ef722d62f0851fe07f56d9d879a9))
+* **cli:** one grammar for the command line: grouped, coloured help and project template list|show|path ([9db0456](https://github.com/inorbithr/sdk/commit/9db0456dcec60f3898e4aff777ae5648f61924cd))
+* **cli:** one grammar for the command line: grouped, coloured help and project template list|show|path ([dddf758](https://github.com/inorbithr/sdk/commit/dddf7583d074c732b6191f76bd2fbfbb137bd94b))
+* **cli:** project init reads your public site and keeps it in atlas and memory ([#455](https://github.com/inorbithr/sdk/issues/455)) ([d8c7827](https://github.com/inorbithr/sdk/commit/d8c7827a37cd7eb39cdff7a6db96e17537f717da))
+* **cli:** runner workspace prune, user service install and opt-in host git credentials ([#467](https://github.com/inorbithr/sdk/issues/467)) ([8fd69a6](https://github.com/inorbithr/sdk/commit/8fd69a6015936382b079b3e95cf7da2093146317))
+* **cli:** the ? card says what it can see and offers to attach the output of a failed command ([#442](https://github.com/inorbithr/sdk/issues/442)) ([9db0456](https://github.com/inorbithr/sdk/commit/9db0456dcec60f3898e4aff777ae5648f61924cd))
+* **cli:** the permission ask is an Io card with the action bar (PRD 0197) ([#421](https://github.com/inorbithr/sdk/issues/421)) ([579c0bb](https://github.com/inorbithr/sdk/commit/579c0bbde9b7845c209661786e112470fba9a85c))
+
+
+### Bug fixes
+
+* **cli:** ? works in the home folder: trust prompt, then reads and asked commands (PRD 0197) ([#422](https://github.com/inorbithr/sdk/issues/422)) ([1d733f6](https://github.com/inorbithr/sdk/commit/1d733f669e8a428348ddef0254eee5ac13b89bb0))
+* **cli:** a chosen ? action runs at once, folders with subfolders offer a recursive read, and the card header is just Io ([#451](https://github.com/inorbithr/sdk/issues/451)) ([b75bff5](https://github.com/inorbithr/sdk/commit/b75bff59b02617c4c8ae9afc2684bf9648dd5a9b))
+* **cli:** a re-run after stop starts the session host again ([#482](https://github.com/inorbithr/sdk/issues/482)) ([740b82f](https://github.com/inorbithr/sdk/commit/740b82f57046583677f666972b161086e8a952f9))
+* **cli:** bound QuietStore to four calls in flight ([#474](https://github.com/inorbithr/sdk/issues/474)) ([c8092e3](https://github.com/inorbithr/sdk/commit/c8092e353eff29d72890555ad69cff7b0bf006bd))
+* **cli:** build on Windows: gate the panel's helpers to unix ([#458](https://github.com/inorbithr/sdk/issues/458)) ([fe799e6](https://github.com/inorbithr/sdk/commit/fe799e6c4abbd9d89d2dadc25a662b378c5212f9))
+* **cli:** build on Windows: nearest_256 is used by the panel on every platform ([#495](https://github.com/inorbithr/sdk/issues/495)) ([ea8b61c](https://github.com/inorbithr/sdk/commit/ea8b61c467f81cdb13ed49ff3dfffb9562c2acd7))
+* **cli:** build the ext tests on Windows (pty helper is unix only) ([#494](https://github.com/inorbithr/sdk/issues/494)) ([5dbedfb](https://github.com/inorbithr/sdk/commit/5dbedfbd7b46bc663aa15c9bf1bc47209c5d3b5d))
+* **cli:** check the credential store before signing in ([#437](https://github.com/inorbithr/sdk/issues/437)) ([ce55a85](https://github.com/inorbithr/sdk/commit/ce55a854bf033d7cea12ab92179178a9b4f4608c))
+* **cli:** gate the panel's note below the box to unix ([#476](https://github.com/inorbithr/sdk/issues/476)) ([9a30a65](https://github.com/inorbithr/sdk/commit/9a30a652c846a249b5310bba9500158267ed2400))
+* **cli:** init drops the editor-ask line and says a coming extension has nothing to install ([#452](https://github.com/inorbithr/sdk/issues/452)) ([864e46e](https://github.com/inorbithr/sdk/commit/864e46e9d27341827eaf98a8f48990dbd2701087))
+* **cli:** init lists what it did not do only under --verbose ([#443](https://github.com/inorbithr/sdk/issues/443)) ([30f7eb0](https://github.com/inorbithr/sdk/commit/30f7eb07ef65557d8882b2921fc56d1a32f68c46))
+* **cli:** IO.md labels and runner purge on Windows ([#489](https://github.com/inorbithr/sdk/issues/489)) ([4b1cf8b](https://github.com/inorbithr/sdk/commit/4b1cf8bb890d027623f6fb178a8085fcbf7a8a04))
+* **cli:** IO.md tests and file names on Windows and macOS ([#484](https://github.com/inorbithr/sdk/issues/484)) ([8e8db19](https://github.com/inorbithr/sdk/commit/8e8db193046478db443cd4d98980867940122b42))
+* **cli:** name Windows paths in a question, and keep / working after a \\?\ prefix ([#464](https://github.com/inorbithr/sdk/issues/464)) ([c7ecf15](https://github.com/inorbithr/sdk/commit/c7ecf15e8e360333c52467ac4f689982a78dd6a9))
+* **cli:** one folder-trust prompt, on the Io card (PRD 0197) ([#423](https://github.com/inorbithr/sdk/issues/423)) ([4b7b681](https://github.com/inorbithr/sdk/commit/4b7b6810df0beb630ce7514cf59922342df114d1))
+* **cli:** panel keys and restart; the session host gets a runner of its own ([#459](https://github.com/inorbithr/sdk/issues/459)) ([a5a3fbf](https://github.com/inorbithr/sdk/commit/a5a3fbf43ac83a0f1f476bb2bf1dc19ea85bdeb1))
+* **cli:** pin release signer identity to main ([#462](https://github.com/inorbithr/sdk/issues/462)) ([c962d99](https://github.com/inorbithr/sdk/commit/c962d99b55aede1f8366b44f18a04c7cf9549887))
+* **cli:** Rust reference examples are one main that returns the error ([#439](https://github.com/inorbithr/sdk/issues/439)) ([f279f3f](https://github.com/inorbithr/sdk/commit/f279f3ff08dae13cca360f94c40afd93022e94b1))
+* **cli:** sign iohr-preview like the release and ask the Keychain once per run ([#479](https://github.com/inorbithr/sdk/issues/479)) ([111af09](https://github.com/inorbithr/sdk/commit/111af09e06c03306422ec02f53ac004f9873d427))
+* **cli:** the ? card's Down menu works after an empty Enter and after the hook is sourced again ([#446](https://github.com/inorbithr/sdk/issues/446)) ([faae596](https://github.com/inorbithr/sdk/commit/faae596d4be455cd8afd489b892c7513096e7bec))
+* **cli:** the real Keychain test runs only where CI asks for it ([#472](https://github.com/inorbithr/sdk/issues/472)) ([9b9d886](https://github.com/inorbithr/sdk/commit/9b9d886a00b2918b83c4785ece52f859751cbc43))
+* **cli:** two Windows test failures on the alpha.39 release (path separators) ([#502](https://github.com/inorbithr/sdk/issues/502)) ([bc1f453](https://github.com/inorbithr/sdk/commit/bc1f453090ca97d92a4a2d1e2861297fc5360855))
+* **cli:** usage errors help: what was missing, real examples, --help and an AI ask offer ([#438](https://github.com/inorbithr/sdk/issues/438)) ([1c5bb69](https://github.com/inorbithr/sdk/commit/1c5bb696d52baa2e6b68cd8a1e55d40f4ce3d255))
+* **cli:** write the killed-host test's marker by rename so the parent never reads it empty ([#490](https://github.com/inorbithr/sdk/issues/490)) ([3cfa2ce](https://github.com/inorbithr/sdk/commit/3cfa2ce1e8b9bca31afceb8416b82c4b2cb517b3))
+
+
+### Documentation
+
+* **cli:** point to the developer-site guides and say what iohr-preview is ([#430](https://github.com/inorbithr/sdk/issues/430)) ([ece935e](https://github.com/inorbithr/sdk/commit/ece935e32f0738db42bd05dc54a83202f668b54f))
+* **cli:** split the README into a landing page and topic pages ([#463](https://github.com/inorbithr/sdk/issues/463)) ([b39f4f0](https://github.com/inorbithr/sdk/commit/b39f4f02da90d69df35c73e6bfeabb27f9ec38a9))
+
 ## [0.1.0-alpha.38](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.37...iohr/v0.1.0-alpha.38) (2026-11-06)
 
 

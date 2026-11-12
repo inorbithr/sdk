@@ -45,6 +45,8 @@ const CONFLICT_RETRIES: u32 = 24;
 pub(crate) enum QueueError {
     #[error("the session queue: {0}")]
     Db(#[from] duckdb::Error),
+    #[error("the session queue: {0}")]
+    Open(#[from] crate::safe_open::OpenError),
     #[error("the session queue: still in conflict after {0} tries")]
     Conflict(u32),
 }
@@ -98,6 +100,9 @@ pub(crate) struct Recovered {
 /// A handle to the queue. Each thread takes its own with [`Queue::handle`].
 pub(crate) struct Queue {
     conn: Connection,
+    // The file's lock and guards (`safe_open`), held as long as any handle is; none for the
+    // in-memory queue of the tests.
+    held: Option<crate::safe_open::Db>,
     conflicts: Arc<AtomicU64>,
 }
 
@@ -209,20 +214,23 @@ fn is_conflict(e: &duckdb::Error) -> bool {
 }
 
 impl Queue {
-    /// Opens (and creates) the queue file. The host is the only process that does this.
+    /// Opens (and creates) the queue file through the one safe opener (`safe_open`): a folder
+    /// of the owner's alone, one writer, a size cap. The host is the only process that does this.
     pub(crate) fn open(path: &Path) -> Result<Self, QueueError> {
-        Self::with(Connection::open(path)?)
+        let db = crate::safe_open::open(path, crate::safe_open::Access::Write)?;
+        Self::with(db.try_clone()?, Some(db))
     }
 
     #[cfg(test)]
     pub(crate) fn open_in_memory() -> Result<Self, QueueError> {
-        Self::with(Connection::open_in_memory()?)
+        Self::with(Connection::open_in_memory()?, None)
     }
 
-    fn with(conn: Connection) -> Result<Self, QueueError> {
+    fn with(conn: Connection, held: Option<crate::safe_open::Db>) -> Result<Self, QueueError> {
         conn.execute_batch(SCHEMA)?;
         Ok(Self {
             conn,
+            held,
             conflicts: Arc::new(AtomicU64::new(0)),
         })
     }
@@ -231,6 +239,11 @@ impl Queue {
     pub(crate) fn handle(&self) -> Result<Self, QueueError> {
         Ok(Self {
             conn: self.conn.try_clone()?,
+            held: self
+                .held
+                .as_ref()
+                .map(crate::safe_open::Db::handle)
+                .transpose()?,
             conflicts: self.conflicts.clone(),
         })
     }
@@ -924,7 +937,9 @@ mod tests {
         put(&q, Some("ask_kill"), None);
         let t = q.claim("rust", SHORT, tick()).unwrap().unwrap();
         assert!(q.start(t.id, "rust", now_ms()).unwrap());
-        std::fs::write(dir.join("claimed"), t.id.to_string()).unwrap();
+        // Written beside it and renamed, so the parent never reads a half-written marker.
+        std::fs::write(dir.join("claimed.tmp"), t.id.to_string()).unwrap();
+        std::fs::rename(dir.join("claimed.tmp"), dir.join("claimed")).unwrap();
         std::thread::sleep(Duration::from_secs(120));
     }
 
@@ -944,12 +959,12 @@ mod tests {
                 "--ignored",
                 "--nocapture",
             ])
-            .env(CHILD_DIR, dir.path())
+            .env(CHILD_DIR, dir.path().join("own"))
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
             .unwrap();
-        let marker = dir.path().join("claimed");
+        let marker = dir.path().join("own").join("claimed");
         let give_up = Instant::now() + Duration::from_secs(60);
         while !marker.exists() {
             assert!(Instant::now() < give_up, "the child never claimed its task");
@@ -961,7 +976,7 @@ mod tests {
 
         // The next host opens the same file: the claim is still held, its lease has most of
         // its time left, and the host that made it is gone. It is given back at once.
-        let q = Queue::open(&dir.path().join("queue.duckdb")).unwrap();
+        let q = Queue::open(&dir.path().join("own").join("queue.duckdb")).unwrap();
         assert_eq!(q.task(id).unwrap().unwrap().0, "running");
         assert_eq!(
             q.recover_all().unwrap(),
@@ -1003,7 +1018,7 @@ mod tests {
     #[test]
     fn what_was_queued_survives_a_reopen() {
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("queue.duckdb");
+        let file = dir.path().join("own").join("queue.duckdb");
         let id = {
             let q = Queue::open(&file).unwrap();
             put(&q, Some("ask_9"), Some("rust"))

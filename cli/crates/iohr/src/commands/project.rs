@@ -9,7 +9,7 @@ use crate::ask::{self, Agent};
 use crate::atlas;
 use crate::cli::{Global, InitArgs, ProjectCommand, TemplateCommand};
 use crate::commands::ask::Run;
-use crate::context::{Ctx, session};
+use crate::context::{Ctx, shared_session};
 use crate::error::Error;
 use crate::handoff::{self, Stop};
 use crate::output::Out;
@@ -24,13 +24,6 @@ use crate::roles::runtime;
 use crate::template::{self, Answer, Answers, Kind, LANGUAGE, Question, Spec, StepName, Template};
 use crate::toolchain::{self, Lang, State};
 use crate::ui::{Choice, Mark, Nav, Ui, cancel};
-
-/// The project's own state: `~/.inorbit/projects/<name>/`, never inside the repository.
-pub(super) fn state_root() -> Result<PathBuf, Error> {
-    etcetera::home_dir()
-        .map(|h| h.join(".inorbit").join("projects"))
-        .map_err(|e| Error::Failed(format!("no home folder: {e}")))
-}
 
 /// The publisher half of the id: `--publisher`, else the account's slug when signed in,
 /// else `local`. The private listing takes it when that step lands.
@@ -59,7 +52,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
         ProjectCommand::Init(a) => init(g, env, *a, out).await,
         ProjectCommand::Sync(a) => project_space::sync_command(g, env, a, out).await,
         // The old name of `template list`: the same handler, so the output is identical.
-        ProjectCommand::Templates => template_command(g, TemplateCommand::List, out),
+        ProjectCommand::Templates => template_command(g, TemplateCommand::List { all: false }, out),
         ProjectCommand::Template { cmd } => template_command(g, cmd, out),
     }
 }
@@ -73,7 +66,7 @@ fn default_template(g: &Global) -> Result<String, Error> {
 
 fn template_command(g: &Global, cmd: TemplateCommand, out: Out) -> Result<(), Error> {
     match cmd {
-        TemplateCommand::List => project_template::list(&default_template(g)?, out),
+        TemplateCommand::List { all } => project_template::list(&default_template(g)?, all, out),
         TemplateCommand::Show { id } => project_template::show(&id, &default_template(g)?, out),
         TemplateCommand::Path { id } => project_template::path(&id, out),
         TemplateCommand::New { id, extends } => {
@@ -185,8 +178,8 @@ fn live_names(rows: &[template::Row]) -> String {
 
 /// The language menu: every language of the template, the live ones first, each marked with
 /// whether its toolchain is on the PATH (`have`); the cursor starts on the first live one that
-/// has its toolchain (else on the template's default). The ones still coming are listed, dim,
-/// and refused when picked. `behind` says, for a toolchain that is found, where it stands
+/// has its toolchain (else on the template's default). A variant still coming is not shown
+/// (`--lang` names it and is refused). `behind` says, for a toolchain that is found, where it stands
 /// against the latest stable (`rustc 1.90.0, 1.93.0 is out`), or nothing.
 fn language_choices(
     tpl: &Template,
@@ -200,7 +193,7 @@ fn language_choices(
         .find(|v| found(v))
         .copied()
         .or_else(|| tpl.default_variant());
-    let mut out: Vec<Choice> = live
+    let out: Vec<Choice> = live
         .iter()
         .map(|v| {
             let what = if v.needs.is_empty() {
@@ -227,19 +220,6 @@ fn language_choices(
             }
         })
         .collect();
-    out.extend(
-        tpl.meta
-            .variants
-            .iter()
-            .filter(|v| v.status != template::Status::Live)
-            .map(|v| Choice {
-                value: v.id.clone(),
-                label: v.label.clone(),
-                hint: String::new(),
-                available: false,
-                key: None,
-            }),
-    );
     let initial = recommended.map(|v| v.id.clone()).unwrap_or_default();
     (out, initial)
 }
@@ -576,13 +556,17 @@ struct ToolchainCheck {
 /// Puts the check's result in the plan (a dry run says what it would do), and, when the
 /// toolchain is behind, offers the upgrade: at a terminal a yes/no question that defaults to
 /// no, and the command runs only on a yes; without a terminal, with `--yes` or in a dry run
-/// the command is printed and never run. Nothing here fails `init`.
+/// the command is printed and never run. Nothing here fails `init`. The question is asked in
+/// the planning pass (`preview`, before the review) and kept in `kept`; the real run, after
+/// Create, only reads that answer and asks nothing.
 ///
 /// # Errors
 /// The person cancelled the question.
 fn check_toolchain(
     flow: &mut Flow,
     interactive: bool,
+    preview: bool,
+    kept: &mut Option<(String, bool)>,
     lang: Lang,
     state: &State,
 ) -> Result<ToolchainCheck, Error> {
@@ -614,6 +598,15 @@ fn check_toolchain(
             up.shown
         ),
     ) {
+        // The planning pass for the review asks it now, so nothing is asked after Create.
+        if preview && interactive && up.run.is_some() && kept.is_none() {
+            ui.info(&said);
+            let yes = ui.confirm(
+                &format!("Upgrade {} now with `{}`?", lang.label(), up.shown),
+                false,
+            )?;
+            *kept = Some((lang.label().to_owned(), yes));
+        }
         return Ok(ToolchainCheck {
             step: step("ask", format!("{said}; upgrade with `{}`", up.shown)),
             upgraded: false,
@@ -627,11 +620,10 @@ fn check_toolchain(
             upgraded: false,
         });
     }
-    ui.info(&said);
-    let yes = ui.confirm(
-        &format!("Upgrade {} now with `{}`?", lang.label(), up.shown),
-        false,
-    )?;
+    // Answered in the planning pass; never asked here. No answer is no.
+    let yes = kept
+        .as_ref()
+        .is_some_and(|(l, yes)| *yes && l == lang.label());
     if !yes {
         return Ok(ToolchainCheck {
             step: step("ask", behind),
@@ -750,6 +742,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         ask_thinking: cfg.ask.thinking.clone(),
         role,
         out,
+        asked: std::cell::RefCell::default(),
     };
     let mut wiz = Wizard {
         ui,
@@ -796,7 +789,11 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         let planned = execute(&cx, &r, true).await;
         wiz.draft.agent_ok = r.agent_ok.get();
         match review(ui, &wiz, planned.err())? {
-            Review::Create => return execute(&cx, &resolved(&wiz)?, false).await,
+            Review::Create => {
+                // No question after Create: every answer was taken before the review.
+                let _closed = Ui::close_questions();
+                return execute(&cx, &resolved(&wiz)?, false).await;
+            }
             Review::Change(stage) => wiz.at.jump(stage),
         }
     }
@@ -959,7 +956,7 @@ impl Wizard<'_> {
         let mut went = Went::Skip;
         if self.a.template.is_none() && self.interactive {
             let default = choose_template(None, self.configured.as_deref());
-            let rows = template::list(&self.root, &default);
+            let rows = template::list(&self.root, &default, self.a.experimental);
             let mut choices = vec![Choice {
                 value: DESCRIBE.into(),
                 label: "Describe it, your agent builds it".into(),
@@ -1020,7 +1017,7 @@ impl Wizard<'_> {
         }
         let tpl: Template = template::load(&spec, &self.root).map_err(Error::Usage)?;
         if tpl.meta.status == template::Status::Coming {
-            let rows = template::list(&self.root, "");
+            let rows = template::list(&self.root, "", false);
             return Err(Error::Usage(format!(
                 "the `{}` template is coming; live today: {}",
                 tpl.meta.id,
@@ -1074,6 +1071,15 @@ impl Wizard<'_> {
                 )));
             }
             given.insert(LANGUAGE.into(), Answer::Text(l.to_owned()));
+        }
+        if let Some(ci) = a.ci {
+            if !tpl.meta.questions.iter().any(|q| q.key == "ci") {
+                return Err(Error::Usage(format!(
+                    "the `{}` template writes no CI files, so --ci does not apply",
+                    tpl.meta.id
+                )));
+            }
+            given.insert("ci".into(), Answer::Text(ci.word().to_owned()));
         }
         Ok(given)
     }
@@ -1237,6 +1243,48 @@ struct Exec<'a> {
     /// The Role the agent builds in (`--role`, RFC 0211), found before the plan starts.
     role: Option<runtime::Applied>,
     out: Out,
+    /// What the preview asked, so the real run does not ask it again.
+    asked: std::cell::RefCell<Asked>,
+}
+
+/// The questions `execute` puts to the person (where to keep the data, whether to read the
+/// site), settled once. The review page runs `execute` twice, as a preview and for real; the
+/// second run takes these answers, so nothing is asked or shown twice. They are dropped when
+/// the project's folder, name or description change, because the answers depend on them.
+#[derive(Default)]
+struct Asked {
+    key: String,
+    place: Option<super::project_place::Decision>,
+    crawl: Option<CrawlAnswer>,
+    /// The project's shape, once asked.
+    shape: Option<ShapeAnswer>,
+    /// Whether to upgrade the behind toolchain of that language.
+    upgrade: Option<(String, bool)>,
+    /// The extensions the person said yes to installing, once the offer was put.
+    extensions: Option<(String, Vec<String>)>,
+}
+
+/// What the crawl question settled: the plan, or no crawl (also an answer, not asked again),
+/// and whether to install the crawler first when it is missing (asked with it, before the
+/// review).
+#[derive(Clone)]
+struct CrawlAnswer(Option<super::init_crawl::Plan>, bool);
+
+/// What the shape question settled: the shape, or `None` when nobody answered (the item stays
+/// open; also an answer, not asked again).
+#[derive(Clone)]
+struct ShapeAnswer(Option<String>);
+
+impl Asked {
+    /// Forgets the answers unless they were given for the same project.
+    fn for_project(&mut self, key: String) {
+        if self.key != key {
+            *self = Self {
+                key,
+                ..Self::default()
+            };
+        }
+    }
 }
 
 /// What the person answered, settled: the input of the plan.
@@ -1330,7 +1378,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             },
             other => other,
         };
-        let done = check_toolchain(&mut flow, interactive, l, &state)?;
+        let mut kept = cx.asked.borrow().upgrade.clone();
+        let done = check_toolchain(&mut flow, interactive, preview, &mut kept, l, &state)?;
+        cx.asked.borrow_mut().upgrade = kept;
         if done.upgraded {
             // The files and the agent are told the version that is there now.
             toolchain = variant.and_then(|v| project::toolchain_line(&v.toolchain));
@@ -1363,6 +1413,20 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     );
     let programs = template::programs(tpl, &vals);
     let runner = lang.as_deref().and_then(|l| tpl.runner(l, &vals));
+    // The folder's context file for `?` and `??`: written once, never over a person's own.
+    if !a.no_io_md && !crate::iomd::has_file(&dir) {
+        let line = |v: &[String]| (!v.is_empty()).then(|| v.join(" "));
+        let (build, test) = runner
+            .as_ref()
+            .map_or((None, None), |r| (line(&r.build), line(&r.test)));
+        crate::iomd::add_starter(
+            &mut files,
+            name,
+            describe.as_deref(),
+            (build.as_deref(), test.as_deref()),
+            &me,
+        );
+    }
     // Reads only, so a dry run finds the same problems a real one would.
     project::check_target(&dir, &files).map_err(Error::Failed)?;
     // Init run again in the folder it made: files already there are left alone, nothing is
@@ -1413,6 +1477,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         } else if has_agent_step && interactive {
             if let Some(v) = r.agent_ok.get() {
                 v
+            } else if !dry {
+                // After Create nothing is asked: the planning pass took this answer.
+                false
             } else {
                 let v = ui.confirm(
                     &format!(
@@ -1473,7 +1540,8 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                         .map(runtime::Applied::system_text)
                         .as_deref(),
                     &prompt,
-                ),
+                )
+                .map_err(Error::Usage)?,
                 prompt,
                 model,
                 role: cx.role.as_ref().map(runtime::Applied::json),
@@ -1505,8 +1573,26 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         steps.insert(st, agent_step);
     }
 
-    let state_root = state_root()?;
-    let state = state_root.join(name);
+    // Where the notes, the crawl and the machine state live (light PRD 0210): asked once,
+    // recorded in inorbit.toml, then every writer follows it through one resolver.
+    cx.asked.borrow_mut().for_project(format!(
+        "{}\n{name}\n{}",
+        dir.display(),
+        describe.as_deref().unwrap_or_default()
+    ));
+    let kept = cx.asked.borrow().place.clone();
+    let placed = if let Some(d) = kept {
+        d
+    } else {
+        let d = super::project_place::decide(a, &dir, name, interactive && dry, ui)?;
+        cx.asked.borrow_mut().place = Some(d.clone());
+        d
+    };
+    let layout = placed.layout.clone();
+    let seed = super::project_place::split_seed(&placed, &mut files);
+    let state = layout
+        .state()
+        .ok_or_else(|| Error::Failed("cannot find the home folder".into()))?;
     let signed_in = flow
         .act_async("signin", "check your sign-in (one call to /v1/me)", || {
             check_sign_in(g, env, ui)
@@ -1581,6 +1667,14 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             }
             report.files = written;
             report.steps.push(st);
+            // The place: recorded, the machine state ignored when it sits in the project,
+            // the starter notes written where they belong.
+            let at = flow.act("place", &placed.would(), || placed.apply(&dir, &seed));
+            match at {
+                Some(Ok(st)) => report.steps.push(st),
+                Some(Err(e)) => return Err(Error::Failed(e)),
+                None => {}
+            }
             report
                 .steps
                 .push(project_space::step(synced.as_ref(), &env_name));
@@ -1608,7 +1702,10 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             }
             return Err(Error::Failed(e));
         }
-        None => {}
+        // A preview or a dry run: the place is listed as a step, as the others are.
+        None => {
+            flow.gate("place", &placed.would());
+        }
     }
     // The built-in roles (security and the language's engineer) go to the account only as part
     // of the account step above: a local-only init (`--no-sync`) or one without a sign-in
@@ -1652,10 +1749,10 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     };
     // The Planner plan the project's builds go through (RFC 0211): made or found, and its id
     // written into coordination.toml. Signed out, init goes on and says how to set it later.
-    let plan = flow
+    let planned = flow
         .act_async(
             "plan",
-            "create or find the project's Planner plan and write its id into coordination.toml",
+            "create or find the project's Planner plan (its id goes into coordination.toml when the project has one)",
             || {
                 super::project_plan::run(
                     g,
@@ -1664,25 +1761,79 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                     name,
                     a.plan.plan_id.as_deref(),
                     a.plan.no_plan,
+                    a.space.no_sync,
                 )
             },
         )
-        .await
-        .flatten();
-    if let Some(st) = plan {
-        if st.state == "skipped" && !out.json {
-            ui.note("Planner", &st.said);
+        .await;
+    let plan_id = planned.as_ref().and_then(|p| p.id.clone());
+    if let Some(p) = planned {
+        if p.step.state == "skipped" && !out.json {
+            ui.note("Planner", &p.step.said);
         }
-        report.steps.push(st);
+        report.steps.push(p.step);
+    }
+    // The project's shape (PRD 0210): asked once, in the planning pass before the review, kept
+    // in `Asked`, then recorded and filed as an item in the plan. A dry run asks nothing and
+    // only says what it would do; the real run, after Create, only reads the answer.
+    {
+        let kept = cx.asked.borrow().shape.clone();
+        let answer = if let Some(ShapeAnswer(k)) = kept {
+            k
+        } else if dry && !preview {
+            a.place_args.shape.clone()
+        } else {
+            let k = super::project_shape::pick(
+                a.place_args.shape.as_deref(),
+                interactive && preview,
+                ui,
+                &dir,
+            )?;
+            if preview {
+                cx.asked.borrow_mut().shape = Some(ShapeAnswer(k.clone()));
+            }
+            k
+        };
+        let what = super::project_shape::would(answer.as_deref());
+        let st = flow
+            .act_async("shape", &what, || {
+                super::project_shape::run(g, env, &dir, answer.as_deref(), plan_id.as_deref())
+            })
+            .await;
+        if let Some(st) = st {
+            if st.state == "skipped" && !out.json {
+                ui.note("Planner", &st.said);
+            }
+            report.steps.push(st);
+        }
     }
     // A public site, read on this machine when the person said so (PRD 0190.1).
-    if let Some(plan) =
-        super::init_crawl::decide(&a.crawl, describe.as_deref(), interactive, ui, out)?
-    {
+    let kept = cx.asked.borrow().crawl.clone();
+    let (crawl, install_crawler) = if let Some(CrawlAnswer(c, install)) = kept {
+        (c, install)
+    } else {
+        let c = super::init_crawl::decide(
+            &a.crawl,
+            describe.as_deref(),
+            &layout.shown(&layout.crawl()),
+            interactive && dry,
+            ui,
+            out,
+        )?;
+        // Whether to install a missing crawler is asked here too, before the review.
+        let install = if c.is_some() && preview {
+            super::init_crawl::ask_install(g, ui, out, interactive)?
+        } else {
+            false
+        };
+        cx.asked.borrow_mut().crawl = Some(CrawlAnswer(c.clone(), install));
+        (c, install)
+    };
+    if let Some(plan) = crawl {
         let what = plan.would();
         let st = flow
             .act_async("crawl", &what, || {
-                super::init_crawl::run(g, env, ui, out, interactive, &dir, &plan)
+                super::init_crawl::run(g, env, ui, out, install_crawler, &dir, &plan)
             })
             .await;
         if let Some(st) = st {
@@ -1715,7 +1866,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 );
                 let sp = (!dry).then(|| ui.step("Registering the project"));
                 let r = flow.act("register", &what, || {
-                    project::register_step(&dir, &state_root, name, &tpl.meta.id, &created_at)
+                    project::register_in(&dir, &state, name, &tpl.meta.id, &created_at)
                 });
                 match r {
                     Some(Ok((_, st))) => {
@@ -1910,20 +2061,38 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     }
     // Extensions that fit the project: one more step, offered at a terminal, a hint
     // line otherwise.
-    if let Some(st) = super::init_extensions::offer(
+    // The question is put in the planning pass; the run after Create installs what was said yes to.
+    let ext_key = format!(
+        "{}\n{}",
+        tpl.meta.id,
+        describe.as_deref().unwrap_or_default()
+    );
+    let mut ext_kept = cx
+        .asked
+        .borrow()
+        .extensions
+        .clone()
+        .filter(|(k, _)| *k == ext_key)
+        .map(|(_, ids)| ids);
+    let offered = super::init_extensions::offer(
         g,
         env,
         ui,
         out,
         dry,
+        preview,
         interactive,
         &super::init_extensions::Signals {
             template: &tpl.meta.id,
             describe: describe.as_deref(),
         },
+        &mut ext_kept,
     )
-    .await
-    {
+    .await;
+    if preview {
+        cx.asked.borrow_mut().extensions = ext_kept.map(|ids| (ext_key, ids));
+    }
+    if let Some(st) = offered {
         report.steps.push(st);
     }
     if dry {
@@ -2110,7 +2279,7 @@ fn dry_report(
 /// found here and not later). `Some(who)` when signed in.
 async fn check_sign_in(g: &Global, env: &Env, ui: Ui) -> Option<String> {
     let sign_in = ui.step("Checking your sign-in");
-    let signed_in = match session(g, env).await {
+    let signed_in = match shared_session(g, env).await {
         Ok(s) => match s.api.get::<serde_json::Value>("/v1/me", &[]).await {
             Ok(me) => Some(format!(
                 "{} ({}, account {})",

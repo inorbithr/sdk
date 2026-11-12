@@ -54,6 +54,9 @@ pub struct Config {
     /// `iohr` panel settings (`[panel]`); read, never written: a person edits it.
     #[serde(default, skip_serializing_if = "PanelConfig::is_empty")]
     pub panel: PanelConfig,
+    /// `iohr doctor` settings (`[doctor]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "DoctorConfig::is_empty")]
+    pub doctor: DoctorConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -246,6 +249,31 @@ impl AskConfig {
     }
 }
 
+/// The `[doctor]` table: whether `iohr doctor` and the `?` card may repair a local problem
+/// themselves. Off when unset: a fix is offered, never run, until the person says yes here.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct DoctorConfig {
+    /// Run the safe fixes (the ones that only restart something already down) without asking.
+    /// Every other fix stays an offer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_fix: Option<bool>,
+}
+
+impl DoctorConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.auto_fix.is_none()
+    }
+
+    /// Whether the safe fixes run on their own (`auto_fix = true`).
+    #[must_use]
+    pub fn auto_fix_on(&self) -> bool {
+        self.auto_fix == Some(true)
+    }
+}
+
 /// The `[sync]` table: whether the project's `atlas/` documents may be pushed to Decisions
 /// without the person running `iohr sync` (RFC 0205). Nothing leaves the machine otherwise.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -315,13 +343,18 @@ pub struct PanelConfig {
     /// `IOHR_PANEL_MOUSE` overrides it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mouse: Option<String>,
+    /// The chat box at the bottom of the panel's terminal (RFC 0212): `on` (shown, the
+    /// default), `hidden` (loaded, but a corner chip until Option+h brings it back) or `off`
+    /// (never drawn, `?` stays the shell's). `IOHR_PANEL_CHAT` overrides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat: Option<String>,
 }
 
 impl PanelConfig {
     /// Whether nothing is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.mouse.is_none()
+        self.mouse.is_none() && self.chat.is_none()
     }
 }
 
@@ -383,6 +416,28 @@ pub struct RunnerConfig {
     /// `target:sweep` or `target:guard` in. Unset, the runner refuses every sweep.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub core_checkout: Option<String>,
+    /// Which sign-in Claude turns may run on: `api` (default; an Anthropic API key the
+    /// runner keeps in the credential store), `plan` (your own Claude plan only, which
+    /// is for personal use only; the stored key is not used) or `any` (either). Set
+    /// here only: the account's policy can narrow a runner, never widen it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_auth: Option<String>,
+    /// The same for Codex turns: `any` (default), `plan` or `api`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_auth: Option<String>,
+    /// Whether git may use this machine's own `gh` sign-in for a job when the platform
+    /// says its GitHub App is not installed for the account (or mints no runner tokens).
+    /// Unset or false, such a job is refused instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_host_git_credentials: Option<bool>,
+    /// Days a job checkout, a mirror or a shared build directory may sit unused before
+    /// the runner removes it (`iohr runner prune`, and the runner while it is idle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_keep_days: Option<u32>,
+    /// The most the checkouts, mirrors and build directories together may take, in GB;
+    /// over it, the oldest unused go first. Unset, no cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_max_gb: Option<u64>,
 }
 
 impl RunnerConfig {
@@ -402,6 +457,11 @@ impl RunnerConfig {
             && self.upgrade_sign_identity.is_none()
             && self.user_units.is_none()
             && self.core_checkout.is_none()
+            && self.claude_auth.is_none()
+            && self.codex_auth.is_none()
+            && self.allow_host_git_credentials.is_none()
+            && self.workspace_keep_days.is_none()
+            && self.workspace_max_gb.is_none()
     }
 }
 
@@ -816,7 +876,10 @@ fn storage_str(s: Storage) -> &'static str {
 
 /// Writes `bytes` to `dir/name` through a temporary file and a rename, with the
 /// directory mode 0700 and the file mode 0600 on Unix.
-pub(crate) fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
+///
+/// # Errors
+/// The directory or the file could not be written.
+pub fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
     create_private_dir(dir)?;
     let tmp = dir.join(format!(".{name}.tmp"));
     {

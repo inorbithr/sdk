@@ -14,16 +14,18 @@ agent and for people. Language-specific rules live in each language directory's 
 | `typescript/`, `python/`, `go/`, `java/`, `csharp/`, `rust/`, `swift/` | One package each: a hand-written runtime and the public surface `iohr sdk generate` writes into it (ADR 0011). Swift's `Package.swift` sits at the root, where SwiftPM reads it (ADR 0016). |
 | `dart/` | The Dart runtime, started (platform RFC 0074.8): the bundled contract and the answer checker; the generated surface and the conformance driver follow. |
 | `cli/` | The `iohr` command line: a Cargo workspace of its own (ADR 0009), with `cli/AGENTS.md`. |
+| `ui/` | The web UI `iohr ui` serves (RFC 0217): a private Vite and React package, not published. The shell frame layer moves here from the Mac app under ADR 0230. |
 | `examples/<lang>/` | Small programs that compile in CI and are quoted by the READMEs. |
 | `docs/` | `design.md` (cross-language API rules), `adr/` (decisions), `releasing.md`, `style.md`. |
 | `tools/` | Repository scripts used by `mise` tasks and hooks. |
 
 The `iohr` guides live on the developer site (developers.inorbit.hr, pages `tools/iohr`,
 `projects`, `ask`, `extensions` and `preview`), built from the platform repository. A change
-to what `iohr` prints or accepts updates `cli/README.md` here in the same PR; the site's
-guides and their captured output are updated from the release that ships it. `iohr-preview`
-is the same program under another name, built ahead of a release: say in the README which
-parts only it has, and drop the note when the release carries them.
+to what `iohr` prints or accepts updates `cli/README.md` and its topic pages in `cli/docs/`
+here in the same PR; the site's guides and their captured output are updated from the
+release that ships it. `iohr-preview` is the same program under another name, built ahead
+of a release: say in the README which parts only it has, and drop the note when the
+release carries them.
 
 ## Source of truth
 
@@ -53,6 +55,8 @@ once, then:
   result differs from what is committed.
 - `mise run conformance` or `conformance:<lang>`: run the shared cases.
 - `mise run examples:check`: compile every example.
+- `mise run ui:check`: the web UI's biome, type check, tests and build, through `iohr ui check`;
+  `ui:dev`, `ui:build` and `ui:serve` are the other verbs.
 - `mise run spec:lint`: lint `spec/` and check it for breaking changes against `main`.
 
 A task for a language whose package does not exist yet prints a skip line and exits 0.
@@ -80,7 +84,7 @@ A task for a language whose package does not exist yet prints a skip line and ex
 
 ## Security and compliance
 
-- The security requirements in `docs/security/requirements.md` (SR-01 to SR-34) are as
+- The security requirements in `docs/security/requirements.md` (SR-01 to SR-36) are as
   binding as `docs/design.md`; code review rejects a change that breaks one.
 - Never put a key secret, token, health data (PHI), personal data or card number in a
   log line, error message, URL, test fixture or example output.

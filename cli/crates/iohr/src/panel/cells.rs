@@ -39,7 +39,7 @@ pub(super) struct Cell {
 }
 
 impl Cell {
-    fn new(ch: char, fg: Rgb, bg: Rgb, bold: bool) -> Self {
+    pub(super) fn new(ch: char, fg: Rgb, bg: Rgb, bold: bool) -> Self {
         Self { ch, fg, bg, bold }
     }
 }
