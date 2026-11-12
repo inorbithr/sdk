@@ -99,6 +99,7 @@ def main() -> int:
     manifest = tomllib.loads((ROOT / "examples/examples.toml").read_text())
     calls = manifest["call"]
     langs = manifest["language"]
+    extensions = manifest.get("extension", {})
     cases = {p.stem for p in (ROOT / "conformance/cases/examples").glob("*.yaml")}
     problems = [f"no case for call type {c['name']}" for c in calls if c["name"] not in cases]
     problems += [f"case {n} is in no call type" for n in sorted(cases - {c["name"] for c in calls})]
@@ -137,6 +138,12 @@ def main() -> int:
                     print(f"[{lang}] {name}: skipped ({skip[name]})")
                     continue
                 results.append(run_one(lang, spec, c, addr, base_env, cwd, sha))
+        for name, spec in extensions.items():
+            if args.lang and name not in args.lang:
+                continue
+            if args.only and spec.get("example", "self-test") not in args.only:
+                continue
+            results.append(run_extension(name, spec, base_env, sha))
     finally:
         server.terminate()
         server.wait(timeout=10)
@@ -150,6 +157,23 @@ def main() -> int:
         print(f"{lang}: {sum(1 for r in mine if r['ok'])}/{len(mine)} passed")
     print(f"examples: {len(ran) - len(bad)}/{len(ran)} passed, results in {args.results}")
     return 1 if bad else 0
+
+
+def run_extension(name: str, spec: dict, base_env: dict[str, str], sha: str) -> dict[str, object]:
+    """An extension example: its self-test (`iohr ext dev --test`) must exit 0."""
+    example = spec.get("example", "self-test")
+    t0 = time.monotonic()
+    note = ""
+    try:
+        done = shell(spec["run"], ROOT, base_env)
+        ok = done.returncode == 0
+        if not ok:
+            note = f"exit {done.returncode}: " + (done.stderr or done.stdout).strip()[-400:]
+    except subprocess.TimeoutExpired:
+        ok, note = False, f"timed out after {TIMEOUT_S * 5}s"
+    ms = int((time.monotonic() - t0) * 1000)
+    print(f"[{name}] {example}: {'ok' if ok else 'FAIL'} ({ms} ms)")
+    return entry(name, example, ok, ms, sha, note)
 
 
 def entry(
