@@ -282,6 +282,9 @@ fn scan(bytes: &[u8]) -> (Vec<Input>, usize) {
                     chars.next();
                 }
             },
+            // The dead key Option-i types is the menu key alone; committed with the next key
+            // (Down, a letter) it is that key's companion and the panel's menu stays as it is.
+            '\u{2c6}' if bytes != "\u{2c6}".as_bytes() => {}
             '\u{2c6}' | '\x07' => out.push(Input::Key(Key::Menu)),
             '\r' | '\n' => out.push(Input::Key(Key::Enter)),
             '\x7f' | '\x08' => out.push(Input::Key(Key::Backspace)),
@@ -319,6 +322,19 @@ mod tests {
         assert!(!k.is(b"ls\x1bi"));
         assert!(!k.is(b"\x1b"));
         assert!(!k.is(b"\x07\x07"));
+    }
+
+    #[test]
+    fn a_dead_key_is_the_menu_key_only_when_it_is_the_whole_read() {
+        assert_eq!(parse("\u{2c6}".as_bytes()), [Key::Menu]);
+        assert_eq!(parse("\u{2c6}\x1b[B".as_bytes()), [Key::Down]);
+        assert_eq!(parse("\x1b[B\u{2c6}".as_bytes()), [Key::Down]);
+        assert_eq!(parse(b"\x1bi"), [Key::Menu]);
+        assert_eq!(
+            parse(b"\x1b[B\x07"),
+            [Key::Down, Key::Menu],
+            "Ctrl-G is one byte, never a companion"
+        );
     }
 
     #[test]
