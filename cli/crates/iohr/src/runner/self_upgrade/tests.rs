@@ -219,6 +219,8 @@ async fn only_a_strictly_newer_release_is_chosen() {
         ("0.1.0-alpha.27", "0.1.0-alpha.26", false),
         ("0.1.0-alpha.9", "0.1.0-alpha.10", true),
         ("0.1.0-alpha.99", "0.1.0", true),
+        ("0.1.0-alpha.39", "0.1.0", true),
+        ("0.1.0", "0.1.0-alpha.39", false),
         ("0.1.0", "0.1.0-rc.1", false),
         ("0.1.0", "0.1.1", true),
     ];

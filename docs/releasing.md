@@ -63,8 +63,13 @@ Conventional Commits that touched it; nobody sets one by hand (no `release-as`, 
   and the squash-merge subject and body keep it. `rust:api` and `py:api` accept a break
   only when such a commit since the last tag declares it (`tools/declared-break.py`): Rust
   is then checked as a breaking release, Python's changes are listed without failing.
-- The command line is the same rule on its `alpha` pre-release line (`0.1.0-alpha.N`)
-  until its first stable release.
+- The command line follows the same rule from its first stable release, `0.1.0` (ADR 0237,
+  RFC 0226): a `feat` or `fix` bumps the patch (0.1.0 to 0.1.1), a declared break the
+  minor (0.1.x to 0.2.0). It left the `alpha` line (`0.1.0-alpha.N`) with that release.
+- The one exception to "nobody sets a version by hand" is `"release-as": "0.1.0"` on the
+  `cli` package in `release-please-config.json`: it takes iohr from `0.1.0-alpha.39` in the
+  manifest to `0.1.0`. A follow-up removes it once `iohr/v0.1.0` is tagged; left in, every
+  later release PR would propose `0.1.0` again.
 - Before merging a release PR, check its title and the manifest line carry the version
   the commits call for.
 
