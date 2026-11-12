@@ -96,16 +96,41 @@ fn subcommand<'a>(args: &[&'a str]) -> &'a str {
     ""
 }
 
-/// `git <args>` in `repo` under `limit`: never a prompt, never another repository named
-/// by the environment, nothing on stdin. The runner's own environment, which holds no
-/// GitHub token (a call that reaches GitHub goes through [`git_in_with`]); the model's
-/// scrubbed one is not involved.
+/// On every runner git call, before its own arguments. The checkout's configuration is
+/// written by the turn, and the command line comes after every configuration file in
+/// git's order, so these win: no file-system monitor program, no hooks, no submodule
+/// recursion.
+const PINNED: [&str; 6] = [
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "submodule.recurse=false",
+];
+
+/// On a call that works on the local repository only: no transport at all.
+const LOCAL_ONLY: [&str; 2] = ["-c", "protocol.allow=never"];
+
+/// `git <args>` in `repo` under `limit`, for a call that stays on this machine (status,
+/// add, commit, merge, rev-parse, worktree): [`PINNED`] and no transport, never a
+/// prompt, never another repository named by the environment, nothing on stdin, and the
+/// same contained environment a check gets ([`env::scrub`] and [`env::contained`]): the
+/// repository may be the turn's checkout, whose configuration can name programs.
 pub(crate) async fn git_in(repo: &Path, args: &[&str], limit: Duration) -> Result<GitOut, Skip> {
-    git_in_with(repo, args, limit, &[]).await
+    let mut all: Vec<&str> = LOCAL_ONLY.to_vec();
+    all.extend_from_slice(args);
+    let mut c = Command::new("git");
+    c.env_clear()
+        .envs(env::scrub(std::env::vars_os()))
+        .envs(env::contained());
+    git_output(git_command(c, repo, &all), args, limit).await
 }
 
-/// [`git_in`] with `extra` set on this one child only (the job's token for the
-/// credential helper, `access::TOKEN_VAR`); nothing else sees it.
+/// `git <args>` in `repo` with the runner's own environment and `extra` set on this one
+/// child only (the job's token for the credential helper, `access::TOKEN_VAR`); nothing
+/// else sees it. For a call that reaches a remote: in the runner's guarded mirror, or
+/// [`fetch_main`] in a checkout the runner does not own, as the host's git says.
 pub(crate) async fn git_in_with(
     repo: &Path,
     args: &[&str],
@@ -113,9 +138,15 @@ pub(crate) async fn git_in_with(
     extra: &[(&str, &str)],
 ) -> Result<GitOut, Skip> {
     let mut c = Command::new("git");
-    c.args(args)
+    c.envs(extra.iter().copied());
+    git_output(git_command(c, repo, args), args, limit).await
+}
+
+/// The one way a runner git child `c` is finished: [`PINNED`], then `args`.
+fn git_command(mut c: Command, repo: &Path, args: &[&str]) -> Command {
+    c.args(PINNED)
+        .args(args)
         .current_dir(repo)
-        .envs(extra.iter().copied())
         .env("GIT_TERMINAL_PROMPT", "0")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
@@ -124,6 +155,10 @@ pub(crate) async fn git_in_with(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    c
+}
+
+async fn git_output(mut c: Command, args: &[&str], limit: Duration) -> Result<GitOut, Skip> {
     let out = tokio::time::timeout(limit, c.output())
         .await
         .map_err(|_| Skip::Git(format!("git {} took too long", subcommand(args))))?
@@ -167,7 +202,14 @@ pub(crate) enum MainFrom {
 /// `git fetch origin main` in `repo`, with no token ([`MainFrom::Checkout`]); a failure
 /// says git's last stderr line, redacted.
 async fn fetch_main(repo: &Path) -> Result<(), Skip> {
-    let o = git_in(repo, &["fetch", "--quiet", "origin", "main"], GIT_TIMEOUT).await?;
+    // The host's own environment: a person's fetch may need their credential helper.
+    let o = git_in_with(
+        repo,
+        &["fetch", "--quiet", "origin", "main"],
+        GIT_TIMEOUT,
+        &[],
+    )
+    .await?;
     if o.code == 0 {
         Ok(())
     } else {
@@ -232,7 +274,10 @@ pub(crate) async fn check(
     if main == MainFrom::Checkout {
         fetch_main(repo).await?;
     }
-    if !git_ok(repo, &["status", "--porcelain"]).await?.is_empty() {
+    if !git_ok(repo, &["status", "--porcelain", "--ignore-submodules=all"])
+        .await?
+        .is_empty()
+    {
         return Err(Skip::Dirty);
     }
     let head = git_ok(repo, &["rev-parse", "HEAD"]).await?;
@@ -756,5 +801,105 @@ pub(crate) mod tests {
             !why.contains("ghs_") && !why.contains("x-access-token"),
             "{why}"
         );
+    }
+
+    /// A checkout's own configuration names a file-system monitor and hooks; the
+    /// runner's local git calls run neither, and plain git (the control) does.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_checkout_configured_program_does_not_run_on_runner_git_calls() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let d = tempfile::tempdir().unwrap();
+        let repo = d.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        sh(&repo, &["init", "--quiet"]);
+        let marker = d.path().join("ran");
+        let program = d.path().join("probe");
+        std::fs::write(
+            &program,
+            format!("#!/bin/sh\necho \"$0\" >> '{}'\nexit 0\n", marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let hooks = d.path().join("hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        for h in [
+            "pre-commit",
+            "prepare-commit-msg",
+            "commit-msg",
+            "post-commit",
+            "pre-merge-commit",
+            "post-merge",
+            "post-checkout",
+            "post-index-change",
+            "reference-transaction",
+        ] {
+            std::fs::copy(&program, hooks.join(h)).unwrap();
+        }
+        for (k, v) in [
+            ("core.fsmonitor", program.to_str().unwrap()),
+            ("core.hooksPath", hooks.to_str().unwrap()),
+            ("user.email", "t@example.com"),
+            ("user.name", "t"),
+            ("commit.gpgsign", "false"),
+        ] {
+            sh(&repo, &["config", k, v]);
+        }
+        write(&repo, "a.txt", "a\n");
+        for args in [
+            &["status", "--porcelain", "--ignore-submodules=all"][..],
+            &["add", "--all"],
+            &["commit", "--quiet", "-m", "one"],
+            &["status", "--porcelain"],
+        ] {
+            let o = git_in(&repo, args, LIMIT).await.unwrap();
+            assert_eq!(o.code, 0, "git {args:?}: {}", o.stderr_tail);
+        }
+        assert!(!marker.exists(), "a configured program ran");
+        // No transport from a local call either.
+        let other = d.path().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        sh(&other, &["init", "--quiet"]);
+        let o = git_in(&repo, &["fetch", "--quiet", other.to_str().unwrap()], LIMIT)
+            .await
+            .unwrap();
+        assert_ne!(o.code, 0, "a local call fetched");
+        // The control: plain git in the same checkout runs them.
+        sh(&repo, &["commit", "--quiet", "--allow-empty", "-m", "two"]);
+        assert!(marker.exists(), "the fixture's program never ran");
+    }
+
+    /// What a checkout's configured program still sees on a local call: the contained
+    /// environment a check gets, not the runner's own.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_local_git_call_gets_the_contained_environment() {
+        let d = tempfile::tempdir().unwrap();
+        let repo = d.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        sh(&repo, &["init", "--quiet"]);
+        let seen = d.path().join("env.txt");
+        sh(
+            &repo,
+            &[
+                "config",
+                "filter.probe.clean",
+                &format!("env > '{}'; cat", seen.display()),
+            ],
+        );
+        write(&repo, ".gitattributes", "*.txt filter=probe\n");
+        write(&repo, "a.txt", "a\n");
+        let o = git_in(&repo, &["add", "--all"], LIMIT).await.unwrap();
+        assert_eq!(o.code, 0, "{}", o.stderr_tail);
+        let env = std::fs::read_to_string(&seen).unwrap();
+        assert!(
+            env.lines()
+                .any(|l| l == format!("GH_CONFIG_DIR={}", env::NO_GH_CONFIG)),
+            "{env}"
+        );
+        assert!(env.lines().any(|l| l == "GIT_CONFIG_VALUE_0="), "{env}");
+        if std::env::var_os("CARGO_MANIFEST_DIR").is_some() {
+            assert!(!env.contains("CARGO_MANIFEST_DIR="), "{env}");
+        }
     }
 }
