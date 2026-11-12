@@ -1627,15 +1627,59 @@ mod tests {
             let (state, _) = register_step(&dir, &st, "my-shop", "demo", "").unwrap();
             let said = smoke(&dir, &state, "my-shop", runner.as_ref());
             assert!(said.ok, "{}: {} / {}", v.id, said.said, said.output);
-            let b = said.heartbeat.unwrap();
+            let b = said.heartbeat.unwrap_or_else(|| {
+                panic!("{}: no heartbeat: {} / {}", v.id, said.said, said.output)
+            });
             assert_eq!(b["id"], "local/my-shop", "{}", v.id);
             assert_eq!(b["beats"], 1, "{}", v.id);
             assert_eq!(b["token"], "refused", "{}", v.id);
             // The project's own test, the way its README says.
-            let test = &v.test;
-            let (prog, args) = test.split_first().unwrap();
             std::fs::create_dir_all(tmp.path().join("tstate")).unwrap();
             std::fs::create_dir_all(tmp.path().join("tcache")).unwrap();
+            // The rendered test command (`@@MODULE@@` filled in), with its paths expanded.
+            let test: Vec<String> = runner
+                .as_ref()
+                .unwrap()
+                .test
+                .iter()
+                .map(|w| {
+                    paths_in(
+                        w,
+                        &dir,
+                        &tmp.path().join("tstate"),
+                        &tmp.path().join("tcache"),
+                    )
+                })
+                .collect();
+            let (prog, args) = test.split_first().unwrap();
+            // A compiled language builds first, into the same cache, the way its README says.
+            let rt = runner.as_ref().unwrap();
+            if let Some((bp, bargs)) = rt.build.split_first() {
+                let bargs: Vec<String> = bargs
+                    .iter()
+                    .map(|w| {
+                        paths_in(
+                            w,
+                            &dir,
+                            &tmp.path().join("tstate"),
+                            &tmp.path().join("tcache"),
+                        )
+                    })
+                    .collect();
+                let built = Command::new(bp)
+                    .args(&bargs)
+                    .current_dir(&dir)
+                    .env("CARGO_TARGET_DIR", tmp.path().join("tt"))
+                    .output()
+                    .unwrap();
+                assert!(
+                    built.status.success(),
+                    "{} build: {}{}",
+                    v.id,
+                    String::from_utf8_lossy(&built.stdout),
+                    String::from_utf8_lossy(&built.stderr)
+                );
+            }
             let out = Command::new(prog)
                 .args(args)
                 .current_dir(&dir)

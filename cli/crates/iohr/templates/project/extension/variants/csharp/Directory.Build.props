@@ -1,0 +1,13 @@
+<Project>
+  <!-- Every project here: nullable on, warnings are errors. There is no package to restore. -->
+  <PropertyGroup>
+    <LangVersion>13</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <Deterministic>true</Deterministic>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CA1515;CA1716;CA1031;CA1707</NoWarn>
+  </PropertyGroup>
+</Project>

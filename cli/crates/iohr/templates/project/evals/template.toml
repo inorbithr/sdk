@@ -1,7 +1,8 @@
 # The evals template as data (PRD 0088.1, ADR 0221): an offline eval suite with a pass bar. A
 # labelled dataset (JSONL, twelve cases), a solver, deterministic scorers, `thresholds.toml` (the
 # bar), `docs/how-to-grade.md` and an `evals.yml` workflow that runs the suite on every pull
-# request. Python on its standard library alone. The solver is a stub, labelled as one
+# request. Every language runs on its standard library alone (Python, TypeScript, Go, Rust, Java,
+# Swift) or on the language's own test runner (C#, Dart; see their variants). The solver is a stub, labelled as one
 # (`stub: true`, a `stub-` name), so the suite runs and tests offline with no key; swap in a
 # provider behind `Solver.solve`. The enterprise floor (CI, signed and attested release, SBOM,
 # dependency updates, secret scan) comes from `floor`.
@@ -45,3 +46,281 @@ LAYOUT = '''- `src/@@MODULE@@/runner.py`: runs the solver over the cases, scores
 - `src/@@MODULE@@/__main__.py`: `python -m @@MODULE@@`, exit 0 met, 1 missed, 2 broken suite.
 - `tests/test_suite.py`: the passes-on-init test, including that the bar bites.
 - `uv.lock`: the lockfile (`uv lock` refreshes it).'''
+SOLVER_FILE = "src/@@MODULE@@/solver.py"
+SCORERS_FILE = "src/@@MODULE@@/scorers.py"
+TEST_FILE = "tests/test_suite.py"
+SOLVER_HOWTO = "Write a class with `name`, `stub` and `solve(case)` and pass it to `main(solver=...)`."
+CI_EVAL = "PYTHONPATH=src python3 -m @@MODULE@@"
+OFFLINE_NOTE = "with the network switched off"
+
+# Node runs TypeScript unflagged since 22.18 (type stripping, no build): https://nodejs.org/api/typescript.html
+[[variants]]
+id = "typescript"
+label = "TypeScript on Node 22.18 or newer (standard library only)"
+status = "live"
+needs = ["node"]
+toolchain = ["node", "--version"]
+agent_allow = ["node --test", "node --check", "npm test"]
+smoke = "test"
+test = ["node", "--test", "tests/**/*.test.ts"]
+[variants.vars]
+SOURCE = "src/, tests in tests/"
+IGNORE = "node_modules/\nreport.txt"
+RUN_TEST = "`node --test 'tests/**/*.test.ts'`"
+README_TEST = "node --test 'tests/**/*.test.ts'"
+RUN = "node src/main.ts"
+TOOLCHAIN_MINOR = "22.18"
+LAYOUT = '''- `src/main.ts`: `node src/main.ts`, exit 0 met, 1 missed, 2 broken suite. Node runs the TypeScript as it is: nothing to build.
+- `src/suite.ts`: reads the flags, grades, prints the report.
+- `src/runner.ts`: runs the solver over the cases, scores them.
+- `src/solver.ts`: the thing under test; the stub model, and the one place to put yours.
+- `src/scorers.ts`: deterministic scorers, 0 or 1.
+- `src/dataset.ts`: the strict JSONL loader.
+- `tests/suite.test.ts`: the passes-on-init test, including that the bar bites.
+- `package-lock.json`: the lockfile.'''
+SOLVER_FILE = "src/solver.ts"
+SCORERS_FILE = "src/scorers.ts"
+TEST_FILE = "tests/suite.test.ts"
+SOLVER_HOWTO = "Write an object with `name`, `stub` and `solve(case)` and pass it to `main(argv, io, solver)`."
+CI_EVAL = "node src/main.ts"
+OFFLINE_NOTE = "with the network switched off"
+
+# Go release history and the go directive in go.mod: https://go.dev/doc/devel/release and https://go.dev/ref/mod#go-mod-file-go
+[[variants]]
+id = "go"
+label = "Go 1.26 or newer (standard library only)"
+status = "live"
+needs = ["go"]
+toolchain = ["go", "version"]
+agent_allow = ["go build", "go test", "go vet"]
+smoke = "test"
+test = ["go", "test", "./..."]
+[variants.vars]
+SOURCE = "main.go, runner.go, solver.go, scorers.go, dataset.go, bar.go"
+IGNORE = "/@@NAME@@\nreport.txt"
+RUN_TEST = "`go test ./...`"
+README_TEST = "go vet ./... && go test ./..."
+RUN = "go run ."
+TOOLCHAIN_MINOR = "1.26"
+LAYOUT = '''- `main.go`: flags, the report and the exit code: 0 met, 1 missed, 2 broken suite.
+- `runner.go`: runs the solver over the cases, scores them.
+- `solver.go`: the thing under test; the stub model, and the one place to put yours.
+- `scorers.go`: deterministic scorers, 0 or 1.
+- `dataset.go`: the strict JSONL loader.
+- `bar.go`: reads `thresholds.toml` and says which lines of the bar are missed.
+- `suite_test.go`: the passes-on-init test, including that the bar bites.'''
+SOLVER_FILE = "solver.go"
+SCORERS_FILE = "scorers.go"
+TEST_FILE = "suite_test.go"
+SOLVER_HOWTO = "Write a type with `Name`, `Stub` and `Solve` methods and pass it to `suite` in `main`."
+CI_EVAL = "go run ."
+OFFLINE_NOTE = "with the network switched off"
+
+# Edition 2024 needs Rust 1.85: https://doc.rust-lang.org/edition-guide/rust-2024/index.html
+[[variants]]
+id = "rust"
+label = "Rust 1.85 or newer (standard library only)"
+status = "live"
+needs = ["cargo"]
+toolchain = ["rustc", "--version"]
+agent_allow = ["cargo build", "cargo test", "cargo fmt", "cargo clippy"]
+smoke = "test"
+test = ["cargo", "test", "--quiet", "--locked"]
+[variants.vars]
+SOURCE = "src/, tests in tests/"
+IGNORE = "target/\nreport.txt"
+RUN_TEST = "`cargo test --locked`"
+README_TEST = "cargo test --locked"
+RUN = "cargo run --quiet --locked"
+TOOLCHAIN_MINOR = "1.85"
+LAYOUT = '''- `src/main.rs`: the binary: exit 0 met, 1 missed, 2 broken suite.
+- `src/lib.rs`: reads the flags, grades, prints the report.
+- `src/runner.rs`: runs the solver over the cases, scores them.
+- `src/solver.rs`: the thing under test; the stub model, and the one place to put yours.
+- `src/scorers.rs`: deterministic scorers, 0 or 1.
+- `src/dataset.rs`, `src/json.rs`, `src/bar.rs`: the strict JSONL, JSON and TOML readers.
+- `tests/suite.rs`: the passes-on-init test, including that the bar bites.
+- `Cargo.lock`: the lockfile; CI builds with `--locked`.'''
+SOLVER_FILE = "src/solver.rs"
+SCORERS_FILE = "src/scorers.rs"
+TEST_FILE = "tests/suite.rs"
+SOLVER_HOWTO = "Implement the `Solver` trait and pass it to `suite` in `src/main.rs`."
+CI_EVAL = "cargo run --quiet --locked"
+OFFLINE_NOTE = "with the network switched off"
+
+# JDK 17 is an LTS release (records, switch arrows, text blocks): https://openjdk.org/projects/jdk/17/ ; javac --release: https://docs.oracle.com/en/java/javase/17/docs/specs/man/javac.html
+[[variants]]
+id = "java"
+label = "Java 17 or newer (JDK only, no build tool)"
+status = "live"
+needs = ["javac", "java"]
+toolchain = ["javac", "--version"]
+agent_allow = ["javac", "java", "jar"]
+smoke = "test"
+build = ["javac", "--release", "17", "-Xlint:all", "-d", "$CACHE/classes", "-sourcepath", "src", "tests/@@MODULE@@/SuiteTests.java", "src/@@MODULE@@/Main.java"]
+test = ["java", "-cp", "$CACHE/classes", "@@MODULE@@.SuiteTests"]
+[variants.vars]
+SOURCE = "src/@@MODULE@@/, tests in tests/@@MODULE@@/"
+IGNORE = "out/\n*.class\nreport.txt"
+RUN_TEST = "`javac` then `java -cp out @@MODULE@@.SuiteTests`"
+README_TEST = "mkdir -p out && javac --release 17 -Xlint:all -d out -sourcepath src tests/@@MODULE@@/SuiteTests.java src/@@MODULE@@/Main.java && java -cp out @@MODULE@@.SuiteTests"
+RUN = "mkdir -p out && javac --release 17 -Xlint:all -d out -sourcepath src tests/@@MODULE@@/SuiteTests.java src/@@MODULE@@/Main.java && java -cp out @@MODULE@@.Main"
+TOOLCHAIN_MINOR = "17"
+LAYOUT = '''- `src/@@MODULE@@/Main.java`: `main`: exit 0 met, 1 missed, 2 broken suite.
+- `src/@@MODULE@@/Suite.java`: reads the flags, grades, prints the report.
+- `src/@@MODULE@@/Runner.java`: runs the solver over the cases, scores them.
+- `src/@@MODULE@@/StubSolver.java`, `Solver.java`: the thing under test; the stub model, and the one place to put yours.
+- `src/@@MODULE@@/Scorers.java`: deterministic scorers, 0 or 1.
+- `src/@@MODULE@@/Dataset.java`, `Json.java`, `Bar.java`: the strict JSONL, JSON and TOML readers.
+- `tests/@@MODULE@@/SuiteTests.java`: the passes-on-init test, including that the bar bites (plain JDK, no JUnit).'''
+SOLVER_FILE = "src/@@MODULE@@/StubSolver.java"
+SCORERS_FILE = "src/@@MODULE@@/Scorers.java"
+TEST_FILE = "tests/@@MODULE@@/SuiteTests.java"
+SOLVER_HOWTO = "Implement `Solver` and pass it to `Suite.run` in `Main.java`."
+CI_EVAL = "mkdir -p out && javac --release 17 -Xlint:all -d out -sourcepath src tests/@@MODULE@@/SuiteTests.java src/@@MODULE@@/Main.java && java -cp out @@MODULE@@.Main"
+OFFLINE_NOTE = "with the network switched off"
+CI_SETUP = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"'''
+CI_TEST = "mkdir -p out && javac --release 17 -Xlint:all -d out -sourcepath src tests/@@MODULE@@/SuiteTests.java src/@@MODULE@@/Main.java && java -cp out @@MODULE@@.SuiteTests"
+RELEASE_STEPS = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build (one jar)
+        run: |
+          mkdir -p classes dist
+          javac --release 17 -Xlint:all -d classes -sourcepath src src/@@MODULE@@/Main.java
+          jar --create --file "dist/@@NAME@@.jar" --main-class @@MODULE@@.Main -C classes .'''
+
+# NET 10 is an LTS release: https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core ; `dotnet test --project` with the Microsoft.Testing.Platform runner: https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-with-dotnet-test ; locked restore: https://learn.microsoft.com/en-us/nuget/consume-packages/package-references-in-project-files#locking-dependencies. The packages restore once from nuget.org (the lock files pin them); after that the suite runs offline.
+[[variants]]
+id = "csharp"
+label = "C# on .NET 10 (xunit.v3 for the tests, locked)"
+status = "live"
+needs = ["dotnet"]
+toolchain = ["dotnet", "--version"]
+agent_allow = ["dotnet build", "dotnet test", "dotnet run", "dotnet publish"]
+smoke = "test"
+test = ["dotnet", "test", "--project", "tests/@@MODULE@@.Tests"]
+[variants.env]
+DOTNET_NOLOGO = "1"
+DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+[variants.vars]
+SOURCE = "src/@@MODULE@@/, tests in tests/@@MODULE@@.Tests/"
+IGNORE = "bin/\nobj/\nreport.txt"
+RUN_TEST = "`dotnet test --project tests/@@MODULE@@.Tests`"
+README_TEST = "dotnet test --project tests/@@MODULE@@.Tests"
+RUN = "dotnet run --project src/@@MODULE@@ --configuration Release"
+TOOLCHAIN_MINOR = "10.0"
+LAYOUT = '''- `src/@@MODULE@@/Program.cs`: `Main`: exit 0 met, 1 missed, 2 broken suite.
+- `src/@@MODULE@@/Suite.cs`: reads the flags, grades, prints the report.
+- `src/@@MODULE@@/Runner.cs`: runs the solver over the cases, scores them.
+- `src/@@MODULE@@/Solver.cs`: the thing under test; the stub model, and the one place to put yours.
+- `src/@@MODULE@@/Scorers.cs`: deterministic scorers, 0 or 1.
+- `src/@@MODULE@@/Dataset.cs`, `Bar.cs`: the strict JSONL and TOML readers.
+- `tests/@@MODULE@@.Tests/SuiteTests.cs`: the passes-on-init test, including that the bar bites.
+- `packages.lock.json`, `Directory.Build.props`: the lock files; restore is locked when CI is set.'''
+SOLVER_FILE = "src/@@MODULE@@/Solver.cs"
+SCORERS_FILE = "src/@@MODULE@@/Scorers.cs"
+TEST_FILE = "tests/@@MODULE@@.Tests/SuiteTests.cs"
+SOLVER_HOWTO = "Implement `ISolver` and pass it to `Suite.Run` in `Program.cs`."
+CI_EVAL = "dotnet run --project src/@@MODULE@@ --configuration Release"
+OFFLINE_NOTE = "once the packages are restored, with the network switched off"
+CI_TEST = "dotnet test --project tests/@@MODULE@@.Tests"
+RELEASE_STEPS = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"
+      - name: Publish (locked restore, release)
+        run: |
+          dotnet publish src/@@MODULE@@ --configuration Release --output publish
+          mkdir -p dist
+          tar -C publish -czf "dist/@@NAME@@-linux-amd64.tar.gz" .'''
+
+# Dart SDK 3.9: https://dart.dev/get-dart ; locked resolution (pub get --enforce-lockfile): https://dart.dev/tools/pub/cmd/pub-get . The two dev packages (lints, test) restore once from pub.dev (pubspec.lock pins them); after that the suite runs offline.
+[[variants]]
+id = "dart"
+label = "Dart 3.9 or newer (core libraries; lints and test as dev dependencies)"
+status = "live"
+needs = ["dart"]
+toolchain = ["dart", "--version"]
+agent_allow = ["dart pub get", "dart analyze", "dart test", "dart run", "dart format"]
+smoke = "test"
+build = ["dart", "pub", "get", "--enforce-lockfile"]
+test = ["dart", "test"]
+[variants.env]
+DART_SUPPRESS_ANALYTICS = "true"
+[variants.vars]
+SOURCE = "lib/, bin/, tests in test/"
+IGNORE = ".dart_tool/\nreport.txt"
+RUN_TEST = "`dart test`"
+README_TEST = "dart pub get --enforce-lockfile && dart analyze --fatal-infos && dart test"
+RUN = "dart run"
+TOOLCHAIN_MINOR = "3.9"
+LAYOUT = '''- `bin/@@MODULE@@.dart`: `main`: exit 0 met, 1 missed, 2 broken suite.
+- `lib/src/suite.dart`: reads the flags, grades, prints the report.
+- `lib/src/runner.dart`: runs the solver over the cases, scores them.
+- `lib/src/solver.dart`: the thing under test; the stub model, and the one place to put yours.
+- `lib/src/scorers.dart`: deterministic scorers, 0 or 1.
+- `lib/src/dataset.dart`, `lib/src/bar.dart`: the strict JSONL and TOML readers.
+- `test/suite_test.dart`: the passes-on-init test, including that the bar bites.
+- `pubspec.lock`: the lockfile (`dart pub get` refreshes it).'''
+SOLVER_FILE = "lib/src/solver.dart"
+SCORERS_FILE = "lib/src/scorers.dart"
+TEST_FILE = "test/suite_test.dart"
+SOLVER_HOWTO = "Implement `Solver` and pass it to `runSuite` in `bin/@@MODULE@@.dart`."
+CI_EVAL = "dart pub get --enforce-lockfile && dart run"
+OFFLINE_NOTE = "once the packages are restored, with the network switched off"
+CI_SETUP = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: "3.9"'''
+CI_TEST = "dart pub get --enforce-lockfile && dart analyze --fatal-infos && dart test"
+RELEASE_STEPS = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: "3.9"
+      - name: Build (locked, native executable)
+        run: |
+          dart pub get --enforce-lockfile
+          mkdir -p dist
+          dart compile exe bin/@@MODULE@@.dart -o "dist/@@NAME@@-linux-amd64"'''
+
+# Swift toolchains and the Linux install: https://www.swift.org/install/ ; SwiftPM (tools version 5.9, `swift test`): https://docs.swift.org/swiftpm/documentation/packagemanager/ . Proven on macOS here; the Linux CI step is not run on this machine.
+[[variants]]
+id = "swift"
+label = "Swift 5.9 or newer (Foundation only)"
+status = "live"
+needs = ["swift"]
+toolchain = ["swift", "--version"]
+agent_allow = ["swift build", "swift test", "swift run"]
+smoke = "test"
+build = ["swift", "build", "--build-tests", "--scratch-path", "$CACHE/swift"]
+test = ["swift", "test", "--scratch-path", "$CACHE/swift"]
+[variants.vars]
+SOURCE = "Sources/@@MODULE@@/, tests in Tests/@@MODULE@@Tests/"
+IGNORE = ".build/\n.swiftpm/\nreport.txt"
+RUN_TEST = "`swift test`"
+README_TEST = "swift test"
+RUN = "swift run @@NAME@@"
+TOOLCHAIN_MINOR = "5.9"
+LAYOUT = '''- `Sources/@@MODULE@@_run/main.swift`: the executable: exit 0 met, 1 missed, 2 broken suite.
+- `Sources/@@MODULE@@/Suite.swift`: reads the flags, grades, prints the report.
+- `Sources/@@MODULE@@/Runner.swift`: runs the solver over the cases, scores them.
+- `Sources/@@MODULE@@/Solver.swift`: the thing under test; the stub model, and the one place to put yours.
+- `Sources/@@MODULE@@/Scorers.swift`: deterministic scorers, 0 or 1.
+- `Sources/@@MODULE@@/Dataset.swift`, `Bar.swift`: the strict JSONL and TOML readers.
+- `Tests/@@MODULE@@Tests/SuiteTests.swift`: the passes-on-init test, including that the bar bites.'''
+SOLVER_FILE = "Sources/@@MODULE@@/Solver.swift"
+SCORERS_FILE = "Sources/@@MODULE@@/Scorers.swift"
+TEST_FILE = "Tests/@@MODULE@@Tests/SuiteTests.swift"
+SOLVER_HOWTO = "Conform a type to `Solver` and pass it to `runSuite` in `main.swift`."
+CI_EVAL = "swift run @@NAME@@"
+OFFLINE_NOTE = "with the network switched off"
+RELEASE_STEPS = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.1"
+      - name: Build (release, static standard library)
+        run: |
+          swift build -c release --static-swift-stdlib
+          mkdir -p dist
+          install -m 0755 ".build/release/@@NAME@@" "dist/@@NAME@@-linux-amd64"'''

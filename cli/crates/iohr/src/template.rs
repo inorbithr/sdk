@@ -1794,7 +1794,19 @@ mod tests {
     fn demo_has_four_live_languages_and_asks_for_one_first() {
         let d = demo();
         let ids: Vec<&str> = d.live_variants().iter().map(|v| v.id.as_str()).collect();
-        assert_eq!(ids, ["python", "typescript", "go", "rust"]);
+        assert_eq!(
+            ids,
+            [
+                "python",
+                "typescript",
+                "go",
+                "rust",
+                "dart",
+                "java",
+                "csharp",
+                "swift"
+            ]
+        );
         assert_eq!(d.default_variant().unwrap().id, "python");
         let q = d.all_questions();
         assert_eq!(q[0].key, LANGUAGE);
@@ -1835,9 +1847,13 @@ mod tests {
         let mut d = demo();
         assert_eq!(
             d.picker_description(),
-            format!("{} (Go, Python, Rust or TypeScript)", d.meta.description)
+            format!(
+                "{} (C#, Dart, Go, Java, Python, Rust, Swift or TypeScript)",
+                d.meta.description
+            )
         );
         // A variant that is added shows; one that is coming does not; no list is typed.
+        d.meta.variants.truncate(4);
         let mut java = d.meta.variants[0].clone();
         java.id = "java".into();
         d.meta.variants.push(java);

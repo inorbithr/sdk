@@ -1,0 +1,23 @@
+[package]
+name = "@@NAME@@"
+version = "0.1.0"
+edition = "2024"
+rust-version = "@@TOOLCHAIN_MINOR@@"
+description = "@@ID@@"
+license = "@@LICENSE@@"
+publish = false
+
+[lib]
+name = "@@MODULE@@"
+path = "src/lib.rs"
+
+[[bin]]
+name = "@@NAME@@"
+path = "src/main.rs"
+
+# No dependencies: the JSON and TOML readers are small, strict and in this crate. Add a crate with
+# `cargo add`, commit Cargo.lock with it, and CI keeps using --locked.
+
+[profile.release]
+strip = true
+lto = true
