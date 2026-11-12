@@ -21,7 +21,13 @@ use sha2::{Digest as _, Sha256};
 use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const SUB: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}"#;
+mod pty;
+
+const SUB: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"seat@example.com","orgId":"00000000-0000-4000-8000-00000000000a","orgName":"Example","subscriptionType":"max","loginExpiresAt":"2026-11-05T10:00:00Z","configDirectory":"/home/a/.claude","projectsDirectory":"/home/a/.claude/projects"}"#;
+/// The same seat after a token refresh, on another host, with the email in another case.
+const SUB_REFRESHED: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"Seat@Example.com","orgId":"00000000-0000-4000-8000-00000000000a","orgName":"Example Renamed","subscriptionType":"pro","loginExpiresAt":"2026-11-06T22:00:00Z","configDirectory":"/Users/b/.config/claude","projectsDirectory":"/srv/projects"}"#;
+/// The canonical identity line of `SUB` and `SUB_REFRESHED`.
+const SUB_LINE: &str = "authMethod=claude.ai apiProvider=firstParty orgId=00000000-0000-4000-8000-00000000000a email=seat@example.com";
 const TURN: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"{\"say\":\"hello\",\"state\":\"s\",\"actions\":[{\"kind\":\"ask\",\"payload\":{\"q\":1}}],\"evidence\":[\"e1\"],\"left\":[]}","session_id":"s1","num_turns":2,"duration_ms":5,"total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}"#;
 const API_KEY: &str = r#"{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty"}"#;
 
@@ -56,12 +62,18 @@ fn fake_claude(dir: &Path, auth: &str) {
 }
 
 fn iohr(server: &MockServer, dir: &Path, args: &[&str]) -> Command {
+    iohr_as(server, dir, "p", args)
+}
+
+/// [`iohr`] as another profile.
+fn iohr_as(server: &MockServer, dir: &Path, profile: &str, args: &[&str]) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
     c.args(args)
         .env_clear()
+        .env("IOHR_NO_BROWSER", "1")
         .env("IOHR_BASE_URL", server.uri())
         .env("IOHR_CONFIG_DIR", dir.join("config"))
-        .env("IOHR_PROFILE", "p")
+        .env("IOHR_PROFILE", profile)
         .env("HOME", dir)
         .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
         // What must never reach claude or the coordinator.
@@ -78,7 +90,12 @@ fn iohr(server: &MockServer, dir: &Path, args: &[&str]) -> Command {
 
 /// Signs `iohr` in as profile `p` with `tok`, the token kept in an owner-only file (the
 /// test machine has no Keychain to use; the runner's key goes to the same store).
-async fn login(server: &MockServer, dir: &Path, tok: &str) {
+async fn sign_in(server: &MockServer, dir: &Path, tok: &str) {
+    sign_in_as(server, dir, tok, "p").await;
+}
+
+/// [`sign_in`] as another profile.
+async fn sign_in_as(server: &MockServer, dir: &Path, tok: &str, profile: &str) {
     Mock::given(method("GET"))
         .and(path("/v1/me"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -86,15 +103,16 @@ async fn login(server: &MockServer, dir: &Path, tok: &str) {
         })))
         .mount(server)
         .await;
-    let mut c = iohr(
+    let mut c = iohr_as(
         server,
         dir,
+        profile,
         &[
             "login",
             "--with-token",
             "--insecure-storage",
             "--profile",
-            "p",
+            profile,
         ],
     );
     c.stdin(Stdio::piped())
@@ -109,6 +127,41 @@ async fn login(server: &MockServer, dir: &Path, tok: &str) {
         .unwrap();
     let o = child.wait_with_output().unwrap();
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+}
+
+/// [`sign_in`], then lets this machine's runner use the person's own Claude plan:
+/// `claude_auth = "any"` for profile `p` and the personal-use notice accepted now.
+async fn login(server: &MockServer, dir: &Path, tok: &str) {
+    login_as(server, dir, tok, "p").await;
+}
+
+/// [`login`] as another profile.
+async fn login_as(server: &MockServer, dir: &Path, tok: &str, profile: &str) {
+    sign_in_as(server, dir, tok, profile).await;
+    allow_own_plan(dir, profile);
+}
+
+/// What `iohr runner personal-use --accept` and a person's `claude_auth = "any"` leave.
+fn allow_own_plan(dir: &Path, profile: &str) {
+    let p = dir.join("config").join("config.toml");
+    let mut text = std::fs::read_to_string(&p).unwrap_or_default();
+    let table = format!("[profiles.{profile}.runner]");
+    if !text.contains(&table) {
+        text.push('\n');
+        text.push_str(&table);
+        text.push_str("\nclaude_auth = \"any\"\n");
+        std::fs::write(&p, text).unwrap();
+    }
+    let runner = dir.join("config").join("runner");
+    std::fs::create_dir_all(&runner).unwrap();
+    std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let f = runner.join("personal-use.json");
+    std::fs::write(&f, format!(r#"{{"notice_version":1,"accepted_at":{now}}}"#)).unwrap();
+    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
 }
 
 fn sha(s: &(impl AsRef<[u8]> + ?Sized)) -> String {
@@ -252,10 +305,10 @@ async fn register_signs_the_challenge_and_never_sends_a_credential() {
     assert_eq!(post["providers"][0]["method"], "subscription");
     // A person's own runner names no holder.
     assert!(post.get("holder_subject").is_none());
-    // The identity hash is sha256(salt + "\n" + line).
+    // The identity hash is sha256(salt + "\n" + the canonical identity line).
     assert_eq!(
         post["identity_sha256"]["claude"],
-        sha(&format!("{SALT}\n{SUB}"))
+        sha(&format!("{SALT}\n{SUB_LINE}"))
     );
     // A standard, padded base64 key; the challenge; a signature over the registration lines.
     let key = post["public_key"].as_str().unwrap();
@@ -265,6 +318,7 @@ async fn register_signs_the_challenge_and_never_sends_a_credential() {
     assert!(verify(key, &message, post["signature"].as_str().unwrap()));
     let all = serde_json::to_string(&sent).unwrap();
     assert!(!all.contains("SECRETKEY") && !all.contains("firstParty"));
+    assert!(!all.contains("example.com") && !all.contains("00000000-0000"));
     assert_no_secrets(dir.path());
     // The key is in the profile's store, not a file of the runner's own.
     assert!(
@@ -303,7 +357,7 @@ async fn register_with_a_holder_names_that_person() {
     // The holder is checked against the sign-in the runner holds, so it goes with it.
     assert_eq!(
         post["identity_sha256"]["claude"],
-        sha(&format!("{SALT}\n{SUB}"))
+        sha(&format!("{SALT}\n{SUB_LINE}"))
     );
 }
 
@@ -362,16 +416,161 @@ async fn register_and_status_act_on_the_profiles_account_or_the_flags() {
 }
 
 #[tokio::test]
-async fn register_refuses_an_api_key_sign_in_and_calls_nothing() {
+async fn by_default_the_own_plan_is_refused_and_the_message_names_the_api_key() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
-    fake_claude(dir.path(), API_KEY);
-    login(&server, dir.path(), &token()).await;
+    fake_claude(dir.path(), SUB);
+    sign_in(&server, dir.path(), &token()).await;
+    let before = server.received_requests().await.unwrap().len();
+    for args in [&["runner", "register"][..], &["runner", "run"][..]] {
+        let o = run(&mut iohr(&server, dir.path(), args));
+        assert_eq!(o.status.code(), Some(1), "{args:?}: {}", text(&o));
+        assert!(text(&o).contains("API key only"), "{args:?}: {}", text(&o));
+        assert!(text(&o).contains("iohr runner api-key set"), "{}", text(&o));
+    }
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+}
+
+#[tokio::test]
+async fn the_own_plan_needs_the_personal_use_notice_accepted_as_well_as_the_config() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    sign_in(&server, dir.path(), &token()).await;
+    add_to_config(dir.path(), "\n[profiles.p.runner]\nclaude_auth = \"any\"\n");
     let before = server.received_requests().await.unwrap().len();
     let o = run(&mut iohr(&server, dir.path(), &["runner", "register"]));
     assert_eq!(o.status.code(), Some(1), "{}", text(&o));
-    assert!(text(&o).contains("subscription only"));
+    assert!(
+        text(&o).contains("iohr runner personal-use"),
+        "{}",
+        text(&o)
+    );
     assert_eq!(server.received_requests().await.unwrap().len(), before);
+
+    // Accepting needs no sign-in and no call; then registration goes ahead.
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "personal-use", "--accept", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["accepted"], json!(true));
+    assert!(
+        v["notice"]
+            .as_str()
+            .unwrap()
+            .starts_with("Personal use only.")
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+    mount_register(&server).await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(text(&o).contains("personal use only"), "{}", text(&o));
+
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "personal-use", "--withdraw", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["accepted"], json!(false));
+}
+
+/// A key shaped like an Anthropic one; it only ever reaches the fake `claude`.
+const STORED_KEY: &str = "sk-ant-api03-TESTKEYVALUE0123456789abcdef";
+
+#[tokio::test]
+async fn a_stored_api_key_reaches_claude_alone_and_is_never_printed_or_sent() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), API_KEY);
+    sign_in(&server, dir.path(), &token()).await;
+    let mut c = iohr(
+        &server,
+        dir.path(),
+        &["runner", "api-key", "set", "--stdin", "--json", "--verbose"],
+    );
+    c.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = c.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("{STORED_KEY}\n").as_bytes())
+        .unwrap();
+    let set = child.wait_with_output().unwrap();
+    assert_eq!(set.status.code(), Some(0), "{}", text(&set));
+    let v: Value = serde_json::from_slice(&set.stdout).unwrap();
+    assert_eq!(v, json!({"api_key_stored": true}));
+    // An API key needs no own-plan setting or notice.
+    mount_register(&server).await;
+    let reg = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "register", "--name", "mac", "--verbose"],
+    ));
+    assert_eq!(reg.status.code(), Some(0), "{}", text(&reg));
+    let status = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "status", "--json", "--verbose"],
+    ));
+    assert_eq!(status.status.code(), Some(0), "{}", text(&status));
+    let v: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(v["this_machine"]["auth"], json!("api_key"), "{v}");
+    assert_eq!(v["this_machine"]["api_key_stored"], json!(true), "{v}");
+    assert_eq!(v["this_machine"]["subscription"], json!(false), "{v}");
+
+    // claude saw the stored key, with the subprocess scrub beside it, and never the
+    // parent's own ANTHROPIC_* values.
+    let env = std::fs::read_to_string(dir.path().join("env.txt")).unwrap();
+    assert!(env.contains(&format!("ANTHROPIC_API_KEY={STORED_KEY}")));
+    assert!(env.contains("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1"));
+    assert!(!env.contains("SECRETKEY") && !env.contains("ANTHROPIC_BASE_URL"));
+    // Nothing printed it, nothing sent it, the config does not hold it.
+    for o in [&set, &reg, &status] {
+        assert!(!text(o).contains("TESTKEYVALUE"), "{}", text(o));
+    }
+    for r in server.received_requests().await.unwrap() {
+        assert!(!String::from_utf8_lossy(&r.body).contains("TESTKEYVALUE"));
+        assert!(!format!("{:?}", r.headers).contains("TESTKEYVALUE"));
+        assert!(!r.url.as_str().contains("TESTKEYVALUE"));
+    }
+    let config = std::fs::read_to_string(dir.path().join("config").join("config.toml")).unwrap();
+    assert!(!config.contains("TESTKEYVALUE"));
+
+    // Removing it signs claude out here again.
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "api-key", "remove", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v, json!({"removed": true}));
+}
+
+#[tokio::test]
+async fn an_api_key_on_the_command_line_is_refused_before_anything_runs() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "api-key", "set", STORED_KEY],
+    ));
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
+    assert!(!text(&o).contains("TESTKEYVALUE"), "{}", text(&o));
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -684,7 +883,7 @@ async fn run_takes_the_pack_keeps_the_lease_alive_and_reports_a_signed_turn() {
 /// Registers runner `mac` on its own server (which makes this machine's key), then
 /// mounts a coordinator that lists it and answers every heartbeat with no offer.
 async fn registered_and_idle(dir: &Path) -> MockServer {
-    fake_claude(dir, SUB);
+    fake_claude(dir, API_KEY);
     let first = MockServer::start().await;
     login(&first, dir, &token()).await;
     mount_register(&first).await;
@@ -708,6 +907,23 @@ async fn registered_and_idle(dir: &Path) -> MockServer {
         )
         .mount(&server)
         .await;
+    server
+}
+
+/// [`registered_and_idle`], and the session host's own runner: it signs in as the `session`
+/// profile with a key of its own, never the profile the live runner uses.
+async fn host_registered(dir: &Path) -> MockServer {
+    let server = registered_and_idle(dir).await;
+    let first = MockServer::start().await;
+    login_as(&first, dir, &token(), "session").await;
+    mount_register(&first).await;
+    let o = run(&mut iohr_as(
+        &first,
+        dir,
+        "session",
+        &["runner", "register", "--name", "mac-session"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
     server
 }
 
@@ -966,7 +1182,7 @@ async fn a_service_that_holds_the_beat_is_beaten_again_without_waiting_for_the_i
 async fn config_show_names_each_value_and_its_source_without_a_sign_in() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
-    login(&server, dir.path(), &token()).await;
+    sign_in(&server, dir.path(), &token()).await;
     add_to_config(
         dir.path(),
         "\n[runner]\ncapacity = 4\nalways_on = true\n\n[profiles.p.runner]\ncapacity = 8\n",
@@ -1051,9 +1267,13 @@ async fn config_show_names_the_upgrade_settings_and_the_flag_turns_it_off() {
         v["upgrade_restart"],
         json!({"value": "exec", "source": "default"})
     );
+    assert_eq!(
+        v["upgrade_sign_identity"],
+        json!({"value": "off", "source": "default"})
+    );
     add_to_config(
         dir.path(),
-        "\n[runner]\nauto_upgrade = true\nupgrade_interval_minutes = 15\nupgrade_restart = \"exit\"\n",
+        "\n[runner]\nauto_upgrade = true\nupgrade_interval_minutes = 15\nupgrade_restart = \"exit\"\nupgrade_sign_identity = \"auto\"\n",
     );
     let v = show(&[]);
     assert_eq!(
@@ -1068,8 +1288,23 @@ async fn config_show_names_the_upgrade_settings_and_the_flag_turns_it_off() {
         v["upgrade_restart"],
         json!({"value": "exit", "source": "[runner]"})
     );
+    assert_eq!(
+        v["upgrade_sign_identity"],
+        json!({"value": "auto", "source": "[runner]"})
+    );
     let v = show(&["--no-auto-upgrade"]);
     assert_eq!(v["auto_upgrade"], json!({"value": false, "source": "flag"}));
+    // The variable beats the file; `-` is off.
+    let o = run(
+        iohr(&server, dir.path(), &["runner", "config", "show", "--json"])
+            .env("IOHR_SIGN_IDENTITY", "-"),
+    );
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v = serde_json::from_slice::<Value>(&o.stdout).unwrap();
+    assert_eq!(
+        v["upgrade_sign_identity"],
+        json!({"value": "off", "source": "IOHR_SIGN_IDENTITY"})
+    );
     // A value out of range stops the start, before anything is sent.
     let p = dir.path().join("config").join("config.toml");
     let t = std::fs::read_to_string(&p).unwrap();
@@ -1180,6 +1415,142 @@ async fn register_with_the_matching_key_is_already_registered_and_sends_nothing(
     assert!(text(&o).contains("already registered"), "{}", text(&o));
     let sent = bodies(&second, "/v1/coordinator/runners").await;
     assert!(sent.iter().all(|b| b.get("public_key").is_none()));
+}
+
+/// The identity hash one `claude auth status` answer registers with.
+async fn registered_identity(auth: &str) -> Value {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), auth);
+    login(&server, dir.path(), &token()).await;
+    mount_register(&server).await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    bodies(&server, "/v1/coordinator/runners")
+        .await
+        .into_iter()
+        .find_map(|b| b.get("identity_sha256").cloned())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn identity_hash_is_stable_across_token_refresh() {
+    let want = json!({"claude": sha(&format!("{SALT}\n{SUB_LINE}"))});
+    assert_eq!(registered_identity(SUB).await, want);
+    // Another expiry, other directories, another plan and organisation name, the
+    // email's case: the same seat, the same hash.
+    assert_eq!(registered_identity(SUB_REFRESHED).await, want);
+    // Another email, or the same email in another organisation: another seat.
+    let other_email = SUB.replace("seat@example.com", "other@example.com");
+    let other_org = SUB.replace("00000000000a", "00000000000b");
+    for other in [other_email, other_org] {
+        assert_ne!(registered_identity(&other).await, want, "{other}");
+    }
+}
+
+#[tokio::test]
+async fn register_refuses_a_sign_in_that_names_no_seat() {
+    for auth in [
+        r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}"#,
+        r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"seat@example.com"}"#,
+        r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","orgId":"00000000-0000-4000-8000-00000000000a"}"#,
+        "Logged in",
+    ] {
+        let server = MockServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        fake_claude(dir.path(), auth);
+        login(&server, dir.path(), &token()).await;
+        mount_register(&server).await;
+        let o = run(&mut iohr(
+            &server,
+            dir.path(),
+            &["runner", "register", "--name", "mac"],
+        ));
+        assert_eq!(o.status.code(), Some(1), "{auth}: {}", text(&o));
+        let sent = bodies(&server, "/v1/coordinator/runners").await;
+        assert!(
+            sent.iter().all(|b| b.get("public_key").is_none()),
+            "{auth}: nothing registered"
+        );
+    }
+}
+
+#[tokio::test]
+async fn register_refresh_sends_the_held_key_and_the_current_sign_in() {
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    let first = MockServer::start().await;
+    login(&first, dir.path(), &token()).await;
+    mount_register(&first).await;
+    let o = run(&mut iohr(
+        &first,
+        dir.path(),
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let key = bodies(&first, "/v1/coordinator/runners")
+        .await
+        .iter()
+        .find_map(|b| b["public_key"].as_str().map(str::to_owned))
+        .unwrap();
+
+    // The sign-in changed seat since: the refresh sends the new seat's hash.
+    let moved = SUB.replace("seat@example.com", "moved@example.com");
+    fake_claude(dir.path(), &moved);
+    let moved_line = SUB_LINE.replace("seat@example.com", "moved@example.com");
+    let mut mine = runner_json();
+    mine["public_key"] = json!(key);
+    for (answer, says) in [
+        (runner_json(), "refreshed"),
+        (
+            json!({"runner_id": "run_2", "user": "usr_me", "name": "mac", "status": "online",
+                   "last_seen_at": "2026-10-12T08:00:00Z", "providers": []}),
+            "revoke run_1",
+        ),
+    ] {
+        let second = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/coordinator/runners"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"runners": [mine.clone()]})),
+            )
+            .mount(&second)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/coordinator/runners/challenge"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"challenge": CHALLENGE, "identity_salt": SALT, "account_id": "acc_1"}),
+            ))
+            .mount(&second)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/coordinator/runners"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runner": answer})))
+            .mount(&second)
+            .await;
+        let o = run(&mut iohr(
+            &second,
+            dir.path(),
+            &["runner", "register", "--name", "mac", "--refresh"],
+        ));
+        assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+        assert!(text(&o).contains(says), "{}", text(&o));
+        assert!(!text(&o).contains("already registered"), "{}", text(&o));
+        let sent = bodies(&second, "/v1/coordinator/runners").await;
+        let post = sent.iter().find(|b| b.get("public_key").is_some()).unwrap();
+        // The key this machine holds, a fresh signature over the new challenge.
+        assert_eq!(post["public_key"], json!(key));
+        let message = format!("iohr.coordinator.v1.RegisterRunner\n{CHALLENGE}\n{key}");
+        assert!(verify(&key, &message, post["signature"].as_str().unwrap()));
+        assert_eq!(
+            post["identity_sha256"]["claude"],
+            sha(&format!("{SALT}\n{moved_line}"))
+        );
+    }
 }
 
 // ---- `iohr runner gate-report` (platform RFC 0120, the Checked gate) ----
@@ -1746,5 +2117,409 @@ async fn sign_in_io_calls_the_coordinator_with_a_minted_token_and_guards_the_sec
     assert_eq!(
         last.headers.get("authorization").unwrap().to_str().unwrap(),
         format!("Bearer {}", token())
+    );
+}
+
+// ---- the session host (RFC 0213)
+
+/// The one socket a host made below `data`, if it is there.
+fn session_socket(data: &Path) -> Option<std::path::PathBuf> {
+    std::fs::read_dir(data.join("session"))
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|e| e.path().join("sock"))
+        .find(|p| p.exists())
+}
+
+/// What the shell and the host wrote, for a failure message.
+fn session_diag(dir: &Path) -> String {
+    let host = std::fs::read_dir(dir.join("data/session"))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .find_map(|e| std::fs::read_to_string(e.path().join("host.log")).ok())
+        .unwrap_or_default();
+    let shell = std::fs::read_to_string(dir.join("session.err")).unwrap_or_default();
+    format!("shell: {shell}\nhost: {host}")
+}
+
+fn session_cmd(server: &MockServer, dir: &Path, args: &[&str]) -> Command {
+    let mut c = iohr(server, dir, args);
+    // `iohr session` names no runner: the host's name is this machine's, as at `register`.
+    c.env("IOHR_DATA_DIR", dir.join("data"))
+        .env("HOSTNAME", "mac");
+    c
+}
+
+async fn wait_until(what: &str, mut ok: impl FnMut() -> bool) {
+    for _ in 0..200 {
+        if ok() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("gave up waiting for {what}");
+}
+
+/// The live runner's key is the Mac's only one: a host that borrowed it would overwrite the
+/// live runner's heartbeat row and take its leases. With only that profile signed in, the
+/// host stops at once and sends nothing.
+#[tokio::test]
+async fn a_session_host_never_borrows_the_live_runners_profile_or_key() {
+    let dir = tempfile::tempdir().unwrap();
+    // Profile `p` is registered and its runner is listed: a borrowing host would beat.
+    let server = registered_and_idle(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap();
+    let o = run(&mut session_cmd(&server, dir.path(), &["session", p]));
+    let said = text(&o);
+    assert_ne!(o.status.code(), Some(0), "{said}");
+    assert!(
+        said.contains("session host has no profile of its own")
+            && said.contains("login --profile session")
+            && said.contains("--profile session runner register --name mac-session"),
+        "{said}"
+    );
+    // Signed in as `session` but with no key of its own: the one command that makes it.
+    let first = MockServer::start().await;
+    login_as(&first, dir.path(), &token(), "session").await;
+    let o = run(&mut session_cmd(&server, dir.path(), &["session", p]));
+    let said = text(&o);
+    assert_ne!(o.status.code(), Some(0), "{said}");
+    assert!(
+        said.contains("session host has no runner key of its own")
+            && said.contains("--profile session runner register --name mac-session"),
+        "{said}"
+    );
+    assert!(
+        bodies(&server, BEAT).await.is_empty(),
+        "the host beat as the live runner"
+    );
+}
+
+#[tokio::test]
+async fn session_starts_one_host_that_beats_and_stop_ends_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = host_registered(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap();
+    let out = dir.path().join("session.out");
+    let mut shell = session_cmd(&server, dir.path(), &["session", p, "--verbose"])
+        .stdout(std::fs::File::create(&out).unwrap())
+        .stderr(std::fs::File::create(dir.path().join("session.err")).unwrap())
+        .spawn()
+        .unwrap();
+    // The host is a process of its own, and it is the runner: it keeps the lease alive.
+    assert!(
+        beats_at_least(&server, 1).await >= 1,
+        "the host sent no heartbeat: {}",
+        session_diag(dir.path())
+    );
+    wait_until("the session note", || {
+        std::fs::read_to_string(dir.path().join("session.err"))
+            .is_ok_and(|t| t.contains("session open: host"))
+    })
+    .await;
+    let note = std::fs::read_to_string(dir.path().join("session.err")).unwrap();
+    let host: u32 = note
+        .split("session open: host ")
+        .nth(1)
+        .and_then(|r| r.split(' ').next())
+        .and_then(|n| n.parse().ok())
+        .unwrap();
+    assert_ne!(host, shell.id(), "the host is not the shell");
+    assert!(session_socket(&dir.path().join("data")).is_some());
+    // A second shell joins the same host: no second process.
+    let second = run(&mut session_cmd(
+        &server,
+        dir.path(),
+        &["stop", p, "--wait", "0"],
+    ));
+    assert_eq!(second.status.code(), Some(0), "{}", text(&second));
+    // `stop` told it; the host finishes and ends, and the shell sees it go.
+    let status = tokio::task::spawn_blocking(move || shell.wait().unwrap())
+        .await
+        .unwrap();
+    assert!(status.success(), "{status}");
+    wait_until("the socket to go", || {
+        session_socket(&dir.path().join("data")).is_none()
+    })
+    .await;
+    let again = run(&mut session_cmd(&server, dir.path(), &["stop", p]));
+    assert_eq!(again.status.code(), Some(0));
+    assert!(
+        text(&again).contains("no session host runs"),
+        "{}",
+        text(&again)
+    );
+    // Neither the shell's nor the host's output holds a credential.
+    let log = std::fs::read_dir(dir.path().join("data/session"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .find_map(|e| std::fs::read_to_string(e.path().join("host.log")).ok())
+        .unwrap_or_default();
+    let all = format!(
+        "{}{note}{log}",
+        std::fs::read_to_string(&out).unwrap_or_default()
+    );
+    assert!(
+        !all.contains("TOKENSIGNATUREMARKER") && !all.contains("SECRETKEY"),
+        "{all}"
+    );
+}
+
+#[tokio::test]
+async fn a_killed_shell_takes_the_host_with_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = host_registered(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap();
+    let mut shell = session_cmd(&server, dir.path(), &["session", p])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    wait_until("the host's socket", || {
+        session_socket(&dir.path().join("data")).is_some()
+    })
+    .await;
+    assert!(beats_at_least(&server, 1).await >= 1);
+    // SIGKILL: the shell cannot say goodbye; the kernel closes its end of the pipe.
+    shell.kill().unwrap();
+    shell.wait().unwrap();
+    wait_until("the host to end", || {
+        session_socket(&dir.path().join("data")).is_none()
+    })
+    .await;
+    let o = run(&mut session_cmd(&server, dir.path(), &["stop", p]));
+    assert!(text(&o).contains("no session host runs"), "{}", text(&o));
+}
+
+#[tokio::test]
+async fn sigterm_ends_a_host_run_by_hand() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = host_registered(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap();
+    let mut host = session_cmd(
+        &server,
+        dir.path(),
+        &[
+            "runner",
+            "run",
+            "--name",
+            "mac",
+            "--interval",
+            "1",
+            "--session",
+            p,
+        ],
+    )
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_until("the host's socket", || {
+        session_socket(&dir.path().join("data")).is_some()
+    })
+    .await;
+    signal(host.id(), "-TERM");
+    let status = tokio::task::spawn_blocking(move || host.wait().unwrap())
+        .await
+        .unwrap();
+    assert!(status.success(), "SIGTERM is a clean stop: {status}");
+    assert!(session_socket(&dir.path().join("data")).is_none());
+}
+
+/// Bare `iohr` on a terminal is the session: the shell with the panel over it, in the host this
+/// folder's session joined (started here, since none ran). `iohr stop` ends the host, which
+/// closes the panel and leaves the shell; the shell then ends with its own exit status.
+#[tokio::test]
+async fn bare_iohr_on_a_terminal_enters_the_session_and_stop_closes_the_panel() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = host_registered(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap().to_owned();
+    let mut c = session_cmd(&server, dir.path(), &[]);
+    c.current_dir(&project)
+        .env_remove("TERM_PROGRAM")
+        .env("TERM", "xterm-256color")
+        .env("COLORTERM", "truecolor")
+        .env("SHELL", "/bin/sh")
+        .env("PS1", "shell> ");
+    let mut s = pty::Session::spawn(c);
+    s.until("the panel over the shell", |screen| {
+        pty::any(screen, "⌥i menu") && pty::any(screen, "shell>")
+    });
+    let screen = s.screen.screen().contents();
+    assert!(
+        !screen.contains("Usage:"),
+        "bare iohr printed help:\n{screen}"
+    );
+    // The host is a process of its own that this shell joined: it beats, and has a socket.
+    assert!(
+        beats_at_least(&server, 1).await >= 1,
+        "the host sent no heartbeat: {}",
+        session_diag(dir.path())
+    );
+    assert!(session_socket(&dir.path().join("data")).is_some());
+    // `iohr stop` from another process ends the host; the panel closes, the shell stays.
+    let stopped = tokio::task::spawn_blocking({
+        let (server_uri, dir_path) = (server.uri(), dir.path().to_path_buf());
+        move || {
+            let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
+            c.args(["stop", &p, "--wait", "0"])
+                .env_clear()
+                .env("IOHR_BASE_URL", server_uri)
+                .env("IOHR_CONFIG_DIR", dir_path.join("config"))
+                .env("IOHR_PROFILE", "p")
+                .env("HOME", &dir_path)
+                .env("IOHR_DATA_DIR", dir_path.join("data"))
+                .env("PATH", "/usr/bin:/bin");
+            c.output().unwrap()
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(stopped.status.code(), Some(0), "{}", text(&stopped));
+    // The host ends once its Roles are idle; its closing connection is what closes the panel.
+    wait_until("the host gone", || {
+        session_socket(&dir.path().join("data")).is_none()
+    })
+    .await;
+    s.until("the panel gone", |screen| !pty::any(screen, "⌥i menu"));
+    assert!(
+        s.child.try_wait().unwrap().is_none(),
+        "the shell must stay open when the host stops"
+    );
+    s.send(b"exit\n");
+    let status = s.exited().expect("the shell ends after exit");
+    assert!(status.success(), "{status}");
+    // Leaving says why the panel went: the note is written where the shell ended, not over it.
+    s.until("the host's stop said", |screen| {
+        pty::any(screen, "the session host stopped")
+    });
+}
+
+/// `iohr stop` inside the panel ends the host and lifts the panel; the shell and the panel
+/// proxy around it stay. Running `iohr` again then brings the panel back and must leave a live
+/// host joined for as long as the panel is up: the short-lived re-run cannot be the one that
+/// joins (the host stops when its last session leaves), so the proxy rejoins for it.
+#[tokio::test]
+async fn bare_iohr_after_stop_inside_the_panel_starts_the_host_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = host_registered(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let bin = env!("CARGO_BIN_EXE_iohr");
+    let mut c = session_cmd(&server, dir.path(), &[]);
+    c.current_dir(&project)
+        .env_remove("TERM_PROGRAM")
+        .env("TERM", "xterm-256color")
+        .env("COLORTERM", "truecolor")
+        .env("SHELL", "/bin/sh")
+        .env("PS1", "shell> ");
+    let mut s = pty::Session::spawn(c);
+    s.until("the panel over the shell", |screen| {
+        pty::any(screen, "⌥i menu") && pty::any(screen, "shell>")
+    });
+    let data = dir.path().join("data");
+    wait_until("the first host's socket", || {
+        session_socket(&data).is_some()
+    })
+    .await;
+
+    // `iohr stop` typed in the panel's shell: the host ends, the panel lifts.
+    s.send(format!("{bin} stop\r").as_bytes());
+    s.until("the panel closed by stop", |screen| {
+        pty::any(screen, "the panel is closed")
+    });
+    wait_until("the first host gone", || session_socket(&data).is_none()).await;
+    let beats_before = bodies(&server, BEAT).await.len();
+
+    // Bare `iohr` in the stopped panel: the panel is back, and so is a host.
+    s.send(format!("{bin}\r").as_bytes());
+    s.until("the re-run", |screen| pty::any(screen, "the panel is on"));
+    s.until("the panel back", |screen| pty::any(screen, "⌥i menu"));
+    wait_until("a host started by the re-run", || {
+        session_socket(&data).is_some()
+    })
+    .await;
+    assert!(
+        beats_at_least(&server, beats_before + 2).await >= beats_before + 2,
+        "the second host sent no heartbeat: {}",
+        session_diag(dir.path())
+    );
+    // It stays: the re-run process has long exited, and the proxy holds the session.
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    assert!(
+        session_socket(&data).is_some(),
+        "the host ended with the re-run: {}",
+        session_diag(dir.path())
+    );
+    assert!(
+        pty::any(s.screen.screen(), "⌥i menu"),
+        "the panel went again:\n{}",
+        s.screen.screen().contents()
+    );
+
+    // Leaving the panel leaves the session, and the host stops with its last session.
+    s.send(b"exit\r");
+    let status = s.exited().expect("the shell ends after exit");
+    assert!(status.success(), "{status}");
+    wait_until("the second host gone", || session_socket(&data).is_none()).await;
+}
+
+/// Under `NO_COLOR` a terminal is not the session either: the usage report, exit 2.
+#[tokio::test]
+async fn bare_iohr_on_a_terminal_under_no_color_prints_the_usage_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    let mut c = iohr(&server, dir.path(), &[]);
+    c.env("TERM", "xterm-256color").env("NO_COLOR", "1");
+    let mut s = pty::Session::spawn(c);
+    let status = s.exited().expect("it prints and ends");
+    assert_eq!(status.code(), Some(2), "{}", s.screen.screen().contents());
+    assert!(
+        s.screen.screen().contents().contains("Usage: iohr"),
+        "{}",
+        s.screen.screen().contents()
+    );
+}
+
+/// A shell killed after it started the host and before it joined it leaves nobody to join:
+/// the host ends at once, not when its 30 seconds for a first join are up.
+#[tokio::test]
+async fn a_shell_killed_before_it_joined_takes_the_host_with_it_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = host_registered(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap();
+    let mut shell = session_cmd(&server, dir.path(), &["session", p])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    // The moment the socket exists: the shell polls every 50 ms, so it has not joined yet.
+    while session_socket(&dir.path().join("data")).is_none() {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+    shell.kill().unwrap();
+    shell.wait().unwrap();
+    let killed = std::time::Instant::now();
+    wait_until("the host to end", || {
+        session_socket(&dir.path().join("data")).is_none()
+    })
+    .await;
+    assert!(
+        killed.elapsed() < std::time::Duration::from_secs(10),
+        "the host took {:?} to end",
+        killed.elapsed()
     );
 }

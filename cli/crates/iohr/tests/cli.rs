@@ -6,9 +6,12 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -29,15 +32,6 @@ fn token(scopes: &[&str]) -> String {
             "scp": scopes, "org": ACCOUNT, "plan": "free", "key": "key_1"
         }))
     )
-}
-
-/// What a child process needs to run at all; `SYSTEMROOT` is required for sockets on
-/// Windows. Nothing that could hold a credential is passed on.
-fn kept_env() -> Vec<(String, std::ffi::OsString)> {
-    ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"]
-        .into_iter()
-        .filter_map(|k| std::env::var_os(k).map(|v| (k.to_owned(), v)))
-        .collect()
 }
 
 struct Run<'a> {
@@ -571,6 +565,7 @@ async fn verbose_output_never_shows_the_token() {
     let secret_arg = format!("api_key={}", secret_file.to_str().unwrap());
     let commands: Vec<Vec<&str>> = vec![
         vec!["whoami"],
+        vec!["coordinator", "jobs", "list"],
         vec![
             "coordinator",
             "asks",
@@ -594,6 +589,8 @@ async fn verbose_output_never_shows_the_token() {
         vec![
             "project",
             "init",
+            "--template",
+            "blank",
             "verbose-demo",
             "--dir",
             project_dir,
@@ -646,7 +643,12 @@ async fn verbose_output_never_shows_the_token() {
     ];
     // `runner run-key` keeps its key in the profile's store, which a bare token has not:
     // `run_key_is_made_once_and_enrolled_with_a_proof_of_possession` (tests/runner.rs) runs it.
+    // `runner api-key` keeps the key in the same store:
+    // `a_stored_api_key_reaches_claude_alone_and_is_never_printed_or_sent` (tests/runner.rs)
+    // runs it with `--verbose`. `runner personal-use` calls nothing.
     // `iohr decisions` needs typed answers: `decisions_commands_never_show_the_token` runs it.
+    // `iohr sync` needs a project with an atlas: `sync_never_shows_the_token_or_a_documents_words`
+    // (tests/atlas.rs) runs it with `--verbose`.
     for args in commands {
         let mut args = args.clone();
         args.push("--verbose");
@@ -695,6 +697,33 @@ async fn verbose_output_never_shows_the_token() {
         !all.contains("TOKENSIGNATUREMARKER"),
         "{args:?} leaked the token"
     );
+    assert!(!all.contains("request id"), "{args:?} made a call");
+    // `iohr stop` (RFC 0213) talks to a local socket only: it makes no API call, and with no
+    // host running it says so and exits 0. `iohr session` never returns while it is open:
+    // `session_starts_one_host_that_beats_and_stop_ends_it` (tests/runner.rs) runs it with
+    // `--verbose` and checks no credential reaches its output or the host's log.
+    let data = dir.path().join("session-data");
+    let args = [
+        "stop",
+        project_dir,
+        "--data-dir",
+        data.to_str().unwrap(),
+        "--verbose",
+    ];
+    let o = r.with_token(&t, &args);
+    let all = text(&o);
+    // The session host is unix only: elsewhere `stop` refuses (exit 1) and says why.
+    let (want_code, want_text) = if cfg!(unix) {
+        (0, "no session host runs")
+    } else {
+        (1, "the session host needs a unix system")
+    };
+    assert_eq!(code(&o), want_code, "{args:?}: {all}");
+    assert!(
+        !all.contains("TOKENSIGNATUREMARKER"),
+        "{args:?} leaked the token"
+    );
+    assert!(all.contains(want_text), "{args:?}: {all}");
     assert!(!all.contains("request id"), "{args:?} made a call");
     // `ext verify ARTIFACT` (RFC 0143) is offline too: an artifact with a bundle that
     // does not match fails (exit 1) and prints no token and no request line.
@@ -748,6 +777,7 @@ async fn verbose_output_never_shows_the_token() {
             .cmd(&args)
             .env("IOHR_TOKEN", &t)
             .env("HOME", &home)
+            .env("USERPROFILE", &home)
             .env("IOHR_EXT_ONCE", "1")
             .stdin(Stdio::null())
             .output()
@@ -760,6 +790,39 @@ async fn verbose_output_never_shows_the_token() {
         );
         assert!(!all.contains("request id"), "{args:?} made a call");
     }
+    // The runner's housekeeping is offline: `runner prune` with nothing to remove, and
+    // `runner service install --dry-run`, which writes and loads nothing (macOS and
+    // Linux only; elsewhere it says so and exits 1).
+    let service = i32::from(!cfg!(any(target_os = "macos", target_os = "linux")));
+    for (args, want) in [
+        (vec!["runner", "prune", "--dry-run", "--verbose"], 0),
+        (vec!["runner", "prune", "--json", "--verbose"], 0),
+        (
+            vec!["runner", "service", "install", "--dry-run", "--verbose"],
+            service,
+        ),
+    ] {
+        let o = r
+            .cmd(&args)
+            .env("IOHR_TOKEN", &t)
+            .env("HOME", &home)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(code(&o), want, "{args:?}: {}", text(&o));
+        let all = text(&o);
+        assert!(
+            !all.contains("TOKENSIGNATUREMARKER"),
+            "{args:?} leaked the token"
+        );
+        assert!(!all.contains("request id"), "{args:?} made a call");
+    }
+    let unit = if cfg!(target_os = "macos") {
+        home.join("Library/LaunchAgents/hr.inorbit.runner.plist")
+    } else {
+        home.join(".config/systemd/user/iohr-runner.service")
+    };
+    assert!(!unit.exists(), "a dry run wrote {}", unit.display());
 }
 
 const LAB_DOC: &str = "---\ntitle: A decision\nstatus: open\ndate: 2026-10-03\npublic: true\nlab: core\nsummary: One sentence.\n---\n\n## Problem\n\nThe site is www.example.com.\n\n## Status log\n\n- 2026-10-03: opened.\n";
@@ -1055,6 +1118,29 @@ fn profile_of(dir: &Path) -> toml::Table {
         .as_table()
         .unwrap()
         .clone()
+}
+
+/// A store that cannot keep the secret fails the sign-in before a code is shown, so a
+/// person never approves a sign-in that is then lost.
+#[tokio::test(flavor = "multi_thread")]
+async fn login_checks_the_store_before_it_shows_a_code() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mount_person_server(&server, me_with_teams("")).await;
+    // A file where the secrets directory goes: nothing can be written there.
+    std::fs::write(dir.path().join("secrets"), "").unwrap();
+    let login = login_as_me(&r, &server.uri(), &[]);
+    assert_ne!(code(&login), 0, "{}", text(&login));
+    assert!(!text(&login).contains("ABCD2345"), "{}", text(&login));
+    let asked = server.received_requests().await.unwrap_or_default();
+    assert!(
+        !asked.iter().any(|q| q.url.path() == "/oauth2/device/auth"),
+        "the device flow started"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1523,6 +1609,7 @@ fn a_language_iohr_does_not_know_is_a_usage_error_and_writes_nothing() {
     let out_dir = dir.path().join("gen");
     let o = std::process::Command::new(env!("CARGO_BIN_EXE_iohr"))
         .env_clear()
+        .env("IOHR_NO_BROWSER", "1")
         .env("IOHR_CONFIG_DIR", dir.path())
         .args(["sdk", "generate", "--lang", "cobol", "--from"])
         .arg(format!("public={}", doc.display()))
@@ -1531,7 +1618,13 @@ fn a_language_iohr_does_not_know_is_a_usage_error_and_writes_nothing() {
         .output()
         .unwrap();
     assert_eq!(code(&o), 2, "{}", text(&o));
-    assert!(text(&o).contains("cobol"), "{}", text(&o));
+    assert!(
+        text(&o).contains("invalid value for --lang <LANG>"),
+        "{}",
+        text(&o)
+    );
+    // The word typed is not repeated, in the report or in the AI line.
+    assert!(!text(&o).contains("cobol"), "{}", text(&o));
     assert!(
         !out_dir.exists(),
         "nothing is written for a language iohr does not know"
@@ -2730,6 +2823,143 @@ fn sdk_add_runs_the_program_and_passes_its_exit_code_on() {
     assert_eq!(v["manager"], "pip");
 }
 
+// `iohr ui` (RFC 0217): the UI package's scripts through pnpm, and `open` from the record
+// a running `serve` leaves in the data folder.
+
+fn iohr_ui(dir: &Path, data: &Path, args: &[&str], extra: &[(&str, &std::ffi::OsStr)]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .arg("ui")
+        .args(args)
+        .current_dir(dir)
+        .env_clear()
+        .envs(kept_env())
+        .env("IOHR_CONFIG_DIR", data.join("config"))
+        .env("IOHR_DATA_DIR", data)
+        .envs(extra.iter().map(|(k, v)| (*k, *v)))
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+/// A stand-in `pnpm` first on PATH: the arguments arrive as given, the script runs in the
+/// nearest `ui/` package, and its exit code is iohr's.
+#[cfg(unix)]
+#[test]
+fn ui_build_dev_and_check_run_pnpm_in_the_ui_package() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let p = project(&[]);
+    let ui = p.path().join("ui");
+    std::fs::create_dir_all(&ui).unwrap();
+    std::fs::write(ui.join("package.json"), "{}").unwrap();
+    let deep = p.path().join("cli/crates");
+    std::fs::create_dir_all(&deep).unwrap();
+    let bin = p.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let pnpm = bin.join("pnpm");
+    std::fs::write(
+        &pnpm,
+        "#!/bin/sh\nprintf '%s|' \"$@\" > args.txt\nexit \"${FAKE_EXIT:-0}\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&pnpm, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let env = [("PATH", path.as_os_str())];
+    for verb in ["build", "dev", "check"] {
+        let o = iohr_ui(&deep, p.path(), &[verb], &env);
+        assert_eq!(code(&o), 0, "{verb}: {}", text(&o));
+        assert_eq!(
+            std::fs::read_to_string(ui.join("args.txt")).unwrap(),
+            format!("run|{verb}|")
+        );
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(err.contains(&format!("Running `pnpm run {verb}`")), "{err}");
+    }
+    let o = iohr_ui(
+        &deep,
+        p.path(),
+        &["build"],
+        &[env[0], ("FAKE_EXIT", std::ffi::OsStr::new("3"))],
+    );
+    assert_eq!(code(&o), 3, "{}", text(&o));
+    // --json: stdout is the answer alone; --package names the folder.
+    let o = iohr_ui(
+        Path::new("/"),
+        p.path(),
+        &["build", "--json", "--package", ui.to_str().unwrap()],
+        &env,
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["script"], "build");
+}
+
+#[test]
+fn ui_build_without_a_package_or_open_without_a_server_is_a_usage_error() {
+    let p = project(&[]);
+    let o = iohr_ui(p.path(), p.path(), &["build"], &[]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(text(&o).contains("no UI package here"), "{}", text(&o));
+    let o = iohr_ui(p.path(), p.path(), &["build", "--package", "."], &[]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    let o = iohr_ui(p.path(), p.path(), &["open"], &[]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(
+        text(&o).contains("run `iohr ui serve` first"),
+        "{}",
+        text(&o)
+    );
+}
+
+/// `serve` records its address; `open` (no browser here) prints it while the server
+/// answers, and once it is gone says so and drops the stale record.
+#[cfg(unix)]
+#[test]
+fn ui_open_finds_the_running_serve_and_forgets_a_dead_one() {
+    let p = project(&[]);
+    let dist = p.path().join("ui/dist");
+    std::fs::create_dir_all(&dist).unwrap();
+    std::fs::write(dist.join("index.html"), "<!doctype html>").unwrap();
+    let data = p.path().join("data");
+    let mut serve = Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .args(["ui", "serve"])
+        .current_dir(p.path())
+        .env_clear()
+        .envs(kept_env())
+        .env("IOHR_CONFIG_DIR", data.join("config"))
+        .env("IOHR_DATA_DIR", &data)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let record = data.join("ui/serving.json");
+    let start = std::time::Instant::now();
+    while !record.exists() && start.elapsed() < std::time::Duration::from_secs(20) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let o = iohr_ui(p.path(), &data, &["open"], &[]);
+    let _ = serve.kill();
+    let _ = serve.wait();
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let url = String::from_utf8_lossy(&o.stdout).trim().to_owned();
+    assert!(
+        url.starts_with("http://127.0.0.1:") || url.starts_with("http://[::1]:"),
+        "{url}"
+    );
+    // The address a browser is signed in by: the root, then the per-launch secret.
+    let (root, launch) = url.split_once("/?launch=").expect("the launch address");
+    assert!(root.starts_with("http://"), "{url}");
+    assert_eq!(launch.len(), 64, "{url}");
+    assert!(launch.bytes().all(|b| b.is_ascii_hexdigit()), "{url}");
+    let o = iohr_ui(p.path(), &data, &["open"], &[]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(text(&o).contains("no longer running"), "{}", text(&o));
+    assert!(!record.exists(), "the stale record is removed");
+}
+
 // `iohr decisions` (platform RFC 0065, core ADR 0056): the Decisions API through the
 // SDK's Decisions operations.
 
@@ -3365,6 +3595,773 @@ async fn coordinator_jobs_create_list_and_asks_list() {
     let o = r.with_token(&t, &["coordinator", "asks", "list", "--state", "open"]);
     assert_eq!(code(&o), 0, "{}", text(&o));
     assert!(String::from_utf8_lossy(&o.stdout).contains("An ask"));
+}
+
+/// A Planner plan with one item, for the `coordinator plan` and `item` tests.
+async fn planner_mocks(server: &MockServer, status: &str) {
+    let item = serde_json::json!({
+        "item_id": "build", "kind": "task", "title": "Build", "status": status,
+        "version": 3, "holder": "", "position": 1
+    });
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/plans/plan_1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "plan": {"id": "plan_1", "title": "My plan", "state": "open", "access": "private"},
+            "items": [item.clone()], "notes": []
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(item.clone()))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build/claim"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"item": {"item_id": "build", "holder": "iohr:me", "held_until": "2026-11-07T14:00:00Z", "status": "proposed"}}),
+        ))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build/release"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"item": {"item_id": "build", "holder": "", "status": "proposed"}}),
+        ))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build/notes"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"note": {"id": "note_1", "item_id": "build"}})),
+        )
+        .mount(server)
+        .await;
+}
+
+/// The calls the Planner mocks saw, as `METHOD path` and the body's `body` or `status` field.
+async fn planner_calls(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|q| q.url.path().starts_with("/v1/coordinator/plans"))
+        .map(|q| {
+            let b: serde_json::Value = serde_json::from_slice(&q.body).unwrap_or_default();
+            let said = b["body"]
+                .as_str()
+                .or(b["item"]["status"].as_str())
+                .unwrap_or("");
+            format!("{} {} {said}", q.method, q.url.path())
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_plan_create_list_show_and_item_commands() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans"))
+        .and(wiremock::matchers::body_partial_json(
+            serde_json::json!({"title": "My plan", "external_id": "project:my"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "plan": {"id": "plan_1", "title": "My plan"}, "created": false
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/plans"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"plans": [{
+                "id": "plan_1", "title": "My plan", "state": "open", "item_count": 1,
+                "updated_at": "2026-11-07T10:00:00Z"
+            }]})),
+        )
+        .mount(&server)
+        .await;
+
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "plan",
+            "create",
+            "My plan",
+            "--external-id",
+            "project:my",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert!(out.contains("plan_1") && out.contains("false"), "{out}");
+    let o = r.with_token(&t, &["coordinator", "plan", "list"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("My plan"));
+    let o = r.with_token(&t, &["coordinator", "plan", "show", "plan_1"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("build"));
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "claim",
+            "plan_1",
+            "build",
+            "--holder",
+            "me",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.with_token(
+        &t,
+        &["coordinator", "item", "note", "plan_1", "build", "halfway"],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "done",
+            "plan_1",
+            "build",
+            "--note",
+            "shipped",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let calls = planner_calls(&server).await;
+    assert!(
+        calls
+            .iter()
+            .any(|c| c == "POST /v1/coordinator/plans/plan_1/items/build/notes halfway"),
+        "{calls:?}"
+    );
+    let done: Vec<&String> = calls
+        .iter()
+        .filter(|c| c.ends_with("shipped") || c.ends_with(" done"))
+        .collect();
+    assert_eq!(done.len(), 2, "the note, then the status: {calls:?}");
+}
+
+/// The JSON bodies the mocks received on `METHOD path`, oldest first.
+async fn planner_bodies(server: &MockServer, verb: &str, at: &str) -> Vec<serde_json::Value> {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|q| q.method.as_str() == verb && q.url.path() == at)
+        .map(|q| serde_json::from_slice(&q.body).unwrap_or_default())
+        .collect()
+}
+
+/// `item add` keeps what it is not asked to change and locks on the version it read.
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_item_add_keeps_the_rest_and_locks_on_the_version() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    let item = "/v1/coordinator/plans/plan_1/items/build";
+    // add: the item exists (version 3), so its title changes under that version, its kind stays.
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "add",
+            "plan_1",
+            "build",
+            "--title",
+            "Build it",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let put = planner_bodies(&server, "PUT", item).await;
+    assert_eq!(put.len(), 1, "{put:?}");
+    assert_eq!(put[0]["item"]["title"], "Build it", "{put:?}");
+    assert_eq!(put[0]["item"]["kind"], "task", "{put:?}");
+    assert_eq!(put[0]["expected_version"], 3, "{put:?}");
+
+    // add: a new item is written as proposed, version 0, with the kind given.
+    Mock::given(method("PUT"))
+        .and(path("/v1/coordinator/plans/plan_1/items/fresh"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "item": {"item_id": "fresh", "kind": "bug", "title": "Fresh", "status": "proposed", "version": 1}
+        })))
+        .mount(&server)
+        .await;
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "add",
+            "plan_1",
+            "fresh",
+            "--title",
+            "Fresh",
+            "--kind",
+            "bug",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let put = planner_bodies(&server, "PUT", "/v1/coordinator/plans/plan_1/items/fresh").await;
+    assert_eq!(put[0]["expected_version"], 0, "{put:?}");
+    assert_eq!(put[0]["item"]["status"], "proposed", "{put:?}");
+    assert_eq!(put[0]["item"]["kind"], "bug", "{put:?}");
+}
+
+/// `item fail` is a `failed:` note, back to proposed, then the release.
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_item_fail_notes_proposes_and_releases() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    // fail: the reason is a `failed:` note, the item goes back to proposed, the claim is released.
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "fail",
+            "plan_1",
+            "build",
+            "--reason",
+            "the tests broke",
+            "--holder",
+            "me",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(text(&o).contains("failed"), "{}", text(&o));
+    let calls = planner_calls(&server).await;
+    let at = |needle: &str| calls.iter().position(|c| c.contains(needle));
+    let note = at("/notes failed: the tests broke");
+    let back = calls.iter().rposition(|c| c.ends_with(" proposed"));
+    let rel = at("/release");
+    assert!(
+        note.is_some() && back.is_some() && rel.is_some(),
+        "{calls:?}"
+    );
+    assert!(
+        note < back && back < rel,
+        "note, proposed, release: {calls:?}"
+    );
+}
+
+/// `item release` and `claim` send `force` only when asked, and a live claim of another
+/// holder is refused with the API's words.
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_item_release_and_claim_send_force_only_when_asked() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    let item = "/v1/coordinator/plans/plan_1/items/build";
+    // release: the holder goes in, `force` only when asked.
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "release",
+            "plan_1",
+            "build",
+            "--holder",
+            "me",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "release",
+            "plan_1",
+            "build",
+            "--holder",
+            "me",
+            "--force",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let rel = planner_bodies(&server, "POST", &format!("{item}/release")).await;
+    // The two release commands, in order.
+    let (plain, forced) = (&rel[rel.len() - 2], &rel[rel.len() - 1]);
+    assert_eq!(plain["holder"], "me", "{rel:?}");
+    assert!(plain.get("force").is_none(), "{rel:?}");
+    assert_eq!(forced["force"], true, "{rel:?}");
+
+    // claim: plain and --force differ by the force flag; the seconds and holder go through.
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "claim",
+            "plan_1",
+            "build",
+            "--holder",
+            "me",
+            "--seconds",
+            "600",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "claim",
+            "plan_1",
+            "build",
+            "--holder",
+            "me",
+            "--force",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let claims = planner_bodies(&server, "POST", &format!("{item}/claim")).await;
+    assert_eq!(claims.len(), 2, "{claims:?}");
+    assert_eq!(claims[0]["holder"], "me", "{claims:?}");
+    assert_eq!(claims[0]["seconds"], 600, "{claims:?}");
+    assert!(claims[0].get("force").is_none(), "{claims:?}");
+    assert_eq!(claims[1]["force"], true, "{claims:?}");
+
+    // claim: another holder's live claim is refused (409) and the words reach the person.
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans/plan_1/items/taken/claim"))
+        .respond_with(ResponseTemplate::new(409).set_body_raw(
+            r#"{"code":"aborted","error":"item taken is held by someone else","details":[]}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    let o = r.with_token(&t, &["coordinator", "item", "claim", "plan_1", "taken"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("held by someone else"), "{}", text(&o));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_plan_refusals_are_usage_and_sign_in_errors() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    // A bad slug is a usage error before any call.
+    let o = r.with_token(&t, &["coordinator", "item", "note", "plan_1", "a/b", "x"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    // Nobody can read the Planner without the coordinator scopes' sign-in: a 403 says so.
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/plans/plan_denied"))
+        .respond_with(ResponseTemplate::new(403).set_body_raw(
+            r#"{"code":"forbidden","error":"no","details":[]}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    let o = r.with_token(&t, &["coordinator", "plan", "show", "plan_denied"]);
+    assert_eq!(code(&o), 4, "{}", text(&o));
+    assert!(text(&o).contains("coordinator"), "{}", text(&o));
+}
+
+/// `item run`: the command is a Planner step. Success is claim, building, note, done;
+/// failure is a `failed:` note, back to proposed, and the command's own exit code.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_item_run_is_a_planner_step_and_a_failure_goes_back_to_proposed() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "run",
+            "plan_1",
+            "build",
+            "--",
+            "true",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let calls = planner_calls(&server).await;
+    assert!(calls.iter().any(|c| c.contains("/claim")), "{calls:?}");
+    assert!(
+        calls.iter().any(|c| c.ends_with("building")),
+        "set building: {calls:?}"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.contains("/notes") && c.contains("done: ")),
+        "{calls:?}"
+    );
+    assert!(calls.last().unwrap().ends_with(" done"), "{calls:?}");
+
+    // A failing command: its exit code is ours, and the item goes back to proposed.
+    server.reset().await;
+    planner_mocks(&server, "proposed").await;
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "run",
+            "plan_1",
+            "build",
+            "--",
+            "sh",
+            "-c",
+            "exit 7",
+        ],
+    );
+    assert_eq!(code(&o), 7, "{}", text(&o));
+    let calls = planner_calls(&server).await;
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.contains("/notes") && c.contains("failed: ")),
+        "{calls:?}"
+    );
+    assert!(
+        calls.iter().any(|c| c.ends_with(" proposed")),
+        "back to proposed: {calls:?}"
+    );
+    assert!(calls.iter().any(|c| c.contains("/release")), "{calls:?}");
+    assert!(!calls.iter().any(|c| c.ends_with(" done")), "{calls:?}");
+    assert!(
+        !calls.iter().any(|c| c.contains("exit 7")),
+        "the arguments never reach a note: {calls:?}"
+    );
+
+    // An item that is already done is skipped: the command does not run.
+    server.reset().await;
+    planner_mocks(&server, "done").await;
+    let marker = dir.path().join("ran");
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "run",
+            "plan_1",
+            "build",
+            "--",
+            "touch",
+            marker.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(!marker.exists(), "a done step is not run again");
+}
+
+/// `item run` on an item another holder builds says how to take it over with a command that
+/// exists (`item claim --force`), not a `--force` the command does not have.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_item_run_on_a_held_item_names_the_claim_command() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/plans/plan_1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "plan": {"id": "plan_1"},
+            "items": [{"item_id": "build", "status": "building", "holder": "someone-else",
+                       "held_until": "2999-01-01T00:00:00Z"}],
+            "notes": []
+        })))
+        .mount(&server)
+        .await;
+    let o = r.with_token(
+        &token(&[]),
+        &[
+            "coordinator",
+            "item",
+            "run",
+            "plan_1",
+            "build",
+            "--",
+            "true",
+        ],
+    );
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(
+        text(&o).contains("held by someone-else")
+            && text(&o).contains("iohr coordinator item claim plan_1 build --force"),
+        "{}",
+        text(&o)
+    );
+}
+
+const IO_SECRET: &str = "IOSECRETMARKER";
+
+/// A mode 0600 secret file, and the mock sign-in service that mints `io_token` for it.
+async fn io_setup(server: &MockServer, dir: &Path, io_token: &str) -> std::path::PathBuf {
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"access_token": io_token, "token_type": "bearer", "expires_in": 900}),
+        ))
+        .mount(server)
+        .await;
+    let secret = dir.join("io-secret");
+    std::fs::write(&secret, format!("{IO_SECRET}\n")).unwrap();
+    // The mode check is Unix-only (io_signin::read_private_file), so is setting it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    secret
+}
+
+/// `--sign-in io` on `iohr coordinator jobs create` (RFC 0065.2): the job is filed with
+/// Io's bearer and the `x-iohr-via` header the flags name, in the form the platform
+/// reads; a person's call sends neither; the flags without `--sign-in` and a bad value
+/// are refused; no other command takes `--sign-in`; nothing secret is shown.
+#[tokio::test(flavor = "multi_thread")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one scenario: the allowed, refused and unchanged paths"
+)]
+async fn coordinator_jobs_create_signs_in_as_io_with_a_via_header() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let io_token = token(&["coordinator:read", "coordinator:write"]).replace("key_1", "io_1");
+    let secret = io_setup(&server, dir.path(), &io_token).await;
+    let job = serde_json::json!({"job_id": "job_7", "state": "intake", "kind": "chore",
+        "model": "sonnet", "brief": "x", "created_at": "2026-10-13T10:00:00Z"});
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/jobs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"job": job})))
+        .mount(&server)
+        .await;
+    let create = [
+        "coordinator",
+        "jobs",
+        "create",
+        "--kind",
+        "chore",
+        "--brief",
+        "-",
+    ];
+    let as_io = |extra: &[&str]| {
+        let mut args: Vec<&str> = create.to_vec();
+        args.extend(["--sign-in", "io"]);
+        args.extend(extra);
+        let mut c = r.cmd(&args);
+        c.env("IOHR_ISSUER", server.uri())
+            .env("IOHR_CLIENT_SECRET_FILE", &secret)
+            .env("IOHR_TOKEN", token(&[]));
+        spawn_with_stdin(&mut c, "Fix the thing\n")
+    };
+
+    let o = as_io(&["--via-role", "improver", "--via-session", "ab12cd34"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(!text(&o).contains(IO_SECRET) && !text(&o).contains("TOKENSIGNATUREMARKER"));
+    let seen = server.received_requests().await.unwrap();
+    let call = seen
+        .iter()
+        .rfind(|q| q.url.path() == "/v1/coordinator/jobs")
+        .unwrap();
+    assert_eq!(
+        call.headers.get("authorization").unwrap().to_str().unwrap(),
+        format!("Bearer {io_token}")
+    );
+    assert_eq!(
+        call.headers.get("x-iohr-via").unwrap().to_str().unwrap(),
+        "personality=improver; session=ab12cd34"
+    );
+
+    // The environment names it too; no flag, no header.
+    let mut c = r.cmd(&[create.as_slice(), &["--sign-in", "io"]].concat());
+    c.env("IOHR_ISSUER", server.uri())
+        .env("IOHR_CLIENT_SECRET_FILE", &secret)
+        .env("IOHR_VIA_ROLE", "improver")
+        .env("IOHR_VIA_JOB", "job_01M6");
+    let o = spawn_with_stdin(&mut c, "Fix the thing\n");
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let seen = server.received_requests().await.unwrap();
+    let call = seen
+        .iter()
+        .rfind(|q| q.url.path() == "/v1/coordinator/jobs")
+        .unwrap();
+    assert_eq!(
+        call.headers.get("x-iohr-via").unwrap().to_str().unwrap(),
+        "personality=improver; job=job_01M6"
+    );
+
+    // The old names still work, and the header is the same (`--via-personality` is a hidden alias).
+    let o = as_io(&["--via-personality", "improver", "--via-session", "ab12cd34"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let seen = server.received_requests().await.unwrap();
+    let call = seen
+        .iter()
+        .rfind(|q| q.url.path() == "/v1/coordinator/jobs")
+        .unwrap();
+    assert_eq!(
+        call.headers.get("x-iohr-via").unwrap().to_str().unwrap(),
+        "personality=improver; session=ab12cd34"
+    );
+    let mut c = r.cmd(&[create.as_slice(), &["--sign-in", "io"]].concat());
+    c.env("IOHR_ISSUER", server.uri())
+        .env("IOHR_CLIENT_SECRET_FILE", &secret)
+        .env("IOHR_VIA_PERSONALITY", "improver");
+    let o = spawn_with_stdin(&mut c, "Fix the thing\n");
+    assert_eq!(code(&o), 0, "{}", text(&o));
+
+    // A bad value is refused before any sign-in call.
+    let before = server.received_requests().await.unwrap().len();
+    let o = as_io(&["--via-role", "im prover;x=y"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+
+    // The via flags without --sign-in io are refused.
+    let o = r.with_token_and_stdin(
+        &token(&[]),
+        "x\n",
+        &[create.as_slice(), &["--via-role", "improver"]].concat(),
+    );
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(text(&o).contains("--sign-in io"), "{}", text(&o));
+
+    // A person's call is unchanged: their token, no via header.
+    let person = token(&[]);
+    let o = r.with_token_and_stdin(&person, "Fix the thing\n", &create);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let seen = server.received_requests().await.unwrap();
+    let call = seen
+        .iter()
+        .rfind(|q| q.url.path() == "/v1/coordinator/jobs")
+        .unwrap();
+    assert_eq!(
+        call.headers.get("authorization").unwrap().to_str().unwrap(),
+        format!("Bearer {person}")
+    );
+    assert!(call.headers.get("x-iohr-via").is_none());
+
+    // Other commands still refuse it, and say which take it.
+    let others: [&[&str]; 2] = [
+        &["whoami", "--sign-in", "io"],
+        &["accounts", "list", "--sign-in", "io"],
+    ];
+    for args in others {
+        let mut c = r.cmd(args);
+        c.env("IOHR_ISSUER", server.uri())
+            .env("IOHR_CLIENT_SECRET_FILE", &secret)
+            .stdin(Stdio::null());
+        let o = c.output().unwrap();
+        assert_eq!(code(&o), 2, "{args:?}: {}", text(&o));
+        assert!(text(&o).contains("iohr coordinator"), "{}", text(&o));
+    }
+}
+
+/// The Io paths of coordinator commands, with `--verbose`: neither Io's secret nor its
+/// token appears in the output (SR-24, SR-13).
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_io_paths_never_show_the_secret_or_the_token() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let io_token = token(&["coordinator:read", "coordinator:write"]);
+    let secret = io_setup(&server, dir.path(), &io_token).await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "job": {"job_id": "job_7", "state": "intake", "kind": "chore", "model": "sonnet",
+                    "brief": "x", "created_at": "2026-10-13T10:00:00Z"},
+            "jobs": [], "asks": [], "ask": {"id": "ask_1", "state": "queued"}
+        })))
+        .mount(&server)
+        .await;
+    let commands: Vec<Vec<&str>> = vec![
+        vec![
+            "coordinator",
+            "jobs",
+            "create",
+            "--kind",
+            "chore",
+            "--brief",
+            "-",
+        ],
+        vec!["coordinator", "jobs", "list"],
+        vec!["coordinator", "asks", "list"],
+        vec![
+            "coordinator",
+            "asks",
+            "create",
+            "--kind",
+            "bug",
+            "--body",
+            "x",
+        ],
+    ];
+    for mut args in commands {
+        args.extend(["--sign-in", "io", "--via-role", "improver", "--verbose"]);
+        let mut c = r.cmd(&args);
+        c.env("IOHR_ISSUER", server.uri())
+            .env("IOHR_CLIENT_SECRET_FILE", &secret);
+        let o = spawn_with_stdin(&mut c, "Fix the thing\n");
+        assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
+        let all = text(&o);
+        assert!(
+            !all.contains(IO_SECRET) && !all.contains("TOKENSIGNATUREMARKER"),
+            "{args:?} leaked Io's secret or token"
+        );
+        assert!(
+            all.contains("request id"),
+            "{args:?} printed no verbose line"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

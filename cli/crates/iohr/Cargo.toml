@@ -18,6 +18,7 @@ name = "iohr"
 path = "src/main.rs"
 
 [dependencies]
+iohr-atlas-core.workspace = true
 iohr-auth.workspace = true
 iohr-codegen.workspace = true
 iohr-lab.workspace = true
@@ -26,13 +27,21 @@ inorbithr.workspace = true
 
 aws-lc-rs.workspace = true
 base64.workspace = true
+chrono.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
+cliclack.workspace = true
+console.workspace = true
 etcetera.workspace = true
 flate2.workspace = true
 getrandom.workspace = true
+html5ever.workspace = true
+indicatif.workspace = true
+markup5ever_rcdom.workspace = true
+regex.workspace = true
 reqwest.workspace = true
 rpassword.workspace = true
+schemars.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -41,13 +50,19 @@ sigstore-verify.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 url.workspace = true
+vt100.workspace = true
 zeroize.workspace = true
 
-# The current user's id, to check who owns a trusted file (a safe call, no unsafe code).
+# The current user's id, to check who owns a trusted file, and the session host's lock (safe
+# calls, no unsafe code); and the session host's durable task queue (RFC 0213).
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true
+duckdb.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

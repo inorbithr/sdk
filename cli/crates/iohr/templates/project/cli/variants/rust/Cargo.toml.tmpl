@@ -1,0 +1,24 @@
+[package]
+name = "@@NAME@@"
+version = "0.1.0"
+edition = "2024"
+rust-version = "@@TOOLCHAIN_MINOR@@"
+description = "@@ID@@"
+license = "@@LICENSE@@"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "@@MODULE@@"
+path = "src/lib.rs"
+
+[[bin]]
+name = "@@NAME@@"
+path = "src/main.rs"
+
+# No dependencies: the argument parsing and the JSON output are the standard library.
+# Add a crate with `cargo add`, commit Cargo.lock with it, and CI keeps using --locked.
+
+[profile.release]
+strip = true
+lto = true

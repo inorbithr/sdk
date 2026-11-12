@@ -1,11 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/iohr", "crates/iohr-auth", "crates/iohr-openapi", "crates/iohr-codegen", "crates/iohr-lab"]
+members = ["crates/iohr", "crates/iohr-auth", "crates/iohr-openapi", "crates/iohr-codegen", "crates/iohr-lab", "crates/iohr-atlas-core"]
 # Built with nightly by `mise run cli:fuzz`.
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.1.0-alpha.32"
+version = "0.1.0-alpha.39"
 edition = "2024"
 rust-version = "1.94"
 license = "Apache-2.0"
@@ -14,6 +14,7 @@ homepage = "https://docs.inorbit.hr"
 publish = false
 
 [workspace.dependencies]
+iohr-atlas-core = { path = "crates/iohr-atlas-core", version = "0.1.0-alpha.39" }
 iohr-auth = { path = "crates/iohr-auth" }
 iohr-codegen = { path = "crates/iohr-codegen" }
 iohr-lab = { path = "crates/iohr-lab" }
@@ -22,8 +23,12 @@ inorbithr = { path = "../rust" }
 
 aws-lc-rs = "1"
 base64 = "0.23"
+# The Atlas proof crate (PRD 0211): bitemporal records and the observed time of evidence.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 clap = { version = "4.6", features = ["derive", "env", "wrap_help"] }
 clap_complete = "4.6"
+# The session host's durable task queue (RFC 0213): bundled, so no system library is needed.
+duckdb = { version = "1", default-features = false, features = ["bundled"] }
 etcetera = "0.11"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 getrandom = "0.4"
@@ -32,15 +37,24 @@ keyring-core = "1"
 minijinja = { version = "3", features = ["serde"] }
 prettyplease = "0.3"
 quote = "1"
+# The crawl knowledge base cleans the pages it kept (RFC 0205, PRD 0192): a real HTML parser, no
+# regex over markup. html5ever and its reference tree are MIT or Apache-2.0; the selector engine
+# of scraper (selectors, cssparser) is MPL-2.0, which deny.toml does not allow, so the tree is
+# walked directly.
+html5ever = "0.40"
+markup5ever_rcdom = "0.40"
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl"] }
 # Held at 0.8: typify's API takes schemars 0.8 types (`RootSchema`); see the `ignore` in
 # .github/dependabot.yml. Moves to 1.x with typify (oxidecomputer/typify#886).
 schemars = "0.8"
-rustix = { version = "1", default-features = false, features = ["std", "process"] }
+rustix = { version = "1", default-features = false, features = ["std", "process", "pty", "termios", "fs", "stdio"] }
 semver = "1"
 sigstore-verify = { version = "0.15", default-features = false, features = ["aws-lc-rs"] }
 syn = { version = "3", features = ["full"] }
 typify = "0.8"
+cliclack = "0.5"
+indicatif = "0.18"
+console = "0.16"
 rpassword = "7"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json", "query", "form", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
@@ -48,17 +62,30 @@ sha2 = "0.11"
 serde_json = "1"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+# The page's live socket (`iohr ui serve`, `/api/live`): the server side of the handshake, over a
+# stream the guards already read; the same version the SDK uses upstream.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tokio = { version = "1", features = ["rt", "macros", "time", "io-std", "io-util", "fs", "net", "sync", "process", "signal"] }
 toml = "1"
 toml_edit = "0.25"
 url = "2"
+# Typed ids of the Atlas proof crate: UUIDv7 for claims and observations.
+uuid = { version = "1", features = ["v7", "serde"] }
+# The terminal panel keeps a model of the child's screen: what lies under the floating box (its
+# shadow) and whether the child is on the alternate screen (ADR 0225).
+vt100 = { version = "0.16", default-features = false }
 zeroize = "1"
 
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
+# The version apple-native-keyring-store already uses: `QuietStore` switches the Keychain's
+# dialogs off through it.
+security-framework = "3.7"
 windows-native-keyring-store = "1"
 zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
 tempfile = "3"
+proptest = "1"
 wiremock = "0.6"
 
 [workspace.lints.rust]

@@ -9,7 +9,7 @@ experimental = true
 cargo.binstall = true
 
 [tools]
-go = "1.27.3"
+go = "1.27.4"
 rust = { version = "1.99.0", components = "rustfmt,clippy" }
 node = "26.10.0"
 pnpm = "12.9.1"
@@ -56,15 +56,15 @@ CARGO_TERM_COLOR = "never"
 
 [tasks.ci]
 description = "Everything CI checks, in the same order"
-depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "dart:check", "cli:check", "conformance", "examples:check", "examples:run"]
+depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "dart:check", "cli:check", "ui:check", "conformance", "examples:check", "examples:run"]
 
 [tasks."ci:changed"]
 description = "What CI would run for your changes since origin/main, with CI's path rules; run it before a push (`-- --dry-run` prints the plan)"
 run = "bash tools/ci-changed.sh"
 
 [tasks.check]
-description = "Format check, lint, types and unit tests for every language and the command line"
-depends = ["go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "dart:check", "cli:check"]
+description = "Format check, lint, types and unit tests for every language, the command line and the web UI"
+depends = ["go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "dart:check", "cli:check", "ui:check"]
 
 [tasks.fmt]
 description = "Format every language and the command line in place"
@@ -95,6 +95,8 @@ run = [
   "python3 tools/check-repo.py",
   "python3 tools/test_examples_gate.py",
   "python3 tools/test_cli_policy.py",
+  "python3 tools/test_terminal_themes.py",
+  "python3 tools/terminal-themes.py --offline",
 ]
 
 # ---------------------------------------------------------------- supply chain
@@ -312,6 +314,38 @@ else
 fi
 """
 
+# ---------------------------------------------------------------- web UI (RFC 0217)
+# One path for a developer, mise and CI: each task is the `iohr ui` verb, run from this
+# checkout's own build. `iohr ui` finds the nearest `ui/` package from `cli/`.
+
+[tasks."ui:install"]
+description = "Web UI: install the UI package's locked dependencies (pnpm, frozen lockfile)"
+dir = "ui"
+run = "pnpm install --frozen-lockfile"
+
+[tasks."ui:build"]
+description = "Web UI: build the UI package (`iohr ui build`, pnpm run build)"
+depends = ["ui:install"]
+dir = "cli"
+run = "cargo run --quiet --locked -p iohr -- ui build"
+
+[tasks."ui:dev"]
+description = "Web UI: the UI package's dev server (`iohr ui dev`)"
+depends = ["ui:install"]
+dir = "cli"
+run = "cargo run --quiet --locked -p iohr -- ui dev"
+
+[tasks."ui:check"]
+description = "Web UI: the UI package's checks (`iohr ui check`)"
+depends = ["ui:install"]
+dir = "cli"
+run = "cargo run --quiet --locked -p iohr -- ui check"
+
+[tasks."ui:serve"]
+description = "Web UI: serve the built UI on loopback (`iohr ui serve`)"
+dir = "cli"
+run = "cargo run --quiet --locked -p iohr -- ui serve"
+
 # ---------------------------------------------------------------- command line (ADR 0009)
 
 [tasks."cli:check"]
@@ -325,6 +359,19 @@ cargo nextest run --locked --all-features
 cargo test --locked --doc --all-features
 cargo deny check
 """
+
+[tasks."cli:themes"]
+description = "Regenerate the terminal themes of `iohr theme` from the Mac app's term-config.ts (IOHR_MAC_DIR)"
+run = "python3 tools/terminal-themes.py"
+
+[tasks."cli:themes:check"]
+description = "Fail if the committed terminal themes drifted from the Mac app's (needs an iohr-mac checkout; IOHR_MAC_DIR)"
+run = "python3 tools/terminal-themes.py --check"
+
+[tasks."cli:preview-install"]
+shell = "bash -e -o pipefail -c"
+description = "Command line, macOS: build iohr and install it as iohr-preview signed like the release (Apple Development, hr.inorbit.iohr), so the Keychain trusts every rebuild"
+run = "tools/preview-install.sh"
 
 [tasks."cli:fmt"]
 shell = "bash -e -o pipefail -c"

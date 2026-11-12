@@ -1,6 +1,5 @@
 //! One operation's example in Rust, on `inorbithr` (see [`crate::examples`]). The
-//! program's `run` returns the error with `?` and `main` reports it, the API's code and
-//! request id first.
+//! program's `main` returns the error with `?`, and Rust reports it.
 
 use std::fmt::Write as _;
 
@@ -30,7 +29,11 @@ pub(crate) fn example(call: &Call<'_>) -> String {
     }
     public.sort_by_key(|s| s.to_lowercase());
     let mut uses: Vec<String> = c.imports.iter().map(|s| (*s).to_owned()).collect();
-    uses.push(format!("inorbithr::public::{{{}}}", public.join(", ")));
+    uses.push(if public.len() == 1 {
+        format!("inorbithr::public::{}", public[0])
+    } else {
+        format!("inorbithr::public::{{{}}}", public.join(", "))
+    });
     let mut out = String::new();
     for u in group(uses) {
         let _ = writeln!(out, "use {u};");

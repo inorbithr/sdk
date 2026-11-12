@@ -15,6 +15,7 @@ use crate::ext::install::Fetched;
 use crate::ext::manifest::{check_name, check_version};
 use crate::ext::oci::Digest;
 use crate::output::Out;
+use crate::ui::Listed;
 
 /// The publisher a bare name means (RFC 0073: `agent` is `inorbit/agent`).
 pub(crate) const FIRST_PARTY: &str = "inorbit";
@@ -65,6 +66,11 @@ fn list_of(v: &Value, k: &str) -> Vec<String> {
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(Value::as_str).map(clean).collect())
         .unwrap_or_default()
+}
+
+/// Whether a listing is announced but not released: it has no version to install.
+pub(crate) fn is_coming(x: &Value) -> bool {
+    flag(x, "coming")
 }
 
 fn flag(v: &Value, k: &str) -> bool {
@@ -144,6 +150,15 @@ async fn versions(s: &Session, publisher: &str, name: &str) -> Result<Vec<Value>
     .map_err(scoped)
 }
 
+/// Every listing this account may see, from the API (the client `ext search` uses), for
+/// callers that match listings themselves, such as `init`'s offer of fitting extensions.
+pub(crate) async fn listings(g: &Global, env: &Env) -> Result<Vec<Value>, Error> {
+    let s = session(g, env).await?;
+    pages(&s.api, "/v1/extensions", &[], "extensions", MAX_SEARCH)
+        .await
+        .map_err(scoped)
+}
+
 /// `iohr ext search`.
 pub(crate) async fn search(
     g: &Global,
@@ -195,9 +210,10 @@ pub(crate) async fn search(
         Out::note("No extensions match.");
     } else {
         let rows: Vec<Vec<String>> = found.iter().map(search_row).collect();
-        Out::table(
+        Out::list(
             &["NAME", "KIND", "PUBLISHER", "LATEST", "VISIBILITY"],
             &rows,
+            &Listed::new("match", "matches"),
         );
     }
     if more {
@@ -211,7 +227,7 @@ pub(crate) async fn search(
 }
 
 fn search_row(x: &Value) -> Vec<String> {
-    let latest = if flag(x, "coming") {
+    let latest = if is_coming(x) {
         "coming".to_owned()
     } else {
         x.get("latest")

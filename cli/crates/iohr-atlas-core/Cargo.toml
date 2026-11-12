@@ -1,0 +1,33 @@
+[package]
+name = "iohr-atlas-core"
+description = "Atlas core (RFC 0086): evidence, claims, proof rules and certificates. A claim is true only when a proof tree ends at evidence on disk; no model can write stored truth. Deterministic, with no network and no unsafe code."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["atlas", "evidence", "claims", "proof", "provenance"]
+categories = ["data-structures", "development-tools"]
+# Published on its own (ADR 0023 revision, PRD 0211): the workspace default of `false` does not apply.
+publish = true
+
+[features]
+# Helpers that build evidence through the validating constructors, for tests here and in
+# programs that store claims.
+testkit = []
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

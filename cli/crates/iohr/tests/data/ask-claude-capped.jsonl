@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","cwd":"/work"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I wrote the first PRD. Left: the ADRs and the studies."}}}
+{"type":"result","subtype":"error_max_turns","is_error":false,"duration_ms":900,"num_turns":150}

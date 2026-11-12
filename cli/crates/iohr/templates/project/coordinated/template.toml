@@ -1,0 +1,6 @@
+# The old default, kept by name: the demo wired to a Planner plan. Every template now has the
+# Planner step (coordination.toml is in the base), so this is the extension with its own README.
+id = "coordinated"
+description = "The old default: the extension, wired to a Planner plan that init makes, and an ask example"
+status = "hidden"
+extends = "demo"

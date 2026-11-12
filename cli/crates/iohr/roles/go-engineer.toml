@@ -1,0 +1,80 @@
+name = "go-engineer"
+parent = "base-engineer"
+title = "Go engineer"
+version = 2
+language = "go"
+domain = ["go", "golang", "goroutine", "context"]
+aliases = ["go", "golang"]
+model = "sonnet"
+
+[[line]]
+place = "core"
+section = "Context"
+text = "A Context is the first parameter, named ctx. Do not store it in a struct: pass it to each function that needs it."
+cites = ["https://pkg.go.dev/context", "https://go.dev/wiki/CodeReviewComments"]
+
+[[line]]
+place = "core"
+section = "Context"
+text = "Always call the CancelFunc from WithCancel, WithDeadline and WithTimeout: failing to leaks the child context until the parent is cancelled. go vet checks it."
+cites = ["https://pkg.go.dev/context"]
+
+[[line]]
+place = "core"
+section = "Errors"
+text = "Do not discard errors with the blank identifier. Handle them or return them. Do not use panic for normal error handling."
+cites = ["https://go.dev/wiki/CodeReviewComments"]
+
+[[line]]
+place = "core"
+section = "Errors"
+text = "Wrap with fmt.Errorf and %w, and test with errors.Is and errors.As instead of comparing errors."
+cites = ["https://pkg.go.dev/errors"]
+
+[[line]]
+place = "core"
+section = "Concurrency"
+text = "When you start a goroutine, make clear when it exits: goroutines blocked on a channel leak."
+cites = ["https://go.dev/wiki/CodeReviewComments"]
+
+[[line]]
+place = "core"
+section = "Checks"
+text = "Run go test -race, under a realistic workload as well: it only finds races in code that runs."
+cites = ["https://go.dev/doc/articles/race_detector"]
+
+[[line]]
+place = "core"
+section = "Checks"
+text = "Run govulncheck ./... : it reports a vulnerability only when your code can call the vulnerable function."
+cites = ["https://go.dev/doc/security/vuln/"]
+
+[[line]]
+place = "recall"
+section = "Style"
+text = "Error strings are not capitalized and do not end with punctuation, because they are usually wrapped into longer messages."
+cites = ["https://go.dev/wiki/CodeReviewComments"]
+
+[[line]]
+place = "recall"
+section = "Tests"
+text = "net/http/httptest: NewServer starts a real server on a loopback address (call Close), NewRecorder gives a ResponseWriter that records what was written."
+cites = ["https://pkg.go.dev/net/http/httptest"]
+
+[[line]]
+place = "recall"
+section = "Servers"
+text = "http.Server has Shutdown(ctx) to stop serving, and the race detector reports WARNING: DATA RACE with the stacks of both accesses."
+cites = ["https://pkg.go.dev/net/http#Server.Shutdown", "https://go.dev/doc/articles/race_detector"]
+
+[[line]]
+place = "recall"
+section = "Distributed systems"
+text = "Put a timeout on every remote call and retry in one layer, with a limit and backoff with jitter."
+cites = ["https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"]
+
+[[line]]
+place = "recall"
+section = "Dependency currency"
+text = "Go tools for the dependency check (the steps are in the security role's supply-chain lines): proxy.golang.org lists a module's versions; go list -m -u all shows newer ones and go get example.com/pkg@latest takes the latest; vuln.go.dev holds the reviewed vulnerability reports; govulncheck reports only vulnerabilities that affect code you call (exit 0 when none, non-zero when found); go mod tidy after."
+cites = ["https://proxy.golang.org/", "https://go.dev/doc/security/vuln/", "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck", "https://go.dev/doc/modules/managing-dependencies"]

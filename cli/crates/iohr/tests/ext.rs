@@ -7,8 +7,14 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+// The pty helper is unix only; only the unix `init_crawl` tests use it.
+#[cfg(unix)]
+mod pty;
+mod support;
+
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -264,11 +270,10 @@ impl Box_ {
                 "IOHR_EXT_REGISTRY",
                 format!("{}/{PREFIX}", self.server.uri()),
             )
+            .envs(kept_env())
             .current_dir(self.dir.path());
-        for k in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "HOME"] {
-            if let Some(v) = std::env::var_os(k) {
-                c.env(k, v);
-            }
+        if let Some(v) = std::env::var_os("HOME") {
+            c.env("HOME", v);
         }
         c
     }
@@ -966,6 +971,93 @@ async fn search_and_show_read_the_catalogue() {
     assert_eq!(code(&o), 2, "{}", text(&o));
 }
 
+/// A catalogue listing of InOrbit's, released (`latest` given) or coming.
+fn first_party(name: &str, latest: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "publisher": "inorbit", "name": name, "kind": "program", "description": "d",
+        "visibility": "public", "coming": latest.is_none(), "publisher_name": "InOrbit",
+        "first_party": true, "latest": latest.map(|v| serde_json::json!({"version": v}))
+    })
+}
+
+async fn list_catalogue(b: &Box_, listings: &[serde_json::Value]) {
+    Mock::given(method("GET"))
+        .and(path("/v1/extensions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "extensions": listings, "next_page_token": ""
+        })))
+        .mount(&b.server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn show_with_no_name_lists_the_catalogue_the_way_search_does() {
+    let b = Box_::new().await;
+    list_catalogue(
+        &b,
+        &[
+            first_party("agent", Some("0.2.0")),
+            first_party("crawler", None),
+        ],
+    )
+    .await;
+    let shown = b.run_api(&["ext", "show"]);
+    assert_eq!(code(&shown), 0, "{}", text(&shown));
+    let out = String::from_utf8_lossy(&shown.stdout);
+    assert!(out.starts_with("NAME"), "{out}");
+    assert!(
+        out.contains("inorbit/agent") && out.contains("0.2.0"),
+        "{out}"
+    );
+    let crawler = out
+        .lines()
+        .find(|l| l.contains("inorbit/crawler"))
+        .unwrap_or_default();
+    assert!(crawler.contains("coming"), "{out}");
+    // The one listing: the bytes `ext search` prints.
+    let searched = b.run_api(&["ext", "search"]);
+    assert_eq!(shown.stdout, searched.stdout, "{}", text(&searched));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn init_without_a_terminal_hints_the_extension_and_installs_nothing() {
+    let b = Box_::new().await;
+    list_catalogue(
+        &b,
+        &[
+            first_party("agent", Some("0.2.0")),
+            first_party("crawler", None),
+        ],
+    )
+    .await;
+    let dir = b.dir.path().join("work/made");
+    let o = b
+        .cmd(&[
+            "project",
+            "init",
+            "made",
+            "--template",
+            "coordinated",
+            "--set",
+            "license=MIT",
+            "--yes",
+            "--no-smoke",
+            "--dir",
+            dir.to_str().unwrap(),
+        ])
+        .env("HOME", b.dir.path())
+        .env("IOHR_BASE_URL", b.server.uri())
+        .env("IOHR_TOKEN", token(&["extensions:read"]))
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("ext install inorbit/agent"), "{}", text(&o));
+    assert!(!err.contains("ext install inorbit/crawler"), "{}", text(&o));
+    nothing_installed(&b);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_catalogue_install_never_replaces_another_signers_extension() {
     let b = Box_::new().await;
@@ -1241,7 +1333,15 @@ mod run {
         let b = Box_::new().await;
         let o = b.run(&["agent", "status"]);
         assert_eq!(code(&o), 2, "{}", text(&o));
-        assert!(text(&o).contains("iohr ext install agent"), "{}", text(&o));
+        assert!(
+            text(&o).contains("not an iohr command or an installed extension")
+                && text(&o).contains("iohr ext install PUBLISHER/NAME"),
+            "{}",
+            text(&o)
+        );
+        // The word typed is not repeated (the examples say "AI agent"; the command was `agent`).
+        assert!(!text(&o).contains("`agent`"), "{}", text(&o));
+        assert!(!text(&o).contains("iohr agent"), "{}", text(&o));
     }
 }
 
@@ -1445,4 +1545,931 @@ async fn verifying_an_artifact_accepts_a_good_bundle_and_refuses_a_tampered_one(
     assert_ne!(code(&o), 0);
     let o = b.run(&["ext", "verify", "/no/such/file", "--bundle", good_s]);
     assert_ne!(code(&o), 0);
+}
+
+/// `project init` reads a public site on this machine through the agent extension (PRD
+/// 0190.1): consent first, the files under `.inorbit/crawl/<host>/`, a study the sync lists
+/// and a memory entry, and nothing sent anywhere.
+#[cfg(unix)]
+mod init_crawl {
+    use std::fmt::Write as _;
+    use std::path::Path;
+
+    use super::*;
+
+    const SPACE: &str = "lab_1";
+
+    /// A stand-in for `iohr-agent`: asks the site for its start page (so the test counts the
+    /// requests), writes the crawler's JSON to `--out`, records its arguments beside it and
+    /// exits with `exit`.
+    fn fake_agent(exit: u8, stopped_by: &[&str], json: bool) -> Vec<u8> {
+        fake_agent_with(exit, stopped_by, json, &serde_json::json!([]))
+    }
+
+    /// The same, with `blocked` as the links the crawler met and kept out.
+    fn fake_agent_with(
+        exit: u8,
+        stopped_by: &[&str],
+        json: bool,
+        blocked: &serde_json::Value,
+    ) -> Vec<u8> {
+        let result = serde_json::json!({
+            "start": "http://site.test/", "scope": "site.test",
+            "complete": stopped_by.is_empty(), "stopped_by": stopped_by,
+            "pages": [
+                {"url": "http://site.test/", "status": 200, "title": "Home",
+                 "content_type": "text/html", "size": 10, "depth": 0, "rendered": false},
+                {"url": "http://site.test/about", "status": 200, "title": "About us",
+                 "content_type": "text/html", "size": 20, "depth": 1, "rendered": false},
+                {"url": "http://site.test/gone", "status": 404, "content_type": "text/html",
+                 "size": 0, "depth": 1, "rendered": false}
+            ],
+            "hosts": [{"host": "site.test", "robots": "rules", "pages": 3, "disallowed": 2,
+                       "media_skipped": 0, "refused": false}],
+            "blocked": blocked, "links": [], "listings": [],
+            "used": {"pages": 3, "hosts": 1, "bytes": 30, "seconds": 3, "requests": 4, "renders": 0}
+        })
+        .to_string();
+        let write = if json {
+            format!("printf '%s' '{result}' > \"$out\"\n")
+        } else {
+            String::new()
+        };
+        format!(
+            "#!/bin/sh\nall=\"$*\"\nurl=\"$3\"\nwhile [ $# -gt 0 ]; do\n  \
+             if [ \"$1\" = \"--out\" ]; then out=\"$2\"; fi\n  shift\ndone\n\
+             curl -s -o /dev/null \"$url\"\ndir=$(dirname \"$out\")\n\
+             echo \"$all\" > \"$dir/args.txt\"\n{write}exit {exit}\n"
+        )
+        .into_bytes()
+    }
+
+    struct Site {
+        b: Box_,
+        server: MockServer,
+        dir: PathBuf,
+    }
+
+    /// A box with the fake agent installed (or not) and a site that must be asked `hits`
+    /// times (a mock that is asked a different number of times fails the test when dropped).
+    async fn site(agent: Option<Vec<u8>>, hits: std::ops::RangeInclusive<u64>) -> Site {
+        let b = Box_::new().await;
+        if let Some(program) = agent {
+            let key = KeyPair::generate_ecdsa_p256().unwrap();
+            b.trust(&key);
+            let a = Artifact::new("agent", "1.0.0", &["agents:write"], &program);
+            publish(&b.server, "agent", "1.0.0", &a, Some(&key)).await;
+            let o = b.run(&["ext", "install", "agent@1.0.0"]);
+            assert_eq!(code(&o), 0, "{}", text(&o));
+        }
+        let site = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("<title>Home</title>"))
+            .expect(hits)
+            .mount(&site)
+            .await;
+        let dir = b.dir.path().join("work/made");
+        Site {
+            b,
+            server: site,
+            dir,
+        }
+    }
+
+    impl Site {
+        fn init(&self, extra: &[&str]) -> Output {
+            self.init_env(extra, &[])
+        }
+
+        /// The same, with `env` set on the command beside the rest.
+        fn init_env(&self, extra: &[&str], env: &[(&str, &str)]) -> Output {
+            let t = token(&["extensions:read", "agents:write"]);
+            let mut args = vec![
+                "project",
+                "init",
+                "made",
+                "--template",
+                "coordinated",
+                "--set",
+                "license=MIT",
+                "--yes",
+                "--no-smoke",
+                "--no-sync",
+                "--dir",
+                self.dir.to_str().unwrap(),
+            ];
+            args.extend_from_slice(extra);
+            let mut c = self.b.cmd(&args);
+            c.env("HOME", self.b.dir.path())
+                .env("IOHR_BASE_URL", self.b.server.uri())
+                .env("IOHR_TOKEN", &t)
+                .env("IOHR_TOKEN_CI", &t)
+                .stdin(Stdio::null());
+            for (k, v) in env {
+                c.env(k, v);
+            }
+            c.output().unwrap()
+        }
+
+        /// The folder a crawl of this site keeps its files in.
+        fn crawl_dir(&self) -> PathBuf {
+            let addr = self.server.address();
+            self.dir
+                .join(format!(".inorbit/crawl/{}-{}", addr.ip(), addr.port()))
+        }
+
+        fn url(&self) -> String {
+            format!("{}/", self.server.uri())
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_crawl_and_no_terminal_read_nothing() {
+        // No flag and no terminal: no consent, so no request and no crawl folder.
+        let s = site(Some(fake_agent(0, &[], true)), 0..=0).await;
+        let o = s.init(&[]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        assert!(!s.dir.join(".inorbit/crawl").exists(), "{}", text(&o));
+        assert!(!text(&o).contains("Crawl"), "{}", text(&o));
+        // Even with a URL in the flag's place, --no-crawl wins and the two do not mix.
+        let o = s.init(&["--no-crawl"]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        assert!(!s.dir.join(".inorbit/crawl").exists());
+        let o = s.init(&["--no-crawl", "--crawl", &s.url()]);
+        assert_eq!(code(&o), 2, "{}", text(&o));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn crawl_keeps_the_files_a_study_and_a_memory_and_sends_nothing() {
+        let s = site(Some(fake_agent(0, &[], true)), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        // Consent first, then the summary.
+        let consent = t.find("Nothing is sent to InOrbit").expect(&t);
+        let said = t
+            .find("read 2 pages in 3 s, 2 skipped by robots.txt, 1 failed")
+            .expect(&t);
+        assert!(consent < said, "{t}");
+        assert!(t.contains("stopped: no limit reached"), "{t}");
+        assert!(
+            t.contains("Nothing was sent to InOrbit. Run iohr sync when you want it there."),
+            "{t}"
+        );
+        // The raw record, under the host's folder, with the policy it ran under.
+        let dirc = s.crawl_dir();
+        assert!(dirc.join("crawl.json").is_file(), "{t}");
+        assert_eq!(
+            std::fs::read_to_string(dirc.join("facts.jsonl"))
+                .unwrap()
+                .lines()
+                .count(),
+            3
+        );
+        let policy = std::fs::read_to_string(dirc.join("policy.toml")).unwrap();
+        assert!(policy.contains("allow = [\"127.0.0.1\"]"), "{policy}");
+        let args = std::fs::read_to_string(dirc.join("args.txt")).unwrap();
+        assert!(
+            args.contains("--max-pages 200") && args.contains("--max-minutes 5"),
+            "{args}"
+        );
+        assert!(
+            args.starts_with(&format!("atlas crawl {}", s.url())),
+            "{args}"
+        );
+        // The raw record stays out of the project's git.
+        assert_eq!(
+            std::fs::read_to_string(s.dir.join(".inorbit/crawl/.gitignore")).unwrap(),
+            "*\n"
+        );
+        // The study the sync carries, and one memory entry that points at it.
+        let study = s
+            .dir
+            .read_dir_of("atlas/studies")
+            .into_iter()
+            .find(|n| n.contains("site-crawl"))
+            .expect("a site crawl study");
+        let text_of = std::fs::read_to_string(s.dir.join("atlas/studies").join(&study)).unwrap();
+        assert!(text_of.contains("http://site.test/about"), "{text_of}");
+        assert_eq!(
+            crawl_memories(&s.dir),
+            1,
+            "one memory entry points at the crawl"
+        );
+        // `iohr sync --dry-run` lists the study and sends nothing.
+        let o =
+            s.b.cmd(&["sync", "--dry-run", "--space", SPACE])
+                .env("HOME", s.b.dir.path())
+                .current_dir(&s.dir)
+                .stdin(Stdio::null())
+                .output()
+                .unwrap();
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        assert!(
+            text(&o).contains(&format!("atlas/studies/{study}")),
+            "{}",
+            text(&o)
+        );
+        // Nothing the crawl found went to the InOrbit server of the test.
+        let seen = s.b.server.received_requests().await.unwrap_or_default();
+        // Init's own plan record is the one write; no atlas or decisions path,
+        // and no body carries a crawled page.
+        assert!(
+            seen.iter().all(|r| {
+                let path = r.url.path();
+                !path.contains("atlas")
+                    && !path.contains("decisions")
+                    && !String::from_utf8_lossy(&r.body).contains("site.test")
+                    && (r.method.as_str() == "GET" || path == "/v1/coordinator/plans")
+            }),
+            "{seen:?}"
+        );
+    }
+
+    /// The fake agent, that also leaves the HTML of the pages it read in `pages/` beside its
+    /// result when it is told `--keep-pages`, under the names the real one gives them.
+    fn agent_that_keeps_pages() -> Vec<u8> {
+        let pages = [
+            (
+                "http://site.test/",
+                "<h1>Home</h1><p>Site Test builds warehouse picking robots for logistics teams.</p>",
+            ),
+            (
+                "http://site.test/about",
+                "<h1>About us</h1><p>Write to hello@site.test about the Picker robot, which costs $1,299.00 per month.</p>",
+            ),
+        ];
+        let mut writes = String::new();
+        for (url, body) in pages {
+            let name = iohr::kb::fetch::cache_path(Path::new(""), url);
+            let _ = writeln!(
+                writes,
+                "  printf '%s' '<html><head><title>T</title></head><body><main>{body}</main></body></html>' > \"$dir/pages/{}\"",
+                name.file_name().unwrap().to_string_lossy()
+            );
+        }
+        String::from_utf8(fake_agent(0, &[], true))
+            .unwrap()
+            .replacen(
+                "echo \"$all\" > \"$dir/args.txt\"\n",
+                &format!("echo \"$all\" > \"$dir/args.txt\"\ncase \"$all\" in *--keep-pages*)\n  mkdir -p \"$dir/pages\"\n{writes};;\nesac\n"),
+                1,
+            )
+            .into_bytes()
+    }
+
+    /// An agent that knows `--rate` but not `--keep-pages`.
+    fn agent_without_keep_pages() -> Vec<u8> {
+        String::from_utf8(fake_agent(0, &[], true))
+            .unwrap()
+            .replacen(
+                "all=\"$*\"\n",
+                "all=\"$*\"\ncase \"$all\" in *--keep-pages*)\n  \
+                 echo \"error: unexpected argument '--keep-pages' found\" >&2\n  exit 2;;\nesac\n",
+                1,
+            )
+            .into_bytes()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_kept_pages_become_a_knowledge_base_with_no_second_fetch_and_one_study() {
+        let s = site(Some(agent_that_keeps_pages()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+        assert!(args.trim_end().ends_with("--keep-pages"), "{args}");
+        assert!(
+            t.contains("page text: 2 from files on this machine, 0 requested now"),
+            "{t}"
+        );
+        // The model is in the crawl's own facts and its one study; no model file, no second study.
+        let dirc = s.crawl_dir();
+        let facts = std::fs::read_to_string(dirc.join("facts.jsonl")).unwrap();
+        assert!(
+            facts.contains("\"kind\":\"page\"") && facts.contains("\"kind\":\"entity\""),
+            "{facts}"
+        );
+        assert!(!dirc.join("model.jsonl").exists());
+        let studies: Vec<String> = s
+            .dir
+            .read_dir_of("atlas/studies")
+            .into_iter()
+            .filter(|n| n.contains("site-crawl"))
+            .collect();
+        assert_eq!(
+            studies.len(),
+            1,
+            "one crawl study, no separate model study: {studies:?}"
+        );
+        let study = std::fs::read_to_string(s.dir.join("atlas/studies").join(&studies[0])).unwrap();
+        assert!(
+            study.contains("## Site model") && study.contains("## Pages"),
+            "{study}"
+        );
+        // The index answers, with the page it came from.
+        let o =
+            s.b.cmd(&["atlas", "search", "how much does the picker cost", "--json"])
+                .env("HOME", s.b.dir.path())
+                .current_dir(&s.dir)
+                .stdin(Stdio::null())
+                .output()
+                .unwrap();
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        assert!(
+            v["hits"][0]["url"].as_str().unwrap().ends_with("/about"),
+            "{v}"
+        );
+        assert!(
+            v["hits"][0]["text"].as_str().unwrap().contains("$1,299.00"),
+            "{v}"
+        );
+        // The site was asked once, by the agent (the mock fails on any other count), and a
+        // second init over the same files makes no request for them either.
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agent_without_keep_pages_is_run_again_and_iohr_asks_only_inside_the_scope() {
+        let s = site(Some(agent_without_keep_pages()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(!t.contains("the crawler exited"), "{t}");
+        let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+        assert!(
+            args.contains("--rate") && !args.contains("--keep-pages"),
+            "the second run kept its rate and dropped the flag: {args}"
+        );
+        // The fake agent's pages are on site.test, outside the scope of the 127.0.0.1 crawl:
+        // none is requested, and the box says so.
+        assert!(t.contains("0 requested now"), "{t}");
+        assert!(
+            t.contains("not requested (outside the scope or robots.txt)"),
+            "{t}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn init_json_stays_one_document_with_the_knowledge_base_in_the_crawl_step() {
+        let s = site(Some(agent_that_keeps_pages()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url(), "--json"]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        let out = String::from_utf8_lossy(&o.stdout).into_owned();
+        let v: serde_json::Value =
+            serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("{e}: {out}"));
+        assert!(out.contains("knowledge base: "), "{out}");
+        assert!(
+            !out.contains("Reading the text"),
+            "no spinner in json: {out}"
+        );
+        let _ = v;
+    }
+
+    /// The progress line the agent writes under `--progress` (RFC 0163): `total` only once a
+    /// sitemap has said how much there is.
+    fn progress_line(read: u32, queued: u32, total: Option<u32>) -> String {
+        let total = total.map_or_else(String::new, |t| format!(",\"total\":{t}"));
+        format!(
+            "{{\"event\":\"progress\",\"v\":1,\"scope\":\"site.test\",\"phase\":\"pages\",\"read\":{read},\"failed\":0,\"queued\":{queued}{total},\"cap\":200}}"
+        )
+    }
+
+    /// The fake agent, that first writes `lines` to standard error `gap` seconds apart, as a
+    /// crawl that takes a while would.
+    fn agent_that_reports(lines: &[String], gap: u32) -> Vec<u8> {
+        let said: String = lines
+            .iter()
+            .map(|l| format!("echo '{l}' >&2\nsleep {gap}\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        String::from_utf8(fake_agent(0, &[], true))
+            .unwrap()
+            .replacen("curl -s", &format!("{said}curl -s"), 1)
+            .into_bytes()
+    }
+
+    /// An agent from before RFC 0163: clap's refusal of the flags it does not know, then the
+    /// same crawl when run without them.
+    fn old_agent() -> Vec<u8> {
+        String::from_utf8(fake_agent(0, &[], true))
+            .unwrap()
+            .replacen(
+                "all=\"$*\"\n",
+                "all=\"$*\"\ncase \"$all\" in *--rate*|*--progress*)\n  \
+                 echo \"error: unexpected argument '--rate' found\" >&2\n  exit 2;;\nesac\n",
+                1,
+            )
+            .into_bytes()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_rate_is_ten_a_second_by_default_and_the_agent_is_told() {
+        let s = site(Some(fake_agent(0, &[], true)), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(
+            t.contains("at most 10 requests a second to one host"),
+            "the consent says the rate: {t}"
+        );
+        let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+        assert!(
+            args.trim_end()
+                .ends_with("--rate 10 --progress --keep-pages"),
+            "{args}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_rate_is_the_flag_or_the_environment_and_stays_in_bounds() {
+        let s = site(Some(fake_agent(0, &[], true)), 2..=2).await;
+        let o = s.init(&["--crawl", &s.url(), "--crawl-rate", "3"]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("at most 3 requests a second"), "{t}");
+        let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+        assert!(args.contains("--rate 3 "), "{args}");
+        // The flag is also a variable of the same name, and the flag wins over it.
+        let o = s.init_env(
+            &["--crawl", &s.url(), "--crawl-rate", "4"],
+            &[("IOHR_CRAWL_RATE", "9")],
+        );
+        assert!(text(&o).contains("at most 4 requests"), "{}", text(&o));
+        // Nothing outside 1 to 50 is accepted, and nothing is read.
+        for bad in ["0", "51", "fast"] {
+            let o = s.init(&["--crawl", &s.url(), "--crawl-rate", bad]);
+            assert_eq!(code(&o), 2, "{bad}: {}", text(&o));
+        }
+        let o = s.init_env(&["--crawl", &s.url()], &[("IOHR_CRAWL_RATE", "fast")]);
+        assert_eq!(code(&o), 2, "a bad variable with a crawl: {}", text(&o));
+        assert!(text(&o).contains("1 to 50"), "{}", text(&o));
+    }
+
+    /// A bad `IOHR_CRAWL_RATE` is only a problem for a crawl: `--no-crawl` never reads it, and
+    /// nothing is crawled when no site was given.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_bad_rate_in_the_environment_does_not_stop_init_without_a_crawl() {
+        let s = site(Some(fake_agent(0, &[], true)), 0..=0).await;
+        for extra in [&["--no-crawl"][..], &[][..]] {
+            let o = s.init_env(extra, &[("IOHR_CRAWL_RATE", "fast")]);
+            assert_eq!(code(&o), 0, "{extra:?}: {}", text(&o));
+            assert!(!s.crawl_dir().exists(), "{extra:?}: nothing was crawled");
+            std::fs::remove_dir_all(&s.dir).unwrap();
+            std::fs::create_dir_all(&s.dir).unwrap();
+        }
+    }
+
+    /// No bar is drawn for a script: with no terminal (a test's pipe), with `--json`, with
+    /// `NO_COLOR`, the progress an agent reports is read and dropped, and what is written has
+    /// no progress text, escape, rail or bar character.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_bar_is_drawn_with_json_or_no_color() {
+        let lines = [progress_line(1, 4, None), progress_line(2, 3, Some(5))];
+        let glyphs = |c: char| c == '\u{1b}' || ('\u{2500}'..='\u{25ff}').contains(&c) || c == '\r';
+        for (name, extra, env) in [
+            ("no_terminal", &[][..], &[][..]),
+            ("json", &["--json"][..], &[][..]),
+            (
+                "no_color",
+                &[][..],
+                &[("NO_COLOR", "1"), ("TERM", "xterm-256color")][..],
+            ),
+            (
+                "no_color_and_json",
+                &["--json"][..],
+                &[("NO_COLOR", "1")][..],
+            ),
+        ] {
+            let s = site(Some(agent_that_reports(&lines, 1)), 1..=1).await;
+            let mut args = vec!["--crawl".to_owned(), s.url()];
+            args.extend(extra.iter().map(|a| (*a).to_owned()));
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let o = s.init_env(&args, env);
+            let t = text(&o);
+            assert_eq!(code(&o), 0, "{name}: {t}");
+            assert!(
+                !t.contains("pages read, ")
+                    && !t.contains("of 5 pages")
+                    && !t.contains("\"event\""),
+                "{name}: progress text in the output: {t}"
+            );
+            assert!(
+                !t.chars().any(glyphs),
+                "{name}: a bar or an escape in the output: {t:?}"
+            );
+            // The crawl did run, with progress asked for.
+            let said = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+            assert!(said.contains("--progress"), "{name}: {said}");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_older_agent_is_run_again_without_the_flags_and_the_crawl_still_works() {
+        let s = site(Some(old_agent()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("read 2 pages in 3 s"), "{t}");
+        assert!(!t.contains("the crawler exited"), "{t}");
+        let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+        assert!(
+            !args.contains("--rate") && !args.contains("--progress"),
+            "the second run had neither flag: {args}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_crawl_that_fails_for_another_reason_is_not_run_twice() {
+        // Exit 2 without the agent naming a flag is not an old agent: one run, one failure.
+        let agent = String::from_utf8(fake_agent(2, &[], false))
+            .unwrap()
+            .replacen("curl -s", "echo 'error: bad policy' >&2\ncurl -s", 1)
+            .into_bytes();
+        let s = site(Some(agent), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        assert!(
+            text(&o).contains("the crawler exited with 2: error: bad policy"),
+            "{}",
+            text(&o)
+        );
+    }
+
+    /// At a terminal the crawl is a spinner with a live count until the agent says how much
+    /// there is, then a bar that fills, and the step is gone when it ends.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn on_a_terminal_a_spinner_counts_until_a_total_then_a_bar_fills() {
+        let lines = [
+            progress_line(1, 4, None),
+            progress_line(2, 3, Some(5)),
+            progress_line(4, 1, Some(5)),
+        ];
+        // The row is drawn at most once a second (`ui::REDRAW`) on a 250 ms tick, so each line
+        // must stay longer than that to be seen: a second apart, a state could be passed over.
+        let s = site(Some(agent_that_reports(&lines, 2)), 1..=1).await;
+        let t = token(&["extensions:read", "agents:write"]);
+        let mut cmd = s.b.cmd(&[
+            "project",
+            "init",
+            "made",
+            "--template",
+            "coordinated",
+            "--set",
+            "license=MIT",
+            "--yes",
+            "--no-smoke",
+            "--no-sync",
+            "--dir",
+            s.dir.to_str().unwrap(),
+            "--crawl",
+            &s.url(),
+        ]);
+        cmd.env("HOME", s.b.dir.path())
+            .env("IOHR_BASE_URL", s.b.server.uri())
+            .env("IOHR_TOKEN", &t)
+            .env("IOHR_TOKEN_CI", &t)
+            .env("TERM", "xterm-256color");
+        let mut term = pty::Session::spawn(cmd);
+        // No total yet: a count and the queue, no bar.
+        term.until("a spinner with a live count", |sc| {
+            pty::any(sc, "1 pages read, 4 waiting")
+        });
+        let reading = (0..pty::ROWS)
+            .map(|r| pty::row(term.screen.screen(), r))
+            .filter(|r| r.contains("Reading "))
+            .collect::<Vec<_>>();
+        assert!(
+            reading
+                .iter()
+                .all(|r| !r.contains(" pages, ") && !r.contains(" of ")),
+            "no total, so no bar: {reading:?}"
+        );
+        // A total: pages of it, and what the page limit still allows.
+        term.until("a bar with a total", |sc| {
+            pty::any(sc, "2 of 5 pages") || pty::any(sc, "4 of 5 pages")
+        });
+        let shown = term.screen.screen().contents();
+        assert!(shown.contains("left to the 200-page limit"), "{shown}");
+        let status = term.exited().expect("init ends");
+        assert!(status.success(), "{}", term.screen.screen().contents());
+        // The bar is gone once the crawl is over; the summary is there.
+        let end = term.screen.screen().contents();
+        assert!(!end.contains("pages read, 4 waiting"), "{end}");
+        assert!(end.contains("Nothing was sent to InOrbit"), "{end}");
+    }
+
+    /// The site the real crawler reads: robots.txt, a sitemap that lists `n` pages besides the
+    /// start page, and the pages, each request stamped when it arrives.
+    struct Timed {
+        origin: String,
+        pages: usize,
+        at: std::sync::Arc<std::sync::Mutex<Vec<(String, std::time::Instant)>>>,
+    }
+
+    impl wiremock::Respond for Timed {
+        fn respond(&self, r: &Request) -> ResponseTemplate {
+            let p = r.url.path().to_owned();
+            self.at
+                .lock()
+                .unwrap()
+                .push((p.clone(), std::time::Instant::now()));
+            let html = "<html><head><title>T</title></head><body><p>Enough words here to count \
+                        as a page with text, so nothing is tried in a browser.</p></body></html>";
+            match p.as_str() {
+                "/robots.txt" => ResponseTemplate::new(200)
+                    .set_body_raw("User-agent: *\nAllow: /\n", "text/plain"),
+                "/sitemap.xml" => {
+                    let urls: String = (1..=self.pages)
+                        .map(|i| format!("<url><loc>{}/p{i}</loc></url>", self.origin))
+                        .collect::<Vec<_>>()
+                        .concat();
+                    ResponseTemplate::new(200).set_body_raw(
+                        format!(
+                            "<?xml version=\"1.0\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><url><loc>{}/</loc></url>{urls}</urlset>",
+                            self.origin
+                        ),
+                        "application/xml",
+                    )
+                }
+                _ => ResponseTemplate::new(200).set_body_raw(html, "text/html"),
+            }
+        }
+    }
+
+    /// A box with the real `iohr-agent` (at `IOHR_TEST_AGENT`) installed as the extension, and
+    /// a site of `pages` pages.
+    async fn real_agent_site(pages: usize) -> (Site, Timed) {
+        // The path of an iohr-agent that has `atlas crawl --rate`; unset fails the test here.
+        let real = std::env::var("IOHR_TEST_AGENT").unwrap();
+        let s = site(
+            Some(format!("#!/bin/sh\nexec '{real}' \"$@\"\n").into_bytes()),
+            0..=u64::MAX,
+        )
+        .await;
+        let timed = Timed {
+            origin: s.server.uri(),
+            pages,
+            at: std::sync::Arc::default(),
+        };
+        // The site is the mock the box made, answering through the stamping responder.
+        s.server.reset().await;
+        Mock::given(method("GET"))
+            .respond_with(Timed {
+                origin: timed.origin.clone(),
+                pages,
+                at: timed.at.clone(),
+            })
+            .mount(&s.server)
+            .await;
+        (s, timed)
+    }
+
+    /// The gaps between the requests for pages (not robots.txt and the sitemap).
+    fn page_gaps(t: &Timed) -> Vec<std::time::Duration> {
+        let at: Vec<_> =
+            t.at.lock()
+                .unwrap()
+                .iter()
+                .filter(|(p, _)| p != "/robots.txt" && p != "/sitemap.xml")
+                .map(|(_, i)| *i)
+                .collect();
+        at.windows(2).map(|w| w[1] - w[0]).collect()
+    }
+
+    /// The real crawler under the real binary: on a terminal the bar appears as soon as the
+    /// sitemap has said how much there is and fills, and the requests keep to ten a second.
+    /// Needs the agent built from the dataplane's RFC 0163 change, so it is run by hand:
+    /// `IOHR_TEST_AGENT=<path> cargo test -p iohr --test ext real_agent -- --ignored`.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs IOHR_TEST_AGENT, the path of a built iohr-agent"]
+    async fn real_agent_a_bar_appears_and_ten_a_second_holds() {
+        let (s, timed) = real_agent_site(25).await;
+        let t = token(&["extensions:read", "agents:write"]);
+        let mut cmd = s.b.cmd(&[
+            "project",
+            "init",
+            "made",
+            "--template",
+            "coordinated",
+            "--set",
+            "license=MIT",
+            "--yes",
+            "--no-smoke",
+            "--no-sync",
+            "--dir",
+            s.dir.to_str().unwrap(),
+            "--crawl",
+            &s.url(),
+        ]);
+        cmd.env("HOME", s.b.dir.path())
+            .env("IOHR_BASE_URL", s.b.server.uri())
+            .env("IOHR_TOKEN", &t)
+            .env("IOHR_TOKEN_CI", &t)
+            .env("TERM", "xterm-256color");
+        let mut term = pty::Session::spawn(cmd);
+        // 26 pages: the start page and the 25 the sitemap lists.
+        term.until("a bar with the sitemap's total", |sc| {
+            pty::any(sc, " of 26 pages")
+        });
+        let shown = term.screen.screen().contents();
+        assert!(shown.contains("left to the 200-page limit"), "{shown}");
+        let status = term.exited().expect("init ends");
+        let end = term.screen.screen().contents();
+        assert!(status.success(), "{end}");
+        assert!(end.contains("facts: 26 in atlas/"), "{end}");
+        let gaps = page_gaps(&timed);
+        assert_eq!(gaps.len(), 25, "26 pages, 25 gaps: {gaps:?}");
+        // Ten a second is 100 ms apart; a timer that fires a little early is no breach.
+        let least = gaps.iter().min().unwrap();
+        assert!(
+            *least >= std::time::Duration::from_millis(90),
+            "ten a second at most, the closest gap was {least:?}"
+        );
+        let span: std::time::Duration = gaps.iter().sum();
+        assert!(
+            span >= std::time::Duration::from_millis(2250),
+            "25 gaps of about 100 ms: {span:?}"
+        );
+    }
+
+    /// The same with the rate the flag names: two a second is 500 ms apart.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs IOHR_TEST_AGENT, the path of a built iohr-agent"]
+    async fn real_agent_the_flag_slows_the_crawl() {
+        let (s, timed) = real_agent_site(4).await;
+        let o = s.init(&["--crawl", &s.url(), "--crawl-rate", "2"]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        assert!(text(&o).contains("read 5 pages"), "{}", text(&o));
+        let gaps = page_gaps(&timed);
+        assert_eq!(gaps.len(), 4, "{gaps:?}");
+        let least = gaps.iter().min().unwrap();
+        assert!(
+            *least >= std::time::Duration::from_millis(450),
+            "two a second at most, the closest gap was {least:?}"
+        );
+    }
+
+    /// A site that links to a subdomain, which the crawler keeps out by its policy.
+    fn agent_that_meets_a_subdomain() -> Vec<u8> {
+        fake_agent_with(
+            0,
+            &[],
+            true,
+            &serde_json::json!([
+                {"url": "http://blog.site.test/", "reason": "policy: host not allowed"},
+                {"url": "http://site.test/private", "reason": "robots.txt"}
+            ]),
+        )
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_subdomain_is_not_followed_without_a_yes() {
+        // No terminal (and `--yes`): the one asked-for host is read, the subdomain is not,
+        // and the report says which name was left out and how to read it.
+        let s = site(Some(agent_that_meets_a_subdomain()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("not read: blog.site.test"), "{t}");
+        assert!(t.contains("--crawl-subdomains"), "{t}");
+        assert!(
+            !t.contains("and its subdomains"),
+            "the consent names the host only: {t}"
+        );
+        let dirc = s.crawl_dir();
+        assert!(!dirc.join("more").exists(), "no second pass ran");
+        let policy = std::fs::read_to_string(dirc.join("policy.toml")).unwrap();
+        assert!(!policy.contains("blog"), "{policy}");
+        let study = s.dir.read_dir_of("atlas/studies");
+        let study = study.iter().find(|n| n.contains("site-crawl")).unwrap();
+        let study = std::fs::read_to_string(s.dir.join("atlas/studies").join(study)).unwrap();
+        assert!(study.contains("were not read: blog.site.test"), "{study}");
+        assert_eq!(crawl_memories(&s.dir), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_subdomain_flag_is_the_yes_to_all_and_asks_nothing() {
+        let s = site(Some(agent_that_meets_a_subdomain()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url(), "--crawl-subdomains"]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("and its subdomains"), "{t}");
+        assert!(!t.contains("not read:"), "{t}");
+        assert!(!s.crawl_dir().join("more").exists());
+        // The flag and the refusal to crawl cannot be given together.
+        let o = s.init(&["--no-crawl", "--crawl-subdomains"]);
+        assert_ne!(code(&o), 0, "{}", text(&o));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_budget_stop_is_a_finished_crawl_that_says_how_to_raise_the_limit() {
+        let s = site(Some(fake_agent(1, &["pages"], true)), 2..=2).await;
+        let o = s.init(&["--crawl", &s.url(), "--crawl-pages", "3", "--json"]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        let v = stdout_json(&o);
+        let step = v["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["id"] == "crawl")
+            .unwrap_or_else(|| panic!("no crawl step: {v}"));
+        assert_eq!(step["state"], "done", "{v}");
+        assert!(s.crawl_dir().join("facts.jsonl").is_file());
+        assert!(
+            std::fs::read_to_string(s.crawl_dir().join("args.txt"))
+                .unwrap()
+                .contains("--max-pages 3")
+        );
+        // The same crawl, plain: the stop and the way to raise it.
+        let o = s.init(&["--crawl", &s.url(), "--crawl-pages", "3"]);
+        assert!(
+            text(&o).contains(
+                "stopped at the page limit; raise it with --crawl-pages / --crawl-minutes"
+            ),
+            "{}",
+            text(&o)
+        );
+        // A second crawl rewrites the one study and the one memory.
+        let studies = s.dir.read_dir_of("atlas/studies");
+        assert_eq!(
+            studies.iter().filter(|n| n.contains("site-crawl")).count(),
+            1,
+            "{studies:?}"
+        );
+        assert_eq!(crawl_memories(&s.dir), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_crawler_that_fails_does_not_fail_init() {
+        // Exit 3 and no JSON: the step fails, init still finishes, nothing is kept.
+        let s = site(Some(fake_agent(3, &[], false)), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("the crawler exited with 3"), "{t}");
+        assert!(!s.crawl_dir().join("facts.jsonl").exists(), "{t}");
+        assert!(!s.dir.join("atlas/studies").read_dir().is_ok_and(|mut d| {
+            d.any(|e| e.is_ok_and(|e| e.file_name().to_string_lossy().contains("site-crawl")))
+        }));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn without_the_agent_extension_it_says_so_in_a_line_and_reads_nothing() {
+        let s = site(None, 0..=0).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("is not installed"), "{t}");
+        assert!(t.contains("ext install inorbit/agent"), "{t}");
+        assert!(!s.crawl_dir().exists(), "{t}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_dry_run_says_what_it_would_read_and_reads_nothing() {
+        let s = site(Some(fake_agent(0, &[], true)), 0..=0).await;
+        let o = s.init(&["--crawl", &s.url(), "--dry-run"]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("would: read"), "{t}");
+        assert!(t.contains("nothing is sent to InOrbit"), "{t}");
+        assert!(!s.crawl_dir().exists(), "{t}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_address_that_is_not_a_web_address_is_refused_before_anything_runs() {
+        let s = site(Some(fake_agent(0, &[], true)), 0..=0).await;
+        let o = s.init(&["--crawl", "ftp://acme.example"]);
+        assert_eq!(code(&o), 2, "{}", text(&o));
+        assert!(text(&o).contains("not a web address"), "{}", text(&o));
+    }
+
+    /// How many of the project's memory entries say a site was crawled (init seeds others).
+    fn crawl_memories(dir: &Path) -> usize {
+        std::fs::read_dir(dir.join(".inorbit/memory"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| {
+                std::fs::read_to_string(e.path())
+                    .is_ok_and(|t| t.contains("was crawled on this machine"))
+            })
+            .count()
+    }
+
+    trait ReadDirOf {
+        fn read_dir_of(&self, rel: &str) -> Vec<String>;
+    }
+
+    impl ReadDirOf for PathBuf {
+        /// The file names in a folder under this one; none when it is not there.
+        fn read_dir_of(&self, rel: &str) -> Vec<String> {
+            std::fs::read_dir(self.join(rel))
+                .map(|d| {
+                    d.filter_map(Result::ok)
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+    }
 }

@@ -37,11 +37,19 @@ In this order, and nothing is written to disk until all of them pass:
      when the entry was logged, names the identity
      `https://github.com/inorbithr/<repo>/.github/workflows/release.yml@refs/tags/<tag>`
      and the issuer `https://token.actions.githubusercontent.com`;
+   - Fulcio's claims in the certificate agree with that identity: the build signer is
+     the identity, the source repository is `https://github.com/inorbithr/<repo>`, and
+     the source ref is a tag (a certificate issued before Fulcio wrote these claims is
+     judged by its identity);
    - its Rekor entry has a valid inclusion proof and checkpoint and matches the bundle;
    - the signature over the statement verifies with the certificate's key.
 
-   Both a signature and an SLSA provenance must pass, from the same repository, and the
-   provenance must name that repository, `.github/workflows/release.yml` and a tag.
+   Both a signature and an SLSA provenance must pass under one certificate identity, so
+   from one repository at one tag. The repository and tag are the certificate's; the
+   provenance must agree with them (that repository, `.github/workflows/release.yml`
+   and the same ref) and never decides them. The repository must be the one the
+   extension is named after (`<name>` or `iohr-ext-<name>`); `inorbithr/dataplane`,
+   which publishes `agent` and `capture`, is the one listed exception.
    The Sigstore trusted root is built into `iohr`; nothing is fetched to check it.
    Alternatively, a signature by a key in `ext.trusted_keys` passes (see below).
 3. The config: the name and version are the ones asked for, the entrypoint is a
@@ -65,7 +73,7 @@ unit does. The lock records what you confirmed, and `iohr ext sync` refuses an a
 that declares more.
 
 `iohr ext list` shows what is installed with its digest, privileges and signer.
-`iohr ext packages` (also `iohr packages`) is the wider inventory: the packages your account
+`iohr ext packages` (`iohr packages` still works) is the wider inventory: the packages your account
 publishes, public and private, the private ones shared with it, the unpublished ones in
 `~/.inorbit/ext-dev` and what is installed, one row each with SOURCE and VISIBILITY. The
 folders are read from disk and never sent anywhere; `--json` prints the same rows.

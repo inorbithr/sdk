@@ -8,7 +8,6 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
-use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -44,20 +43,17 @@ fn now() -> String {
     format!("{:02}:{:02}:{:02}Z", t.hour(), t.minute(), t.second())
 }
 
-fn colour() -> bool {
-    std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal()
-}
-
-/// One log line on stderr: the time, where it came from, the text; red when `alarm`.
+/// One log line on stderr: the time, where it came from, the text; red when `alarm` (by the
+/// same colour rules as every drawn line: a terminal, `NO_COLOR` and `TERM=dumb` honoured).
 pub(crate) fn log_line(from: &str, text: &str, alarm: bool) {
     use std::io::Write as _;
     let line = format!("{} {from:<4} {text}", now());
-    let mut err = std::io::stderr().lock();
-    let _ = if alarm && colour() {
-        writeln!(err, "\x1b[31m{line}\x1b[0m")
+    let line = if alarm {
+        crate::ui::Paint::stderr(false).tone(crate::ui::Mark::Fail, &line)
     } else {
-        writeln!(err, "{line}")
+        line
     };
+    let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
 /// Streams `r` line by line with the time, to stdout or stderr.
@@ -128,6 +124,8 @@ fn child_path(path: &OsStr, me: Option<&Path>) -> (OsString, Vec<PathBuf>) {
 /// (service [`SECRET_SERVICE`], account the reference).
 async fn secrets(source: &SourceManifest) -> Result<Vec<(String, Redacted<String>)>, Error> {
     let mut out = Vec::new();
+    // One open of the Keychain for all of them, not one per secret.
+    let mut keychain: Option<std::sync::Arc<iohr_auth::KeyringStore>> = None;
     for s in &source.secrets {
         let var = secret_var(&s.name);
         if let Some(v) = std::env::var(&var).ok().filter(|v| !v.is_empty()) {
@@ -135,11 +133,17 @@ async fn secrets(source: &SourceManifest) -> Result<Vec<(String, Redacted<String
             continue;
         }
         let reference = s.reference.clone();
-        let found = tokio::task::spawn_blocking(move || {
-            iohr_auth::KeyringStore::open()?.get_named(SECRET_SERVICE, &reference)
-        })
-        .await
-        .map_err(|e| Error::Failed(e.to_string()))?;
+        let store = match &keychain {
+            Some(k) => Ok(k.clone()),
+            None => iohr_auth::KeyringStore::open().map(std::sync::Arc::new),
+        };
+        let found = match store {
+            Ok(k) => {
+                keychain = Some(k.clone());
+                iohr_auth::off_thread(move || k.get_named(SECRET_SERVICE, &reference)).await
+            }
+            Err(e) => Err(e),
+        };
         match found {
             Ok(Some(v)) => out.push((s.env.clone(), v)),
             Ok(None) | Err(_) => {

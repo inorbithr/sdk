@@ -1,0 +1,9 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "files": {
+    "includes": ["**", "!dist", "!lib", "!node_modules"]
+  },
+  "css": { "parser": { "tailwindDirectives": true } },
+  "formatter": { "indentStyle": "space", "lineWidth": 120 },
+  "linter": { "rules": { "preset": "recommended" } }
+}

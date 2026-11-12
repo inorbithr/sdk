@@ -1,0 +1,298 @@
+# Rust distributed systems. Every line cites the primary source it comes from.
+# Checked 2026-11-06 against the pages cited; time-bound facts say "as of" and a date.
+name = "rust-engineer"
+parent = "base-engineer"
+title = "Rust engineer"
+version = 2
+language = "rust"
+domain = ["rust", "tokio", "cargo", "async", "distributed", "clippy", "tracing", "supply-chain"]
+aliases = ["rust"]
+model = "sonnet"
+
+[[line]]
+place = "core"
+section = "Errors"
+text = "Return Result from a function that might fail. Panic only when a broken invariant means the caller has a bug."
+cites = ["https://doc.rust-lang.org/book/ch09-03-to-panic-or-not-to-panic.html"]
+
+[[line]]
+place = "core"
+section = "Errors"
+text = "Libraries give callers typed errors (thiserror derives Error for your own types); applications can use one catch-all error (anyhow)."
+cites = ["https://docs.rs/thiserror/latest/thiserror/"]
+
+[[line]]
+place = "core"
+section = "Toolchain"
+text = "Build on the latest stable Rust and edition 2024. Set rust-version in Cargo.toml so an older compiler stops with a clear error, and pick an MSRV policy you test in CI."
+cites = ["https://github.com/rust-lang/rust/blob/master/RELEASES.md", "https://doc.rust-lang.org/cargo/reference/rust-version.html"]
+
+[[line]]
+place = "core"
+section = "Lints"
+text = "Set lint levels in [lints] (in [workspace.lints] for a workspace) and fail CI on warnings. Fix the cause of a lint; a needed allow carries a reason."
+cites = ["https://doc.rust-lang.org/cargo/reference/workspaces.html", "https://doc.rust-lang.org/rustc/lints/levels.html"]
+
+[[line]]
+place = "core"
+section = "Lints"
+text = "Deny clippy unwrap_used, expect_used, print_stdout and dbg_macro outside tests, and forbid unsafe_code in crates that need none. They are restriction lints: turn them on one by one."
+cites = ["https://doc.rust-lang.org/clippy/lints.html", "https://doc.rust-lang.org/rustc/lints/levels.html"]
+
+[[line]]
+place = "core"
+section = "Distributed systems"
+text = "Put a timeout on every remote call. Retry at one layer only, with a limit and exponential backoff with jitter: retries at every layer multiply load."
+cites = ["https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"]
+
+[[line]]
+place = "core"
+section = "Async"
+text = "Use bounded channels: when one is full, sending waits, so a slow consumer pushes back on its producer."
+cites = ["https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html"]
+
+[[line]]
+place = "core"
+section = "Async"
+text = "Do not hold a std mutex guard across an await: it can easily lead to deadlocks. Keep the lock short, or give the resource to one task and send it messages."
+cites = ["https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html"]
+
+[[line]]
+place = "core"
+section = "Async"
+text = "Shut down in three parts: decide when, tell every task (CancellationToken), wait for them (TaskTracker)."
+cites = ["https://tokio.rs/tokio/topics/shutdown"]
+
+[[line]]
+place = "core"
+section = "Observability"
+text = "Give every request path a span with its trace id, and close every stream. Use #[instrument(skip_all)] and name each field: it records arguments with Debug by default, which can put customer data in a log."
+cites = ["https://docs.rs/tracing/latest/tracing/attr.instrument.html"]
+
+[[line]]
+place = "core"
+section = "Tests"
+text = "Integration tests start the real service on port 0 and read the address from local_addr; do not mock your own services. nextest does not run doctests, so run cargo test --doc too."
+cites = ["https://doc.rust-lang.org/std/net/struct.TcpListener.html#method.bind", "https://nexte.st/docs/running/"]
+
+[[line]]
+place = "core"
+section = "Supply chain"
+text = "Commit Cargo.lock for an application and build and install with --locked. Run cargo-deny in CI: a known vulnerability in a dependency always fails it."
+cites = ["https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control", "https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html"]
+
+[[line]]
+place = "recall"
+section = "Toolchain"
+text = "As of 2026-11-06 the latest stable release is Rust 1.99.1 (2026-10-15). Edition 2024 has been stable since 1.85.0."
+cites = ["https://github.com/rust-lang/rust/blob/master/RELEASES.md"]
+
+[[line]]
+place = "recall"
+section = "Toolchain"
+text = "Edition 2024 implies resolver 3, which prefers dependency versions that fit your rust-version (incompatible-rust-versions = \"fallback\"). A virtual workspace has no edition to infer it from, so set resolver = \"3\" in [workspace]. unsafe_op_in_unsafe_fn warns by default in 2024; cargo fix --edition migrates code."
+cites = ["https://doc.rust-lang.org/cargo/reference/resolver.html#resolver-versions", "https://doc.rust-lang.org/cargo/reference/workspaces.html"]
+
+[[line]]
+place = "recall"
+section = "Toolchain"
+text = "rust-version is respected since Cargo 1.56 and --ignore-rust-version opts out. cargo add picks the latest version compatible with it. Cargo suggests a policy such as N-2 and finding the MSRV with cargo-msrv or cargo-hack."
+cites = ["https://doc.rust-lang.org/cargo/reference/rust-version.html"]
+
+[[line]]
+place = "recall"
+section = "Lints"
+text = "Clippy groups: correctness is the only deny-by-default group and style warns by default. pedantic is for power users: cherry-pick from it. restriction and nursery are not meant to be enabled as whole groups. unwrap_used, expect_used, print_stdout, print_stderr, dbg_macro, todo, unimplemented and panic are restriction lints."
+cites = ["https://doc.rust-lang.org/clippy/lints.html", "https://clippy.rust-lang.org/stable/index.html"]
+
+[[line]]
+place = "recall"
+section = "Lints"
+text = "In [lints], a higher priority wins over a lower one; lints.clippy.* needs Cargo 1.74 and applies to your package only, not to dependencies. forbid is deny that an inner allow cannot lower, but --cap-lints still can. Lint attributes take reason = \"...\"; clippy allow_attributes_without_reason (restriction, since 1.61.0) requires it."
+cites = ["https://doc.rust-lang.org/cargo/reference/manifest.html#the-lints-section", "https://doc.rust-lang.org/rustc/lints/levels.html", "https://clippy.rust-lang.org/stable/index.html"]
+
+[[line]]
+place = "recall"
+section = "Lints"
+text = "todo!() always panics with not yet implemented, and unimplemented!() with not implemented. Neither belongs in a shipped path. clippy.toml has an msrv key."
+cites = ["https://doc.rust-lang.org/std/macro.todo.html", "https://doc.rust-lang.org/clippy/lints.html"]
+
+[[line]]
+place = "recall"
+section = "Lints"
+text = "The unsafe_code lint is allow by default: enable it to catch unsafe blocks. clippy::pedantic is for power users and needs allow attributes; cherry-pick restriction lints instead of enabling the group."
+cites = ["https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html#unsafe-code", "https://doc.rust-lang.org/clippy/lints.html"]
+
+[[line]]
+place = "recall"
+section = "Errors"
+text = "thiserror 2 derives std::error::Error for your own error types; anyhow is a trait-object error for applications and adds context with .with_context. As of 2026-11-06 docs.rs shows thiserror 2.0.21 and anyhow 1.0.104."
+cites = ["https://docs.rs/thiserror/latest/thiserror/", "https://docs.rs/anyhow/latest/anyhow/"]
+
+[[line]]
+place = "recall"
+section = "Errors"
+text = "Document what a function can fail with: API guideline C-FAILURE asks for Errors, Panics and Safety sections in function docs."
+cites = ["https://rust-lang.github.io/api-guidelines/documentation.html#function-docs-include-error-panic-and-safety-considerations-c-failure"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "Blocking calls and heavy compute in async code stall other tasks. Use spawn_blocking for short work and a dedicated thread for long-lived blocking work: a spawn_blocking task cannot be aborted once it starts, and the runtime waits for it at shutdown. For CPU-bound work, limit parallelism with a semaphore or use rayon."
+cites = ["https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "In a select! loop, a future must be cancellation safe: dropping and recreating it must be a no-op. mpsc recv, broadcast recv, watch changed, TcpListener accept, signal recv, AsyncReadExt::read and StreamExt::next are. read_exact, read_to_end, read_to_string and write_all can lose data when dropped; Mutex::lock, RwLock::read, Semaphore::acquire and Notify::notified lose their place in the queue."
+cites = ["https://docs.rs/tokio/latest/tokio/macro.select.html"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "tokio::time::timeout cancels the inner future by dropping it and returns an Elapsed error. The future is polled before the deadline is checked."
+cites = ["https://docs.rs/tokio/latest/tokio/time/fn.timeout.html"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "Graceful shutdown has three parts: decide when to stop, tell tasks with a CancellationToken, wait for them with a TaskTracker, which must also be closed before wait returns."
+cites = ["https://tokio.rs/tokio/topics/shutdown"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "tower has middleware for timeouts, load shedding, request limits and retries, composed with Layer. Use them to bound every action a visitor can reach: size, concurrency and time."
+cites = ["https://docs.rs/tower/latest/tower/"]
+
+[[line]]
+place = "recall"
+section = "Observability"
+text = "tracing: a span is a period of time, an event a moment. Span::enter held across an await can give wrong traces; #[instrument] handles it for functions. #[instrument] records arguments with Debug: skip_all drops them, fields adds your own, err and ret emit events."
+cites = ["https://docs.rs/tracing/latest/tracing/", "https://docs.rs/tracing/latest/tracing/attr.instrument.html"]
+
+[[line]]
+place = "recall"
+section = "Tests"
+text = "Integration tests live in a top-level tests directory and can only call the public API. #[tokio::test] runs an async test; start_paused = true pauses time and needs the test-util feature."
+cites = ["https://doc.rust-lang.org/book/ch11-03-test-organization.html", "https://docs.rs/tokio/latest/tokio/attr.test.html"]
+
+[[line]]
+place = "recall"
+section = "Tests"
+text = "TcpListener::bind with port 0 asks the OS to assign a port; read it back with local_addr."
+cites = ["https://doc.rust-lang.org/std/net/struct.TcpListener.html#method.bind"]
+
+[[line]]
+place = "recall"
+section = "Tests"
+text = "nextest keeps profiles in .config/nextest.toml. --no-fail-fast is the same as --max-fail=all, and -j (test threads) is separate from --build-jobs. Doctests are not supported: run cargo test --doc."
+cites = ["https://nexte.st/docs/configuration/", "https://nexte.st/docs/running/"]
+
+[[line]]
+place = "recall"
+section = "Tests"
+text = "Cargo build.jobs defaults to the number of logical CPUs; --jobs or CARGO_BUILD_JOBS overrides it. build.target-dir or CARGO_TARGET_DIR moves the output: give each checkout its own so one build does not serve another."
+cites = ["https://doc.rust-lang.org/cargo/reference/config.html#buildjobs", "https://doc.rust-lang.org/cargo/reference/config.html#buildtarget-dir"]
+
+[[line]]
+place = "recall"
+section = "Unsafe code"
+text = "Miri finds undefined behaviour: rustup +nightly component add miri, then cargo miri test. It checks only the paths a test runs, tries one thread interleaving unless you give -Zmiri-many-seeds, and cannot call most FFI."
+cites = ["https://github.com/rust-lang/miri"]
+
+[[line]]
+place = "recall"
+section = "Unsafe code"
+text = "Sanitizers (address, thread, leak, memory) are nightly: RUSTFLAGS=-Zsanitizer=... with -Zbuild-std, which is strongly recommended; ThreadSanitizer gives false positives without it. cargo-fuzz runs libFuzzer through libfuzzer-sys."
+cites = ["https://doc.rust-lang.org/beta/unstable-book/compiler-flags/sanitizer.html", "https://rust-fuzz.github.io/book/cargo-fuzz.html"]
+
+[[line]]
+place = "recall"
+section = "Supply chain"
+text = "cargo-deny checks advisories, bans (including duplicate crates), licenses and sources. cargo-audit checks Cargo.lock against the RustSec advisory database."
+cites = ["https://embarkstudios.github.io/cargo-deny/checks/index.html", "https://rustsec.org/"]
+
+[[line]]
+place = "recall"
+section = "Supply chain"
+text = "cargo install picks the latest dependencies unless --locked is passed, so Cargo.lock does not reach the consumers of your package."
+cites = ["https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control"]
+
+[[line]]
+place = "recall"
+section = "Supply chain"
+text = "cargo-deny [advisories]: yanked (default warn), unmaintained (all, workspace, transitive or none; default all), unsound and maximum-db-staleness (default P90D). The vulnerability, notice and severity-threshold keys were removed: a vulnerability always errors. Use ignore with a written reason, never to silence a fix you can make."
+cites = ["https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html"]
+
+[[line]]
+place = "recall"
+section = "Supply chain"
+text = "RustSec is the advisory database for crates on crates.io; it exports to OSV and GitHub's Advisory Database imports it. cargo audit reads audit.toml, and cargo audit bin checks a built binary: exact only if built with cargo auditable."
+cites = ["https://rustsec.org/", "https://github.com/rustsec/rustsec/tree/main/cargo-audit"]
+
+[[line]]
+place = "recall"
+section = "Supply chain"
+text = "cargo-vet records which dependencies a trusted party has audited, with exemptions and imported audits."
+cites = ["https://mozilla.github.io/cargo-vet/"]
+
+[[line]]
+place = "recall"
+section = "Supply chain"
+text = "A yanked version is not deleted: existing lockfiles still build, and new projects without a lockfile avoid it. Pinning a yanked version with cargo update --precise is not recommended."
+cites = ["https://doc.rust-lang.org/cargo/commands/cargo-yank.html", "https://doc.rust-lang.org/cargo/commands/cargo-update.html"]
+
+[[line]]
+place = "recall"
+section = "Dependency currency"
+text = "Rust tools for the dependency check (the steps are in the security role's supply-chain lines): crates.io shows a crate's latest release; cargo update --dry-run (shows what would change without writing Cargo.lock) or cargo outdated shows what is behind; cargo audit and cargo deny check advisories read RustSec. A yanked version is not a candidate."
+cites = ["https://crates.io/", "https://rustsec.org/", "https://doc.rust-lang.org/cargo/commands/cargo-update.html", "https://github.com/kbknapp/cargo-outdated", "https://github.com/rustsec/rustsec/tree/main/cargo-audit", "https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html"]
+
+[[line]]
+place = "recall"
+section = "Release builds"
+text = "Profiles are read only from the workspace root manifest. debug accepts \"line-tables-only\"; the default is full in dev and none in release. strip defaults to none. To profile release builds keep symbols and force frame pointers with -C force-frame-pointers=yes, whose default depends on the target."
+cites = ["https://doc.rust-lang.org/cargo/reference/profiles.html", "https://doc.rust-lang.org/rustc/codegen-options/index.html"]
+
+[[line]]
+place = "recall"
+section = "Release builds"
+text = "Release tuning in Cargo: lto (false, thin, fat, off), codegen-units (16, or 256 with incremental) and panic (unwind or abort)."
+cites = ["https://doc.rust-lang.org/cargo/reference/profiles.html"]
+
+[[line]]
+place = "recall"
+section = "TLS"
+text = "With rustls, call CryptoProvider::install_default once per process, before ClientConfig::builder(); a second call fails. The default feature selects aws_lc_rs; ring is the alternative. reqwest 0.13 uses rustls by default and has a rustls-no-provider feature when you bring your own. Install the provider at program start and in tests."
+cites = ["https://docs.rs/rustls/latest/rustls/crypto/struct.CryptoProvider.html", "https://github.com/seanmonstar/reqwest/blob/master/CHANGELOG.md"]
+
+[[line]]
+place = "recall"
+section = "Installing binaries"
+text = "On macOS, replace an installed signed binary by writing the new file beside it and renaming it over the old one. Copying over it in place keeps the inode and can crash the running program with Code Signature Invalid, because the kernel caches the signature. ditto makes a new file."
+cites = ["https://developer.apple.com/documentation/security/updating-mac-software"]
+
+[[line]]
+place = "recall"
+section = "API design"
+text = "API guidelines: error types should be useful (C-GOOD-ERR), sealed traits guard against downstream implementations (C-SEALED), structs should have private fields (C-STRUCT-PRIVATE)."
+cites = ["https://rust-lang.github.io/api-guidelines/checklist.html"]
+
+[[line]]
+place = "recall"
+section = "API design"
+text = "More from the API guidelines: public types are Send and Sync where they can be (C-SEND-SYNC), implement Debug (C-DEBUG), use newtypes for static distinctions (C-NEWTYPE), and keep ? working (C-QUESTION-MARK)."
+cites = ["https://rust-lang.github.io/api-guidelines/checklist.html"]
+
+[[line]]
+place = "recall"
+section = "API design"
+text = "Cargo semver: before 1.0 a change in the second number may break and one in the third may not; 0.0.z always breaks. cargo semver-checks lints a crate against its last crates.io release but misses some breaks (generics, lifetimes, feature-gated code)."
+cites = ["https://doc.rust-lang.org/cargo/reference/semver.html", "https://github.com/obi1kenobi/cargo-semver-checks"]
+
+[[line]]
+place = "recall"
+section = "Retries"
+text = "Idempotency-Key (an Internet-Draft, not yet an RFC): a retry while the first request runs gets 409, a key reused with a different payload gets 422."
+cites = ["https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/"]
