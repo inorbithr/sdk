@@ -193,7 +193,6 @@ RELEASE_STEPS = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac3178
           mkdir -p classes dist
           javac --release 17 -Xlint:all -d classes -sourcepath src src/@@MODULE@@/Main.java
           jar --create --file "dist/@@NAME@@.jar" --main-class @@MODULE@@.Main -C classes .'''
-DEPENDABOT_ECOSYSTEM = "maven"
 
 # NET 10 is an LTS release: https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core ; `dotnet test --project` with the Microsoft.Testing.Platform runner: https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-with-dotnet-test ; locked restore: https://learn.microsoft.com/en-us/nuget/consume-packages/package-references-in-project-files#locking-dependencies. The packages restore once from nuget.org (the lock files pin them); after that the suite runs offline.
 [[variants]]
@@ -229,9 +228,6 @@ TEST_FILE = "tests/@@MODULE@@.Tests/SuiteTests.cs"
 SOLVER_HOWTO = "Implement `ISolver` and pass it to `Suite.Run` in `Program.cs`."
 CI_EVAL = "dotnet run --project src/@@MODULE@@ --configuration Release"
 OFFLINE_NOTE = "once the packages are restored, with the network switched off"
-CI_SETUP = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          dotnet-version: "10.0.x"'''
 CI_TEST = "dotnet test --project tests/@@MODULE@@.Tests"
 RELEASE_STEPS = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -241,7 +237,6 @@ RELEASE_STEPS = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853db
           dotnet publish src/@@MODULE@@ --configuration Release --output publish
           mkdir -p dist
           tar -C publish -czf "dist/@@NAME@@-linux-amd64.tar.gz" .'''
-DEPENDABOT_ECOSYSTEM = "nuget"
 
 # Dart SDK 3.9: https://dart.dev/get-dart ; locked resolution (pub get --enforce-lockfile): https://dart.dev/tools/pub/cmd/pub-get . The two dev packages (lints, test) restore once from pub.dev (pubspec.lock pins them); after that the suite runs offline.
 [[variants]]
@@ -289,7 +284,6 @@ RELEASE_STEPS = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd
           dart pub get --enforce-lockfile
           mkdir -p dist
           dart compile exe bin/@@MODULE@@.dart -o "dist/@@NAME@@-linux-amd64"'''
-DEPENDABOT_ECOSYSTEM = "pub"
 
 # Swift toolchains and the Linux install: https://www.swift.org/install/ ; SwiftPM (tools version 5.9, `swift test`): https://docs.swift.org/swiftpm/documentation/packagemanager/ . Proven on macOS here; the Linux CI step is not run on this machine.
 [[variants]]
@@ -322,10 +316,6 @@ TEST_FILE = "Tests/@@MODULE@@Tests/SuiteTests.swift"
 SOLVER_HOWTO = "Conform a type to `Solver` and pass it to `runSuite` in `main.swift`."
 CI_EVAL = "swift run @@NAME@@"
 OFFLINE_NOTE = "with the network switched off"
-CI_SETUP = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
-        with:
-          swift-version: "6.1"'''
-CI_TEST = "swift test"
 RELEASE_STEPS = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "6.1"
@@ -334,4 +324,3 @@ RELEASE_STEPS = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b8
           swift build -c release --static-swift-stdlib
           mkdir -p dist
           install -m 0755 ".build/release/@@NAME@@" "dist/@@NAME@@-linux-amd64"'''
-DEPENDABOT_ECOSYSTEM = "swift"
