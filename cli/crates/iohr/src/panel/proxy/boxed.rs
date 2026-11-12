@@ -356,12 +356,17 @@ impl Session {
         self.emit(&bytes);
     }
 
-    /// The shell's pty has the rows the box leaves it.
+    /// The shell's pty has the rows the box leaves it, and a phone showing it gets the same size.
     pub(super) fn push_size(&mut self) {
         let want = (self.proxy.child_rows(), self.proxy.cols);
         if want != self.proxy.pty_size {
             let _ = rustix::termios::tcsetwinsize(&self.master, winsize(want.0, want.1));
             self.proxy.pty_size = want;
+            if let (Some(p), Ok(r), Ok(c)) =
+                (&self.phone, u16::try_from(want.0), u16::try_from(want.1))
+            {
+                p.send(phone::Cmd::Resize(c, r));
+            }
         }
     }
 
