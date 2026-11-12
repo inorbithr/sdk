@@ -1204,7 +1204,11 @@ async fn config_show_names_each_value_and_its_source_without_a_sign_in() {
         v["kinds"],
         json!({"value": ["coordinate", "build"], "source": "default"})
     );
-    assert_eq!(v["build_floor"]["floor_bytes"], 100_000_000_000_u64);
+    assert_eq!(
+        v["build_floor"],
+        json!({"volume": null, "floor_bytes": null, "free_bytes": null, "source": "default"}),
+        "no build_volume: no build-disk pause"
+    );
     // A flag wins over both tables.
     let o = run(&mut iohr(
         &server,

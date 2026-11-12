@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Builds this extension's artifact (RFC 0028, iohr ADR 0012) as an OCI image layout:
 one image index per version, one manifest per platform, each with the config
-`application/vnd.inorbit.iohr.extension.config.v1+json` and one layer
+`application/vnd.inorbit.iohr.extension.config.v1+json` (`...config.v2+json` when it
+declares `host_actions`) and one layer
 `application/vnd.inorbit.iohr.extension.layer.v1.tar+gzip` holding the program.
 
     iohr ext lint --json > dist/lint.json
@@ -26,6 +27,7 @@ import sys
 import tarfile
 
 CONFIG_TYPE = "application/vnd.inorbit.iohr.extension.config.v1+json"
+CONFIG_TYPE_V2 = "application/vnd.inorbit.iohr.extension.config.v2+json"
 LAYER_TYPE = "application/vnd.inorbit.iohr.extension.layer.v1.tar+gzip"
 MANIFEST_TYPE = "application/vnd.oci.image.manifest.v1+json"
 INDEX_TYPE = "application/vnd.oci.image.index.v1+json"
@@ -94,7 +96,7 @@ def main() -> int:
         if not program.exists():
             print(f"{platform}: no {program}, skipped", file=sys.stderr)
             continue
-        cfg = blob(out, canonical(config), CONFIG_TYPE)
+        cfg = blob(out, canonical(config), CONFIG_TYPE_V2 if config.get("host_actions") else CONFIG_TYPE)
         lay = blob(out, layer(program, entrypoint), LAYER_TYPE,
                    annotations={"org.opencontainers.image.title": entrypoint})
         manifest = {"schemaVersion": 2, "mediaType": MANIFEST_TYPE, "config": cfg, "layers": [lay], "annotations": common}

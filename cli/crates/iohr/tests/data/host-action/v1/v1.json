@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runner/host-action/v1",
+  "$comment": "A built-in action is a runner/host-action/v0 document (../schema/v0.json) with provider \"builtin\": its action, params and effect are checked as v0 checks them. An extension action names the installed extension that declares it; the runner checks its params against the types the extension's manifest declares, and its effect against the manifest's template, before it runs.",
+  "title": "Host action",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["provider", "action", "runner_id", "params", "effect"],
+  "properties": {
+    "provider": {
+      "oneOf": [
+        { "const": "builtin" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["extension", "version", "manifest_digest"],
+          "properties": {
+            "extension": { "type": "string", "pattern": "^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$", "description": "Not the name of an iohr command." },
+            "version": { "type": "string", "description": "A semantic version." },
+            "manifest_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+          }
+        }
+      ]
+    },
+    "action": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*)+$",
+      "description": "For an extension, `<extension>.<action>`, and never a built-in action's id."
+    },
+    "runner_id": { "type": "string", "pattern": "^rnr_[0-9A-Z]{26}$" },
+    "params": {
+      "type": "object",
+      "maxProperties": 8,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+          { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        ]
+      }
+    },
+    "effect": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }
+  }
+}
