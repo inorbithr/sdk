@@ -99,9 +99,38 @@ Kept but hidden from the help: `iohr packages` (now `iohr ext packages`),
 Results go to stdout (tables, or JSON with `--json`) and notes to stderr, so a pipe gets
 only data.
 
+On a terminal, lists and `show` views are drawn: the header in the help colour, ids dimmed so
+names lead, a `STATUS` or `STATE` cell as a mark and its word (a green check for `active` or
+`done`, an amber `!` for `pending` or `expiring`, a red cross for `failed` or `revoked`; a word
+not on that list stays plain), keys dimmed, and every line indented two spaces as `iohr
+doctor` is. Under `NO_COLOR`, `TERM=dumb`, `--json` or a pipe the bytes are the same as
+before: columns two spaces apart, no indent, no marks.
+
+A list (`token list`, `connections list`, `domains list`, `ext list` and the other `list`
+commands) ends on a terminal with a line that counts it and, where one fits, names the next
+command (`2 tokens · new one: iohr token create`). An empty list there is one line, such as
+`No tokens yet. Next: iohr token create`. A list wider than the terminal has its widest
+columns cut to fit, each cut cell ending in `…`, down to 12 columns or the header's width; an
+`ID` column is never cut, a `PATH` cell loses its start instead (`…/a/IO.md`) so the file it
+names stays, and `--json` or a pipe gives every cell whole. `iohr context` draws its file table
+the same way. Plain output keeps the
+table alone, and an empty list keeps its header line, so scripts read the same bytes.
+
+The other checks are drawn the same way on a terminal: `iohr lab check`, `iohr memory check`,
+`iohr memory drift` (its code part), `iohr sdk check` and `iohr ext verify`. Each problem is a
+row with its mark, where it is, what is wrong, and labelled lines under it (the `rule` that
+found it, the operations a moved profile gained `+` and lost `-`, the `fix`). A memory finding
+is an amber `!`, since it fails only under `--strict`. The last line says what was checked and
+what needs doing (`12 documents checked · 3 to fix`), or a green check with `nothing found`.
+The plain lines, tables and `--json` stay as they are under `NO_COLOR`, `TERM=dumb` or a pipe.
+
 ## `iohr doctor`
 
 Looks at four things and prints one line each: `ok`, or `FAIL` with the fix on the next line.
+On a terminal each line starts with a coloured mark (a green check or a red cross), the fix
+sits under the line it fixes, a passing line is dimmed, and a count closes the list
+(`3 ok · 1 to fix`). Under `NO_COLOR`, `TERM=dumb`, `--json` or a pipe the output is the plain
+lines above, unchanged, so scripts read the same text.
 
 | Check | Fails when | Fix |
 |---|---|---|
@@ -121,6 +150,10 @@ then also names what it found, from the local checks only (it never asks the Key
 `iohr --help` groups the commands the way `gh` does: Sign-in, Account, Build, Agents and
 Operate. `-h` prints one line per command and `--help` the long text. The help is coloured
 on a terminal, and plain under `NO_COLOR`, `--json` or a pipe.
+
+The root help ends with three examples, a `Get started: iohr login, then iohr doctor` line
+and every [exit code](#exit-codes). `--sign-in` and the `--via-*` attribution flags show
+only in `--help`, not in `-h`.
 
 ## Usage errors
 
@@ -152,6 +185,33 @@ Everything goes to stderr. Under `--json` it is one line in the platform's error
 ```
 
 With no terminal, `NO_COLOR` or `TERM=dumb` it is plain text.
+
+## Other errors
+
+Any other error (a refused call, a file that cannot be written) also goes to stderr. On a
+colour terminal it is drawn as a block: a red mark and the message, then a line each for
+the API's error code and HTTP status, the request id, and a hint when `iohr` has one:
+
+```text
+✗ the token cannot read this account's keys
+  code     forbidden · HTTP 403
+  request  req_01H...
+  hint     an API token needs the account:read scope
+```
+
+In a zsh with the `?` hook (`iohr shell hook zsh`), the block ends with one more line,
+`? why did that fail`, which you can type to ask your own agent about the command. It is
+not shown when `INORBIT_ASK=0`.
+
+With no terminal, `NO_COLOR` or `TERM=dumb` it stays one plain line, `iohr: <message>`,
+with the hint on the line after it. Under `--json` it is one line in the same envelope as a
+usage error: `code` is the API's code for a refused call (else `failed`, `unauthenticated`,
+`connection`, `timeout` and the like), and a `failure` detail carries the other lines, the
+HTTP status, the request id and the hint when there are any:
+
+```json
+{"code":"forbidden","error":"the token cannot read this account's keys","details":[{"type":"failure","notes":[],"status":403,"request_id":"req_01H...","hint":"an API token needs the account:read scope"}]}
+```
 
 ## Exit codes
 
@@ -247,22 +307,14 @@ Io. `--account ID` acts on a team you belong to; the default is your own account
 
 ```sh
 iohr ui [serve [--port P] [--dir D] [--open]]
-iohr ui install [--dir D]
 iohr ui build|dev|check [--package DIR]
 iohr ui open
 ```
 
 `serve` serves the built web UI (`sdk/ui`, RFC 0217) on loopback: `127.0.0.1`, else `[::1]`,
-never another address. The UI comes from `--dir` (or `IOHR_UI_DIR`), else the nearest
-`ui/dist` above the working folder (a checkout's own build), else the copy `iohr ui install`
-keeps at `<data folder>/ui/dist`, so it works from any folder. With none of them it fails
-(exit 1) and names where it looked and how to fix it. With no verb it serves and opens the
+never another address. `--dir` (or `IOHR_UI_DIR`) names a built `dist/`; without it the
+nearest `ui/dist` above the working folder is used. With no verb it serves and opens the
 browser (`IOHR_NO_BROWSER` prints the address instead).
-
-`install` copies a built `ui/dist` (`--dir`, else the nearest above the working folder) to
-`<data folder>/ui/dist`, replacing the copy there in one step: it is copied beside the old
-one first, so a failed install leaves the old UI as it was. `mise run cli:preview-install`
-builds the UI and runs this, so `iohr-preview ui serve` works from any folder.
 
 - Pages are GET and HEAD only. The `Host` must be this listener's own address or `localhost` on its
   port. Paths cannot leave the folder or follow a link.

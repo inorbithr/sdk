@@ -42,6 +42,7 @@ use crate::runner::settings::{self, BuildFloor, Declared, Effective, Flags};
 use crate::runner::signing::{self, RunKey, Signer};
 use crate::runner::supervisor::{self, Surroundings};
 use crate::runner::workspace::Workspaces;
+use crate::ui::Listed;
 use iohr_auth::{Config, EntryKey, ProfileName, Redacted};
 
 #[allow(clippy::too_many_lines, reason = "one arm per subcommand")]
@@ -272,7 +273,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     ]
                 })
                 .collect();
-            Out::table(&["RUNNER", "NAME", "STATUS", "SEEN", "PROVIDERS"], &rows);
+            Out::list(
+                &["RUNNER", "NAME", "STATUS", "SEEN", "PROVIDERS"],
+                &rows,
+                &Listed::new("runner", "runners"),
+            );
             match local_state {
                 Some((path, version, auth)) => Out::note(&format!(
                     "this machine ({}): claude {path} {version}; {}",

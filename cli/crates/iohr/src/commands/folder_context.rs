@@ -62,10 +62,7 @@ pub(crate) fn run(g: &Global, args: &ContextArgs, out: Out) -> Result<(), Error>
                 ]
             })
             .collect();
-        text.push_str(&crate::output::table_text(
-            &["FILE", "BYTES", "SENT", "NOTE", "PATH"],
-            &rows,
-        ));
+        text.push_str(&p.table(&["FILE", "BYTES", "SENT", "NOTE", "PATH"], &rows));
         text.push_str("\nFarthest first; the nearest wins.\n");
     }
     for s in &chain.skipped {

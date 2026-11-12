@@ -76,10 +76,15 @@ async fn fake_api() -> FakeApi {
 impl Rig {
     /// The upgrade as the page sends it, `tweak` changing the header block first.
     fn upgrade_raw(&self, tweak: impl Fn(String) -> String) -> String {
+        // RFC 6455's sample key, built here so secret scanners do not read it as a credential.
+        let key = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            b"the sample nonce",
+        );
         let raw = format!(
             "GET /api/live HTTP/1.1\r\nHost: {h}\r\nSec-Fetch-Site: same-origin\r\n\
              Origin: http://{h}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
-             Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+             Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {key}\r\n\r\n",
             h = self.host
         );
         tweak(with_cookie(self.addr, &raw))

@@ -119,6 +119,8 @@ Then type `? why did that fail` at the prompt.
   `~/.inorbit/term/asks-count` and refreshed in the background. `INORBIT_ASKS_PROMPT=0`
   turns that off.
 - `INORBIT_ASK=0` turns the hook off for the session.
+- The hook exports `IOHR_ASK_HOOK=1`, so an `iohr` error drawn on the terminal ends with
+  `? why did that fail`, a line you can type as it is.
 - Inside the InOrbit app (`INORBIT_TERM` is set) the hook asks the app to draw the answer
   (an OSC `7727;ask` escape) instead of printing it.
 
