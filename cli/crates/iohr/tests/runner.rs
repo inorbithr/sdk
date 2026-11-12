@@ -54,7 +54,7 @@ fn fake_claude(dir: &Path, auth: &str) {
     std::fs::write(
         &p,
         format!(
-            "#!/bin/sh\nd=$(dirname \"$0\")\nenv >> \"$d/env.txt\"\ncase \"$1\" in\n  auth) echo '{auth}';;\n  --version) echo '9.9.9 (fake)';;\n  *) cat > /dev/null; printf '%s\n' '{TURN}';;\nesac\n"
+            "#!/bin/sh\nd=$(dirname \"$0\")\nenv >> \"$d/env.txt\"\ncase \"$1\" in\n  auth) echo '{auth}';;\n  --version) echo '9.9.9 (fake)';;\n  *) : > \"$d/turn_ran\"; cat > /dev/null; printf '%s\n' '{TURN}';;\nesac\n"
         ),
     )
     .unwrap();
@@ -62,6 +62,9 @@ fn fake_claude(dir: &Path, auth: &str) {
 }
 
 fn iohr(server: &MockServer, dir: &Path, args: &[&str]) -> Command {
+    if args.starts_with(&["runner", "run"]) {
+        unconfined(dir);
+    }
     iohr_as(server, dir, "p", args)
 }
 
@@ -929,11 +932,26 @@ async fn host_registered(dir: &Path) -> MockServer {
 
 const BEAT: &str = "/v1/coordinator/runners/run_1/heartbeat";
 
+/// Adds `toml` to the config; lines of a `[runner]` table join the one already there.
 fn add_to_config(dir: &Path, toml: &str) {
     let p = dir.join("config").join("config.toml");
-    let mut text = std::fs::read_to_string(&p).unwrap();
-    text.push_str(toml);
+    let mut text = std::fs::read_to_string(&p).unwrap_or_default();
+    match (toml.strip_prefix("\n[runner]\n"), text.find("\n[runner]\n")) {
+        (Some(lines), Some(at)) => text.insert_str(at + "\n[runner]\n".len(), lines),
+        _ => text.push_str(toml),
+    }
     std::fs::write(&p, text).unwrap();
+}
+
+/// A runner under test runs claude without the OS sandbox (SR-35) unless its test set
+/// `sandbox` itself: the fake claude is not what these tests are about, and a Linux
+/// machine without `bwrap` would refuse to start.
+fn unconfined(dir: &Path) {
+    let p = dir.join("config").join("config.toml");
+    let text = std::fs::read_to_string(&p).unwrap_or_default();
+    if !text.contains("\nsandbox = ") {
+        add_to_config(dir, "\n[runner]\nsandbox = \"off\"\n");
+    }
 }
 
 /// Waits up to 15 s for a heartbeat body that `want` accepts.
@@ -2633,6 +2651,233 @@ async fn bare_iohr_on_a_terminal_under_no_color_prints_the_usage_report() {
         "{}",
         s.screen.screen().contents()
     );
+}
+
+/// SR-35: `iohr runner config show` names the three trust settings, their conservative
+/// defaults first, then what `[runner]` says.
+#[tokio::test]
+async fn config_show_names_the_tool_ceiling_the_allow_list_and_the_sandbox() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    login(&server, dir.path(), &token()).await;
+    let show = || {
+        let o = run(&mut iohr(
+            &server,
+            dir.path(),
+            &["runner", "config", "show", "--json"],
+        ));
+        assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+        serde_json::from_slice::<Value>(&o.stdout).unwrap()
+    };
+    let v = show();
+    assert_eq!(
+        v["tool_ceiling"],
+        json!({"value": ["Read", "Grep", "Glob", "Edit", "Write"], "source": "default"})
+    );
+    assert_eq!(v["repositories"], json!({"value": [], "source": "default"}));
+    assert_eq!(v["sandbox"], json!({"value": "auto", "source": "default"}));
+    add_to_config(
+        dir.path(),
+        "\n[runner]\ntool_ceiling = \"coordinator\"\nrepositories = [\"acme/*\", \"beta/app\"]\nsandbox = \"off\"\n",
+    );
+    let v = show();
+    assert_eq!(
+        v["tool_ceiling"],
+        json!({"value": "coordinator", "source": "[runner]"})
+    );
+    assert_eq!(
+        v["repositories"],
+        json!({"value": ["acme/*", "beta/app"], "source": "[runner]"})
+    );
+    assert_eq!(v["sandbox"], json!({"value": "off", "source": "[runner]"}));
+    // A pattern that is not owner/name or owner/* stops the command, naming it.
+    let p = dir.path().join("config").join("config.toml");
+    let t = std::fs::read_to_string(&p).unwrap();
+    std::fs::write(&p, t.replace("\"beta/app\"", "\"*\"")).unwrap();
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "config", "show", "--json"],
+    ));
+    assert_ne!(o.status.code(), Some(0));
+    assert!(text(&o).contains("repositories"), "{}", text(&o));
+}
+
+/// SR-35: a job whose repository is not on the allow-list is reported failed with the
+/// reason on the running binary: no GitHub token is asked for and nothing is cloned. The
+/// start says the sandbox is off and the allow-list is empty.
+#[tokio::test]
+async fn a_job_outside_the_allow_list_is_refused_before_any_clone() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/runners/run_1/heartbeat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "runner": runner_json(), "heartbeat_interval_seconds": 1,
+            "offered": [{"lease_id": "lease_1", "runner_id": "run_1", "job_id": "job_1",
+                         "turn_id": "", "fencing_token": "5"}]
+        })))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/jobs/job_1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"job": {
+            "job_id": "job_1", "repository": "acme/app", "document_id": "ldoc_1"
+        }})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/leases/lease_1/accept"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"lease": {"lease_id": "lease_1"}})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/leases/lease_1/pack"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"pack": {
+            "turn_id": "turn_1", "user": "usr_me", "kind": "job",
+            "pack_sha256": "ab".repeat(32), "system_prompt": "SYS", "prompt": "hi",
+            "model": "sonnet", "max_turns": 5, "allowed_tools": ["Read"],
+            "wall_clock_secs": 60, "thread_id": "th_1", "job_id": "job_1", "attempt": 1,
+            "lease_id": "lease_1", "fencing_token": "5", "token_budget": 4000,
+            "checkout": "checkouts/job_1", "reply_shape": "{}"
+        }})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/leases/lease_1/heartbeat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"stop": false})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path_regex("^/v1/coordinator/turns/turn_1/report$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"turn": {}})))
+        .mount(&server)
+        .await;
+
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &[
+            "runner",
+            "run",
+            "--name",
+            "mac",
+            "--interval",
+            "1",
+            "--max-beats",
+            "3",
+        ],
+    ));
+    let all = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{all}");
+    assert!(all.contains("sandbox = \"off\""), "no start warning: {all}");
+    assert!(
+        all.contains("repositories: none (every repository is refused)"),
+        "{all}"
+    );
+    assert!(all.contains("acme/app refused before any clone"), "{all}");
+    let reports = bodies(&server, "/v1/coordinator/turns/turn_1/report").await;
+    assert_eq!(reports.len(), 1, "{all}");
+    assert_eq!(reports[0]["outcome"], "failed");
+    let detail = reports[0]["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("acme/app is not on this runner's allow-list, which is empty"),
+        "{detail}"
+    );
+    let asked: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.url.path().to_owned())
+        .collect();
+    assert!(
+        !asked.iter().any(|p| p.contains("runner-token")),
+        "a token was asked for: {asked:?}"
+    );
+    assert!(!dir.path().join("turn_ran").exists(), "claude ran");
+    let checkouts = dir.path().join("config/runner/coordinate/checkouts");
+    assert!(!checkouts.join("job_1").exists(), "it was cloned");
+}
+
+/// SR-35: under the default ceiling a turn that asks only for Bash is reported
+/// `refused_tool` and claude never starts.
+#[tokio::test]
+async fn a_turn_that_asks_only_for_tools_above_the_ceiling_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/runners/run_1/heartbeat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "runner": runner_json(), "heartbeat_interval_seconds": 1,
+            "offered": [{"lease_id": "lease_1", "runner_id": "run_1", "job_id": "job_1",
+                         "turn_id": "turn_1", "fencing_token": "5"}]
+        })))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/leases/lease_1/accept"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"lease": {"lease_id": "lease_1"}})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/leases/lease_1/pack"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"pack": {
+            "turn_id": "turn_1", "user": "usr_me", "kind": "coordinate",
+            "pack_sha256": "ab".repeat(32), "system_prompt": "SYS", "prompt": "hi",
+            "model": "sonnet", "max_turns": 5, "allowed_tools": ["Bash"],
+            "wall_clock_secs": 60, "thread_id": "th_1", "job_id": "job_1", "attempt": 1,
+            "lease_id": "lease_1", "fencing_token": "5", "token_budget": 4000,
+            "reply_shape": "{}"
+        }})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/leases/lease_1/heartbeat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"stop": false})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path_regex("^/v1/coordinator/turns/turn_1/report$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"turn": {}})))
+        .mount(&server)
+        .await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &[
+            "runner",
+            "run",
+            "--name",
+            "mac",
+            "--interval",
+            "1",
+            "--max-beats",
+            "3",
+        ],
+    ));
+    let all = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{all}");
+    let reports = bodies(&server, "/v1/coordinator/turns/turn_1/report").await;
+    assert_eq!(reports.len(), 1, "{all}");
+    assert_eq!(reports[0]["outcome"], "refused_tool", "{all}");
+    assert!(
+        reports[0]["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("outside this runner's tool_ceiling"),
+        "{}",
+        reports[0]
+    );
+    assert!(!dir.path().join("turn_ran").exists(), "claude ran");
 }
 
 /// A shell killed after it started the host and before it joined it leaves nobody to join:

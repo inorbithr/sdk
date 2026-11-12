@@ -34,6 +34,7 @@ use crate::runner::hygiene;
 use crate::runner::personal_use;
 use crate::runner::provider::{self, AuthState, LocalAuth};
 use crate::runner::run_loop::{self, GateCheck, LoopConfig, run_loop};
+use crate::runner::sandbox;
 use crate::runner::self_upgrade::{
     DRAIN_LIMIT, ExecRestarter, FileLedger, Outcome, Policy, RealSource, Upgrader,
 };
@@ -41,6 +42,7 @@ use crate::runner::service::{HttpService, Registration, RunnerInfo, Service as _
 use crate::runner::settings::{self, BuildFloor, Declared, Effective, Flags};
 use crate::runner::signing::{self, RunKey, Signer};
 use crate::runner::supervisor::{self, Surroundings};
+use crate::runner::trust::{Ceiling, Repositories};
 use crate::runner::workspace::Workspaces;
 use crate::ui::Listed;
 use iohr_auth::{Config, EntryKey, ProfileName, Redacted};
@@ -387,6 +389,14 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let auth = exec.auth_status().await;
             let allowed = local_auth(&ctx.dir, &set);
             check_auth(&auth, &allowed)?;
+            // SR-35: with no working OS sandbox the runner does not start, unless the
+            // configuration says `sandbox = "off"`, which is said on every start.
+            let trust = set.trust();
+            let path = std::env::var_os("PATH");
+            let (confine, confined) =
+                sandbox::at_start(trust.sandbox, sandbox::find(path.as_deref()))
+                    .await
+                    .map_err(Error::Failed)?;
             let signer = runner_signer(&ctx, &s, &account, false).await?;
             // On the person's own plan, one turn at a time, whatever is configured.
             let flags = if auth == AuthState::Subscription {
@@ -419,6 +429,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let (local_tx, local_rx) = watch::channel(allowed);
             let mut exec = exec.with_local(local_rx);
             exec.workdir = ctx.dir.join("runner").join("coordinate");
+            exec.confine = confine;
+            exec.config_dir = Some(ctx.dir.clone());
+            let (ceiling, ceiling_rx) = watch::channel(trust.ceiling.clone());
+            exec.ceiling = ceiling_rx;
+            let (repositories, repositories_rx) = watch::channel(trust.repositories.clone());
             let (tx, rx) = watch::channel(false);
             let tx = Arc::new(tx);
             let on_ctrl_c = tx.clone();
@@ -450,6 +465,12 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 me.runner_id,
                 declared.kinds.join(", ")
             ));
+            Out::note(&confined);
+            Out::note(&format!(
+                "tool ceiling: {}; repositories: {}",
+                trust.ceiling.describe(),
+                trust.repositories.describe()
+            ));
             Out::note(match auth {
                 AuthState::ApiKey => "Claude: on an Anthropic API key",
                 _ => OWN_PLAN_NOTE,
@@ -462,9 +483,14 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 ctx.dir.clone(),
                 s.profile.clone(),
                 flags,
-                declare,
-                policy,
-                local_tx,
+                Reload {
+                    declare,
+                    policy,
+                    ceiling,
+                    repositories,
+                    sandbox: trust.sandbox,
+                    local: local_tx,
+                },
             );
             // One drain: the turn loop and the approved-run poller take no new work while
             // an upgrade is waiting to install, and say when nothing is left running.
@@ -491,6 +517,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 // Job leases get their own checkout, `checkouts/<job_id>` on `job/<id>`,
                 // and a replied turn's pull request, through the host's git and `gh`.
                 workspaces: Some(Arc::new(Workspaces::for_runner(exec.workdir.clone()))),
+                repositories: repositories_rx,
                 allow_host_git: set.allow_host_git_credentials.value,
                 // While it holds no lease, what nothing used for the days kept goes.
                 sweep: Some(hygiene::Sweep {
@@ -1014,13 +1041,22 @@ fn effective(
 
 /// On SIGHUP, reads config.toml again and sends what the next heartbeat declares. A file
 /// that cannot be read, or a bad value, keeps the settings in use and says why.
+/// What a SIGHUP reload sends the running parts.
+struct Reload {
+    declare: watch::Sender<Declared>,
+    policy: watch::Sender<Policy>,
+    ceiling: watch::Sender<Ceiling>,
+    repositories: watch::Sender<Repositories>,
+    local: watch::Sender<LocalAuth>,
+    /// The sandbox mode the runner started with: a reload cannot change it.
+    sandbox: sandbox::Mode,
+}
+
 fn reload_on_hangup(
     dir: std::path::PathBuf,
     profile: Option<ProfileName>,
     flags: Flags,
-    declare: watch::Sender<Declared>,
-    policy: watch::Sender<Policy>,
-    local: watch::Sender<LocalAuth>,
+    to: Reload,
 ) {
     #[cfg(unix)]
     tokio::spawn(async move {
@@ -1044,7 +1080,7 @@ fn reload_on_hangup(
                             .map_or_else(|| "as registered".to_owned(), |c| c.to_string()),
                         d.kinds.join(", ")
                     ));
-                    let _ = declare.send(d);
+                    let _ = to.declare.send(d);
                     let now = Policy::of(&e);
                     Out::note(&format!(
                         "auto-upgrade {}, every {} minutes, restart {}, signing {}",
@@ -1053,7 +1089,21 @@ fn reload_on_hangup(
                         now.restart.as_str(),
                         now.sign
                     ));
-                    let _ = policy.send(now);
+                    let _ = to.policy.send(now);
+                    let t = e.trust();
+                    Out::note(&format!(
+                        "tool ceiling: {}; repositories: {}",
+                        t.ceiling.describe(),
+                        t.repositories.describe()
+                    ));
+                    if t.sandbox != to.sandbox {
+                        Out::note(&format!(
+                            "sandbox stays {} until the runner is started again",
+                            to.sandbox.as_str()
+                        ));
+                    }
+                    let _ = to.ceiling.send(t.ceiling);
+                    let _ = to.repositories.send(t.repositories);
                     let allowed = local_auth(&dir, &e);
                     Out::note(&format!(
                         "claude_auth {}, codex_auth {}, personal-use notice {}",
@@ -1065,7 +1115,7 @@ fn reload_on_hangup(
                             "not accepted"
                         }
                     ));
-                    let _ = local.send(allowed);
+                    let _ = to.local.send(allowed);
                 }
                 Err(why) => Out::note(&format!(
                     "config.toml was not taken, the settings in use stay: {why}"
@@ -1075,7 +1125,7 @@ fn reload_on_hangup(
     });
     #[cfg(not(unix))]
     {
-        let _ = (dir, profile, flags, declare, policy, local);
+        let _ = (dir, profile, flags, to);
     }
 }
 
@@ -1126,6 +1176,12 @@ async fn show_settings(e: &Effective, out: Out) {
             "upgrade_sign_identity": { "value": e.upgrade_sign.value.to_string(), "source": e.upgrade_sign.source.to_string() },
             "user_units": { "value": e.user_units.as_ref().map(|u| &u.value), "source": user_units_from },
             "core_checkout": { "value": e.core_checkout.as_ref().map(|c| &c.value), "source": core_checkout_from },
+            "tool_ceiling": { "value": match &e.tool_ceiling.value {
+                Ceiling::Coordinator => serde_json::json!("coordinator"),
+                Ceiling::Tools(t) => serde_json::json!(t),
+            }, "source": e.tool_ceiling.source.to_string() },
+            "repositories": { "value": e.repositories.value.0, "source": e.repositories.source.to_string() },
+            "sandbox": { "value": e.sandbox.value.as_str(), "source": e.sandbox.source.to_string() },
             "claude_auth": { "value": e.claude_auth.value.as_str(), "source": e.claude_auth.source.to_string() },
             "codex_auth": { "value": e.codex_auth.value.as_str(), "source": e.codex_auth.source.to_string() },
             "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
@@ -1155,6 +1211,21 @@ async fn show_settings(e: &Effective, out: Out) {
             "core_checkout".to_owned(),
             core_checkout,
             core_checkout_from,
+        ],
+        vec![
+            "tool_ceiling".to_owned(),
+            e.tool_ceiling.value.describe(),
+            e.tool_ceiling.source.to_string(),
+        ],
+        vec![
+            "repositories".to_owned(),
+            e.repositories.value.describe(),
+            e.repositories.source.to_string(),
+        ],
+        vec![
+            "sandbox".to_owned(),
+            e.sandbox.value.as_str().to_owned(),
+            e.sandbox.source.to_string(),
         ],
         vec![
             "claude_auth".to_owned(),

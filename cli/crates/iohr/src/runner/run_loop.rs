@@ -35,6 +35,7 @@ use super::service::{
     TurnReport, Usage,
 };
 use super::settings::{self, BuildFloor, Declared};
+use super::trust::Repositories;
 use super::workspace::{self, Prepared, Shipped, Workspaces};
 
 /// The RFC's runner heartbeat. The service's proto does not carry an interval yet, so
@@ -117,6 +118,10 @@ pub(crate) struct LoopConfig {
     /// The checkouts of job leases (RFC 0147 slice A): made before the accept, shipped
     /// as a pull request after a reply; `None` keeps the old behaviour (no checkout).
     pub(crate) workspaces: Option<Arc<Workspaces>>,
+    /// The repositories a job lease may name (SR-35), read again for every lease (a
+    /// SIGHUP reload sends a new list). Empty, the default, refuses every repository: a
+    /// lease for one that is not listed is accepted, never cloned, and reported refused.
+    pub(crate) repositories: watch::Receiver<Repositories>,
     /// Lets the self-upgrade drain the loop; `None`: never drained.
     pub(crate) drain: Option<Arc<Drain>>,
     /// `allow_host_git_credentials`: a lease with no token of its own may use this host's
@@ -166,6 +171,7 @@ impl Default for LoopConfig {
             report_host: false,
             gate: None,
             workspaces: None,
+            repositories: watch::channel(Repositories::default()).1,
             drain: None,
             allow_host_git: false,
             sweep: None,
@@ -247,7 +253,9 @@ struct Gated {
 }
 
 /// A lease accepted, with its checkout when the runner made one; else its id.
-type Accepted = Result<(Lease, Option<Owned>), String>;
+/// An accepted lease, its checkout, and why its turn is refused without running (a
+/// repository off the allow-list); the lease's id when it was not accepted.
+type Accepted = Result<(Lease, Option<Owned>, Option<String>), String>;
 
 /// A job lease's checkout, made by this runner before it accepted the lease, and the
 /// document the job serves (for the pull request's body).
@@ -282,6 +290,8 @@ struct Busy {
 struct Fetch {
     lease: Lease,
     owned: Option<Owned>,
+    /// Reported as the turn's outcome instead of running it.
+    refused: Option<String>,
     tries: u32,
     /// Not before this instant is the pack asked for (again).
     next: Instant,
@@ -856,7 +866,8 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                 ));
                             } else {
                                 accepting_ids.push(lease.lease_id.clone());
-                                accepting.push(Box::pin(accept_lease(svc, exec, cfg.workspaces.as_deref(), lease, (cfg.op_timeout, cfg.allow_host_git), log)));
+                                let allowed = cfg.repositories.borrow().clone();
+                                accepting.push(Box::pin(accept_lease(svc, exec, cfg.workspaces.as_deref(), allowed, lease, (cfg.op_timeout, cfg.allow_host_git), log)));
                             }
                         }
                     }
@@ -939,6 +950,14 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     Finished::refused("failed", format!("the turn's task stopped: {e}"))
                 });
                 stats.turns += 1;
+                if !finished.dropped_tools.is_empty() {
+                    // Tool names only: never the prompt or what the turn did (SR-35).
+                    log(&format!(
+                        "lease {}: tools outside the ceiling dropped: {}",
+                        b.lease.lease_id,
+                        finished.dropped_tools.join(", ")
+                    ));
+                }
                 let report = report_of(&b.lease, &b.pack, runner, &finished).limited();
                 log(&report.journal_line());
                 // The runner ships a replied turn of a checkout it owns: commit, push
@@ -1138,10 +1157,10 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
             }
             taken = first_of(&mut accepting) => {
                 match taken {
-                    Ok((lease, owned)) => {
+                    Ok((lease, owned, refused)) => {
                         accepting_ids.retain(|id| *id != lease.lease_id);
                         stats.accepted += 1;
-                        fetching.push(Fetch { lease, owned, tries: 0, next: Instant::now(), asking: false });
+                        fetching.push(Fetch { lease, owned, refused, tries: 0, next: Instant::now(), asking: false });
                         next_lease_beat = Instant::now();
                     }
                     // Not accepted: `accept_lease` logged it and the lease expires.
@@ -1155,11 +1174,16 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 match got {
                     Ok(pack) => {
                         let (task, p) = (exec.clone(), pack.clone());
+                        // Refused before the clone: the report says why, and nothing runs.
+                        let handle = match f.refused {
+                            Some(why) => tokio::spawn(async move { Finished::refused("failed", why) }),
+                            None => tokio::spawn(async move { task.execute(p).await }),
+                        };
                         busy.push(Busy {
                             lease: f.lease,
                             pack,
                             owned: f.owned,
-                            handle: tokio::spawn(async move { task.execute(p).await }),
+                            handle,
                         });
                     }
                     Err(e) => {
@@ -1283,21 +1307,25 @@ async fn github_access<S: Service>(
 ///
 /// A job lease whose job names a repository gets its checkout first
 /// (`checkouts/<job_id>` on `job/<job_id>`, [`Workspaces::prepare`]); a checkout that
-/// cannot be made means the lease is not accepted. A coordinator without `GetJob` keeps
-/// the old behaviour.
+/// cannot be made means the lease is not accepted. A repository off `allowed` (SR-35) is
+/// refused before any token or clone: the lease is accepted with the reason, so the
+/// coordinator gets a report rather than a lease that times out. A coordinator without
+/// `GetJob` keeps the old behaviour.
 async fn accept_lease<S: Service, X: Exec>(
     svc: &S,
     exec: &Arc<X>,
     workspaces: Option<&Workspaces>,
+    allowed: Repositories,
     lease: Lease,
     (op_timeout, allow_host): (Duration, bool),
     log: Log<'_>,
-) -> Result<(Lease, Option<Owned>), String> {
+) -> Accepted {
     let refuse = |why: &str| {
         log(&format!("lease {} not accepted: {why}", lease.lease_id));
         lease.lease_id.clone()
     };
     let mut owned = None;
+    let mut refused = None;
     if let Some(w) = workspaces
         && !lease.job_id.is_empty()
         && lease.turn_id.is_empty()
@@ -1308,7 +1336,16 @@ async fn accept_lease<S: Service, X: Exec>(
             Ok(Err(e)) => return Err(refuse(&format!("its job could not be read: {e}"))),
             Err(_) => return Err(refuse("its job could not be read: timed out")),
         };
-        if let Some(job) = job.filter(|j| !j.repository.is_empty()) {
+        let job = job.filter(|j| !j.repository.is_empty());
+        if let Some(j) = job.as_ref().filter(|j| !allowed.allows(&j.repository)) {
+            log(&format!(
+                "lease {}: {} refused before any clone, it is not on the allow-list ({})",
+                lease.lease_id,
+                j.repository,
+                allowed.describe()
+            ));
+            refused = Some(allowed.refusal(&j.repository));
+        } else if let Some(job) = job {
             let access =
                 match github_access(svc, &lease, &job.repository, op_timeout, allow_host).await {
                     Ok(a) => a,
@@ -1363,7 +1400,7 @@ async fn accept_lease<S: Service, X: Exec>(
         caps_set: true,
     };
     match bounded(op_timeout, svc.accept(&lease, facts)).await {
-        Ok(()) => Ok((lease, owned)),
+        Ok(()) => Ok((lease, owned, refused)),
         Err(e) => Err(refuse(&e.msg)),
     }
 }
@@ -1875,6 +1912,7 @@ mod tests {
                     detail: String::new(),
                     provider_version: "x".into(),
                     model: pack.model.clone(),
+                    dropped_tools: Vec::new(),
                 }
             })
         }
@@ -1950,6 +1988,7 @@ mod tests {
             detail: String::new(),
             provider_version: "x".into(),
             model: "opus".into(),
+            dropped_tools: Vec::new(),
         }
     }
 
@@ -2038,6 +2077,7 @@ mod tests {
             build_floor: None,
             gate: None,
             workspaces: None,
+            repositories: watch::channel(Repositories::of(&["acme/*"])).1,
             drain: None,
             report_host: false,
             // Most tests offer leases with no token of their own on a platform that mints
@@ -2662,14 +2702,16 @@ mod tests {
         )
         .unwrap();
         crate::runner::exec::settle_script(&claude);
-        let exec = Arc::new(ClaudeExec::new(
+        let mut exec = ClaudeExec::new(
             claude,
             dir.path().join("work"),
             vec![],
             None,
             "run_1".into(),
             "usr_me".into(),
-        ));
+        );
+        exec.confine = crate::runner::sandbox::Confine::Off;
+        let exec = Arc::new(exec);
         let fake = Fake {
             revoke_when: Some(pid.clone()),
             ..Fake::default()
@@ -3377,6 +3419,62 @@ mod tests {
             assert_eq!(calls_of(&fake, "job job_1"), 1);
         }
         assert!(!p.workdir.join("checkouts/job_1").exists());
+    }
+
+    /// SR-35: a job whose repository is not on the allow-list is reported failed with
+    /// the reason, and nothing is minted, cloned or run for it. The empty list (the
+    /// default) refuses every repository.
+    #[tokio::test]
+    async fn a_job_whose_repository_is_not_on_the_allow_list_is_refused_before_any_clone() {
+        use crate::runner::workspace::tests::{FakeForge, place, spaces};
+        for (list, why) in [
+            (Repositories::default(), "which is empty"),
+            (
+                Repositories::of(&["acme/other", "beta/*"]),
+                "acme/other, beta/*",
+            ),
+        ] {
+            let p = place();
+            let fake = Fake {
+                job: Some(JobInfo {
+                    repository: "acme/app".into(),
+                    document_id: String::new(),
+                }),
+                ..Fake::default()
+            };
+            offer(&fake, &[job_lease("lease_1", 7)]);
+            *fake.pack.lock().unwrap() = Some(Pack {
+                kind: "job".into(),
+                job_id: "job_1".into(),
+                checkout: "checkouts/job_1".into(),
+                ..good_pack()
+            });
+            let (_keep, repositories) = watch::channel(list);
+            let c = LoopConfig {
+                workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+                repositories,
+                ..cfg(8)
+            };
+            let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+            assert_eq!((stats.accepted, stats.reported), (1, 1), "{lines:?}");
+            assert_eq!(calls_of(&fake, "runner_token "), 0, "a token was minted");
+            assert!(!p.workdir.join("checkouts/job_1").exists(), "it was cloned");
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.contains("acme/app refused before any clone")),
+                "{lines:?}"
+            );
+            let r = fake.reports.lock().unwrap();
+            assert_eq!(r.len(), 1);
+            assert_eq!(r[0].outcome, "failed");
+            assert!(
+                r[0].detail.contains("not on this runner's allow-list")
+                    && r[0].detail.contains(why),
+                "{}",
+                r[0].detail
+            );
+        }
     }
 
     #[tokio::test]

@@ -54,6 +54,21 @@ pub(crate) fn target_for(workdir: &Path, checkout: &Path) -> Option<PathBuf> {
     target_from_gitfile(&text, &state)
 }
 
+/// The mirror the checkout at `checkout` keeps its history in, when it is one of this
+/// runner's own (`<state>/mirrors/<owner>/<name>.git`): what a sandboxed turn still reads
+/// for `git status` and `git log` (SR-35).
+pub(crate) fn mirror_for(workdir: &Path, checkout: &Path) -> Option<PathBuf> {
+    let state = workdir.parent()?.canonicalize().ok()?;
+    let text = std::fs::read_to_string(checkout.join(".git")).ok()?;
+    mirror_from_gitfile(&text, &state)
+}
+
+fn mirror_from_gitfile(text: &str, state: &Path) -> Option<PathBuf> {
+    let gitdir = Path::new(text.lines().next()?.strip_prefix("gitdir:")?.trim());
+    let mirror = gitdir.parent()?.parent()?;
+    (mirror.parent()?.parent()? == state.join("mirrors")).then(|| mirror.to_path_buf())
+}
+
 /// `env` with [`TARGET_VAR`] set to `target` (replacing any other); `env` as it was when
 /// there is no shared directory.
 pub(crate) fn with_target(
@@ -691,6 +706,21 @@ pub(crate) fn sweep(s: &Sweep) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_worktree_names_its_mirror_only_inside_the_state_directory() {
+        let state = Path::new("/s/runner");
+        let git = "gitdir: /s/runner/mirrors/acme/app.git/worktrees/job_1\n";
+        assert_eq!(
+            mirror_from_gitfile(git, state),
+            Some(PathBuf::from("/s/runner/mirrors/acme/app.git"))
+        );
+        assert_eq!(
+            mirror_from_gitfile("gitdir: /elsewhere/x.git/worktrees/j", state),
+            None
+        );
+        assert_eq!(mirror_from_gitfile("not a gitfile", state), None);
+    }
 
     #[test]
     fn a_worktree_builds_into_its_repository_shared_directory() {
