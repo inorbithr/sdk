@@ -194,7 +194,8 @@ names) only in `iohr ext install`, `upgrade` and `sync`: that registry, the toke
 service its challenge names and the storage host a blob download redirects to, with
 `GET`, over HTTPS (plain HTTP to this machine only). Never on another command, never to
 look for updates, no telemetry. A mirror's credential comes from
-`IOHR_EXT_REGISTRY_AUTH` and goes to that registry and its token service only.
+`IOHR_EXT_REGISTRY_AUTH` and goes to that registry only, and to its token service when
+that service is on the registry's own origin.
 - Why: banks and regulated companies do not allow software that changes or reports on
   its own; a security team needs to know every host the tool reaches.
 - Verify: review; integration tests run against a registry on loopback with nothing
