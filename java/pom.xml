@@ -11,7 +11,7 @@
 
   <name>InOrbit SDK</name>
   <description>The InOrbit API client for Java: one runtime, and the operations your credential may call.</description>
-  <url>https://docs.inorbit.hr</url>
+  <url>https://developers.inorbit.hr</url>
   <licenses>
     <license>
       <name>Apache-2.0</name>
