@@ -248,6 +248,7 @@ fn render_with(
 }
 
 /// The text of a first note (no earlier runs).
+#[cfg(test)]
 pub(crate) fn render(asked: &str, files: &[String], said: &str, why: &str, bin: &str) -> String {
     let h = History {
         runs: 1,
@@ -288,10 +289,11 @@ pub(crate) fn write(
         .filter(|t| !t.trim().is_empty())
     {
         let p = parse(&old);
-        earlier = p.earlier.clone();
-        earlier.push(p.digest(p.runs));
+        let last = p.digest(p.runs);
         folded = p.folded;
         runs = p.runs + 1;
+        earlier = p.earlier;
+        earlier.push(last);
         compact_earlier(&mut earlier, &mut folded);
     }
     let h = History {
@@ -453,7 +455,10 @@ mod tests {
         write(d.path(), "c", "d", "w", "iohr").unwrap();
         let before = std::fs::read_to_string(d.path().join(FILE)).unwrap();
         assert_eq!(compact(d.path(), "iohr").unwrap(), 0);
-        assert_eq!(before, std::fs::read_to_string(d.path().join(FILE)).unwrap());
+        assert_eq!(
+            before,
+            std::fs::read_to_string(d.path().join(FILE)).unwrap()
+        );
         // A hand-grown history is cut to the newest lines.
         let mut long = before.replace("\n## Continue", "");
         for i in 10..20 {

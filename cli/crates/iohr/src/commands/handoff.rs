@@ -9,14 +9,15 @@ use crate::error::Error;
 use crate::handoff;
 use crate::output::Out;
 
-pub(crate) fn run(cmd: HandoffCommand, out: Out) -> Result<(), Error> {
+pub(crate) fn run(cmd: &HandoffCommand, out: Out) -> Result<(), Error> {
     let root = handoff::root_here();
     let have = root.as_deref().and_then(handoff::runs);
+    let Some(root) = root.filter(|_| have.is_some()) else {
+        none(out);
+        return Ok(());
+    };
     match cmd {
         HandoffCommand::Show => {
-            let Some(root) = root.filter(|_| have.is_some()) else {
-                return none(out);
-            };
             let text = std::fs::read_to_string(root.join(handoff::FILE))
                 .map_err(|e| Error::Failed(format!("cannot read the note: {}", e.kind())))?;
             if out.json {
@@ -28,12 +29,8 @@ pub(crate) fn run(cmd: HandoffCommand, out: Out) -> Result<(), Error> {
             } else {
                 Out::raw(text.as_bytes());
             }
-            Ok(())
         }
         HandoffCommand::Compact => {
-            let Some(root) = root.filter(|_| have.is_some()) else {
-                return none(out);
-            };
             let n = handoff::compact(&root, &super::shell::running_bin()).map_err(Error::Failed)?;
             if out.json {
                 Out::print_json(&json!({ "path": handoff::FILE, "folded": n }));
@@ -43,28 +40,26 @@ pub(crate) fn run(cmd: HandoffCommand, out: Out) -> Result<(), Error> {
                     handoff::FILE
                 ));
             }
-            Ok(())
         }
         HandoffCommand::Clear => {
-            let Some(root) = root.filter(|_| have.is_some()) else {
-                return none(out);
-            };
             handoff::clear(&root);
             if out.json {
                 Out::print_json(&json!({ "path": handoff::FILE, "removed": true }));
             } else {
                 Out::note(&format!("iohr handoff: removed {}", handoff::FILE));
             }
-            Ok(())
         }
     }
+    Ok(())
 }
 
-fn none(out: Out) -> Result<(), Error> {
+fn none(out: Out) {
     if out.json {
         Out::print_json(&json!({ "path": handoff::FILE, "runs": 0 }));
     } else {
-        Out::note(&format!("iohr handoff: no {} in this project", handoff::FILE));
+        Out::note(&format!(
+            "iohr handoff: no {} in this project",
+            handoff::FILE
+        ));
     }
-    Ok(())
 }

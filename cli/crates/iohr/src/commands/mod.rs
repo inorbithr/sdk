@@ -141,7 +141,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Coordinator(cmd) => coordinator::run(g, &env, cmd, out).await,
         Command::Context(args) => folder_context::run(g, &args, out),
         Command::Memory(cmd) => memory::run(g, &env, cmd, out).await,
-        Command::Handoff(cmd) => handoff::run(cmd, out),
+        Command::Handoff(cmd) => handoff::run(&cmd, out),
         Command::Connectors(cmd) => connectors::run(g, &env, cmd, out).await,
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
