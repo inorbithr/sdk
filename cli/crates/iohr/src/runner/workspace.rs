@@ -5,8 +5,11 @@
 //! worktree of one bare mirror per repository (`<workdir>/../mirrors/<owner>/<repo>.git`,
 //! fetched, never cloned again), started from `origin/main`, or from `origin/job/<id>`
 //! when an earlier attempt pushed it. A retry finds the checkout and reuses it as it is:
-//! the same job's work, never another's, and nothing is ever deleted. A checkout that
-//! cannot be made means the lease is not accepted.
+//! the same job's work, never another's. A checkout that cannot be made means the lease
+//! is not accepted. The runner holds the checkout's lock ([`Workspaces::hold`]) from
+//! before it is made until the lease's work has ended, so a prune
+//! ([`super::hygiene`]) never removes a checkout a live lease uses; what nothing has
+//! used for `workspace_keep_days` is removed.
 //!
 //! After a shaped reply the runner (never the model, which has no shell) commits what the
 //! turn changed, by name, pushes `job/<id>` without force, and opens the pull request, or
@@ -51,6 +54,12 @@ const FETCH_TIMEOUT: Duration = Duration::from_mins(15);
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 /// One `gh` call.
 const GH_TIMEOUT: Duration = Duration::from_secs(60);
+/// The longest [`Workspaces::hold`] waits for a prune that holds the checkout.
+const HOLD_WAIT: Duration = if cfg!(test) {
+    Duration::from_millis(300)
+} else {
+    Duration::from_secs(30)
+};
 /// The longest pull request body sent (GitHub's own cap is 65,536 characters).
 const BODY_MAX: usize = 60_000;
 /// The longest title accepted as a Conventional Commit.
@@ -340,7 +349,7 @@ fn valid_repository(r: &str) -> Result<(&str, &str), String> {
 }
 
 /// `job_` and letters or digits: it names a directory and a branch.
-fn valid_job_id(id: &str) -> Result<(), String> {
+pub(crate) fn valid_job_id(id: &str) -> Result<(), String> {
     let ok = id.len() <= 64
         && id
             .strip_prefix("job_")
@@ -586,6 +595,29 @@ impl Workspaces {
             self.mirrors.join(owner).join(format!("{name}.git")),
             format!("{}/{owner}/{name}.git", self.remote_base),
         ))
+    }
+
+    /// Holds `job_id`'s checkout for a live lease, so no prune (of this runner or another
+    /// on the machine) removes it until the [`super::hygiene::Hold`] is dropped. Waits up
+    /// to [`HOLD_WAIT`] for another holder, then refuses.
+    pub(crate) async fn hold(&self, job_id: &str) -> Result<super::hygiene::Hold, String> {
+        valid_job_id(job_id)?;
+        let checkouts = self.workdir.join("checkouts");
+        let deadline = tokio::time::Instant::now() + HOLD_WAIT;
+        loop {
+            let (dir, job) = (checkouts.clone(), job_id.to_owned());
+            let got = tokio::task::spawn_blocking(move || super::hygiene::try_hold(&dir, &job))
+                .await
+                .map_err(|e| format!("its checkout could not be held: {e}"))?;
+            match got {
+                Ok(Some(h)) => return Ok(h),
+                Ok(None) if tokio::time::Instant::now() < deadline => {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                Ok(None) => return Err("its checkout is held by another runner process".into()),
+                Err(e) => return Err(format!("its checkout could not be held: {e}")),
+            }
+        }
     }
 
     /// Makes, or finds again, the checkout of `job_id` in `repository`, reaching GitHub

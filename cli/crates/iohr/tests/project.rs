@@ -18,6 +18,11 @@ fn iohr(home: &Path, args: &[&str]) -> Output {
 
 /// The same, run from `cwd`.
 fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
+    iohr_env(home, cwd, &[], args)
+}
+
+/// The same, with `vars` set in the environment as well.
+fn iohr_env(home: &Path, cwd: &Path, vars: &[(&str, &str)], args: &[&str]) -> Output {
     let path = std::env::var_os("PATH").unwrap_or_default();
     // The run's HOME is a temp folder, so the toolchain manager keeps pointing at the real one
     // (the smoke test runs the language's own test command).
@@ -38,6 +43,7 @@ fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("IOHR_CONFIG_DIR", home.join("config"))
+        .envs(vars.iter().copied())
         .stdin(Stdio::null())
         .output()
         .unwrap()
@@ -66,17 +72,23 @@ fn create_is_init() {
             "project",
             "create",
             "made",
+            "--set",
+            "license=MIT",
             "--dir",
             dir.to_str().unwrap(),
             "--no-smoke",
         ],
     );
     assert!(out.status.success(), "{}", text(&out));
-    assert!(dir.join("extension.toml").is_file());
     assert!(
-        !dir.join("coordination.toml").exists(),
-        "the built-in default is demo"
+        dir.join("coordination.toml").is_file(),
+        "every template names the project's plan"
     );
+    assert!(
+        dir.join(".github/workflows/ci.yml").is_file(),
+        "the built-in default is service, with the enterprise floor (PRD 0088.1)"
+    );
+    assert!(!dir.join("extension.toml").exists());
     assert!(
         h.path()
             .join(".inorbit/projects/made/project.toml")
@@ -95,17 +107,19 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     assert!(t.starts_with("NAME"), "{t}");
     for (name, status) in [
         ("blank", "live"),
-        ("demo", "live"),
-        ("coordinated", "live"),
-        ("macos-app", "coming"),
-        ("ui-panel", "coming"),
+        ("service", "live"),
+        ("mcp-server", "live"),
+        ("agent", "live"),
+        ("evals", "live"),
+        ("cli", "live"),
+        ("extension", "live"),
     ] {
         let row = t.lines().find(|l| l.starts_with(name)).unwrap_or_default();
         assert!(row.contains(status), "{name}: {t}");
     }
     assert!(
         t.lines()
-            .find(|l| l.starts_with("demo"))
+            .find(|l| l.starts_with("service"))
             .unwrap()
             .contains('*')
     );
@@ -114,53 +128,36 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     let out = iohr(h.path(), &["project", "templates", "--json"]);
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let rows = v.as_array().unwrap();
-    assert_eq!(rows.len(), 5);
-    // `blank` is listed first, after the menu's "Describe it"; demo keeps its own description.
+    assert_eq!(rows.len(), 7);
+    // `blank` is listed first, after the menu's "Describe it".
     assert_eq!(rows[0]["name"], "blank");
-    assert_eq!(rows[0]["description"], "An empty project in your language");
-    assert_eq!(rows[1]["name"], "demo");
-    assert_eq!(rows[2]["status"], "live");
-    assert_eq!(rows[3]["status"], "coming");
+    assert_eq!(
+        rows[0]["description"],
+        "A starter project in your language: one runnable file, Roles and memory"
+    );
+    assert_eq!(rows[1]["name"], "service");
+    assert!(rows.iter().all(|r| r["status"] == "live"));
 }
 
 #[test]
-fn the_flag_beats_the_config_which_beats_demo() {
+fn the_flag_beats_the_config_which_beats_service() {
     let h = tempfile::tempdir().unwrap();
-    config(h.path(), "[project]\ntemplate = \"coordinated\"\n");
+    config(h.path(), "[project]\ntemplate = \"cli\"\n");
+    let (one, two, three) = (h.path().join("a"), h.path().join("b"), h.path().join("c"));
 
     // The config's template when there is no flag.
-    let first = h.path().join("a");
-    let out = iohr(
-        h.path(),
-        &[
-            "project",
-            "create",
-            "proj-a",
-            "--dir",
-            first.to_str().unwrap(),
-            "--no-smoke",
-        ],
-    );
+    let out = iohr(h.path(), &go_create("proj-a", one.to_str().unwrap(), &[]));
     assert!(out.status.success(), "{}", text(&out));
-    assert!(first.join("coordination.toml").is_file());
+    assert!(one.join("golden/greet.txt").is_file(), "the cli template");
 
     // The flag over the config.
-    let second = h.path().join("b");
     let out = iohr(
         h.path(),
-        &[
-            "project",
-            "create",
-            "proj-b",
-            "--template",
-            "demo",
-            "--dir",
-            second.to_str().unwrap(),
-            "--no-smoke",
-        ],
+        &go_create("proj-b", two.to_str().unwrap(), &["--template", "service"]),
     );
     assert!(out.status.success(), "{}", text(&out));
-    assert!(!second.join("coordination.toml").exists());
+    assert!(two.join("server.go").is_file(), "the service template");
+    assert!(!two.join("golden").exists());
 
     // The listing marks the configured default.
     let out = iohr(h.path(), &["project", "templates", "--json"]);
@@ -172,7 +169,31 @@ fn the_flag_beats_the_config_which_beats_demo() {
         .filter(|t| t["default"] == true)
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(default, ["coordinated"]);
+    assert_eq!(default, ["cli"]);
+
+    // With neither, service.
+    std::fs::remove_file(h.path().join("config/config.toml")).unwrap();
+    let out = iohr(h.path(), &go_create("proj-c", three.to_str().unwrap(), &[]));
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(three.join("server.go").is_file());
+}
+
+/// `project create NAME` in Go, answered, with the smoke test off, plus `extra`.
+fn go_create<'a>(name: &'a str, dir: &'a str, extra: &[&'a str]) -> Vec<&'a str> {
+    let mut a = vec![
+        "project",
+        "create",
+        name,
+        "--set",
+        "license=MIT",
+        "--lang",
+        "go",
+        "--dir",
+        dir,
+        "--no-smoke",
+    ];
+    a.extend_from_slice(extra);
+    a
 }
 
 #[test]
@@ -186,7 +207,7 @@ fn a_template_that_is_coming_still_refuses_and_says_what_is_live() {
             "create",
             "proj-c",
             "--template",
-            "ui-panel",
+            "macos-app",
             "--dir",
             d.to_str().unwrap(),
             "--no-smoke",
@@ -194,9 +215,9 @@ fn a_template_that_is_coming_still_refuses_and_says_what_is_live() {
     );
     assert!(!out.status.success());
     let t = text(&out);
-    assert!(t.contains("coming") && t.contains("`coordinated`"), "{t}");
+    assert!(t.contains("coming") && t.contains("`service`"), "{t}");
     assert!(!d.exists());
-    config(h.path(), "[project]\ntemplate = \"macos-app\"\n");
+    config(h.path(), "[project]\ntemplate = \"ui-panel\"\n");
     let out = iohr(
         h.path(),
         &[
@@ -283,6 +304,8 @@ fn a_user_template_answers_set_answers_yes_and_when() {
             "--template",
             "probe",
             "--set",
+            "license=MIT",
+            "--set",
             "kind=beta",
             "--set",
             "extra=hi",
@@ -311,6 +334,8 @@ fn a_user_template_answers_set_answers_yes_and_when() {
             "two",
             "--template",
             "probe",
+            "--set",
+            "license=MIT",
             "--answers",
             f.to_str().unwrap(),
             "--dir",
@@ -335,6 +360,8 @@ fn a_user_template_answers_set_answers_yes_and_when() {
             "three",
             "--template",
             "probe",
+            "--set",
+            "license=MIT",
             "--dir",
             d3.to_str().unwrap(),
             "--no-smoke",
@@ -353,6 +380,8 @@ fn a_user_template_answers_set_answers_yes_and_when() {
             "--template",
             "probe",
             "--set",
+            "license=MIT",
+            "--set",
             "kind=gamma",
             "--dir",
             d4.to_str().unwrap(),
@@ -368,6 +397,8 @@ fn a_user_template_answers_set_answers_yes_and_when() {
             "four",
             "--template",
             "probe",
+            "--set",
+            "license=MIT",
             "--set",
             "nope=1",
             "--dir",
@@ -434,6 +465,8 @@ fn a_template_from_a_path_beats_the_user_folder() {
         &[
             "project",
             "init",
+            "--set",
+            "license=MIT",
             "pp",
             "--template",
             p.to_str().unwrap(),
@@ -556,16 +589,11 @@ fn dry_run_changes_nothing_on_every_built_in_and_never_starts_the_agent() {
                 h.path(),
                 &h.path().join("bin"),
                 &[
-                    "project",
-                    "init",
-                    &format!("{id}-x"),
-                    "--template",
-                    id,
-                    "--dir",
-                    d.to_str().unwrap(),
-                    flag,
-                    "--yes",
-                ],
+                    &["project", "init", &format!("{id}-x"), "--template", id][..],
+                    licence(id),
+                    &["--dir", d.to_str().unwrap(), flag, "--yes"],
+                ]
+                .concat(),
             );
             let t = text(&o);
             assert!(o.status.success(), "{id}: {t}");
@@ -596,6 +624,8 @@ fn dry_run_changes_nothing_on_every_built_in_and_never_starts_the_agent() {
             "jj",
             "--template",
             "probe",
+            "--set",
+            "license=MIT",
             "--describe",
             "do a thing",
             "--dir",
@@ -645,6 +675,8 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
             "my-shop",
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--dry-run",
             "--yes",
         ],
@@ -652,7 +684,7 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
     assert!(out.status.success(), "{}", text(&out));
     let t = text(&out);
     assert!(
-        t.contains("would: write 35 files into ./my-shop (in the folder you are in)"),
+        t.contains("would: write 94 files into ./my-shop (in the folder you are in)"),
         "{t}"
     );
     assert!(
@@ -676,6 +708,8 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
             "my-shop",
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--dry-run",
             "--yes",
             "--json",
@@ -707,6 +741,8 @@ fn a_folder_that_is_not_empty_is_refused_and_dotfiles_alone_are_fine() {
         "my-shop",
         "--template",
         "demo",
+        "--set",
+        "license=MIT",
         "--yes",
         "--no-smoke",
     ];
@@ -741,6 +777,8 @@ fn inside_a_git_repository_the_dry_run_warns_that_it_would_nest() {
             "my-shop",
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--dry-run",
             "--yes",
             "--json",
@@ -771,6 +809,8 @@ fn lang_picks_the_variant_and_a_wrong_one_is_refused() {
                 "my-shop",
                 "--template",
                 "demo",
+                "--set",
+                "license=MIT",
                 "--lang",
                 lang,
                 "--dry-run",
@@ -798,6 +838,8 @@ fn lang_picks_the_variant_and_a_wrong_one_is_refused() {
             "my-shop",
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--lang",
             "cobol",
             "--dry-run",
@@ -819,6 +861,8 @@ fn lang_picks_the_variant_and_a_wrong_one_is_refused() {
             "my-shop",
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--lang",
             "go",
             "--set",
@@ -860,6 +904,8 @@ fn every_live_language_scaffolds_and_its_smoke_test_passes_when_its_toolchain_is
             &name,
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--lang",
             lang,
             "--yes",
@@ -921,8 +967,8 @@ fn template_list_columns_and_a_piped_run_has_no_footer_or_colour() {
         ["NAME", "STATUS", "ORIGIN", "DEFAULT", "DESCRIPTION"],
         "{t}"
     );
-    let demo = t.lines().find(|l| l.starts_with("demo")).unwrap();
-    assert!(demo.contains(" * "), "the default is marked: {demo}");
+    let def = t.lines().find(|l| l.starts_with("service")).unwrap();
+    assert!(def.contains(" * "), "the default is marked: {def}");
     assert!(!t.contains("(default)"), "{t}");
     assert!(t.contains("user: ~/.inorbit/templates/probe"), "{t}");
     assert!(!t.contains("Next:"), "a pipe gets data only: {t}");
@@ -1025,7 +1071,10 @@ fn show_json_carries_everything() {
         got["agent"]["describe_prompt"],
         "Make @@NAME@@ do @@KIND@@."
     );
-    let q = got["questions"].as_array().unwrap();
+    // The questions it inherits come first (the base's, the floor's), its own after them.
+    let all = got["questions"].as_array().unwrap();
+    let at = all.iter().position(|q| q["key"] == "kind").unwrap();
+    let q = &all[at..];
     assert_eq!(q[0]["key"], "kind");
     assert_eq!(q[0]["type"], "choice");
     assert_eq!(q[0]["choices"], serde_json::json!(["alpha", "beta"]));
@@ -1041,12 +1090,12 @@ fn show_json_carries_everything() {
 
     let built_in = iohr(
         home.path(),
-        &["project", "template", "show", "demo", "--json"],
+        &["project", "template", "show", "coordinated", "--json"],
     );
     let built_in: serde_json::Value = serde_json::from_slice(&built_in.stdout).unwrap();
     assert_eq!(built_in["origin"]["kind"], "built-in");
     assert!(built_in["path"].is_null());
-    assert_eq!(built_in["default"], true);
+    assert_eq!(built_in["default"], false);
 }
 
 #[test]
@@ -1075,7 +1124,7 @@ fn show_lists_the_languages_a_template_offers_in_text_and_in_json() {
         .lines()
         .find(|l| l.trim_start().starts_with("go "))
         .unwrap();
-    assert!(go.contains("live") && go.contains("Go 1.22"), "{go}");
+    assert!(go.contains("live") && go.contains("Go 1.26"), "{go}");
     let py = t
         .lines()
         .find(|l| l.trim_start().starts_with("python "))
@@ -1181,7 +1230,41 @@ fn init_described(
 }
 
 #[cfg(unix)]
+/// The scaffold's commit, then the agent's work as its own AI-labelled commit, tree clean.
+fn assert_two_commits_the_second_ai_built(d: &Path) {
+    let git = |a: &[&str]| {
+        String::from_utf8_lossy(
+            &std::process::Command::new("git")
+                .arg("-C")
+                .arg(d)
+                .args(a)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .into_owned()
+    };
+    let log = git(&["log", "--format=%s"]);
+    assert_eq!(log.lines().count(), 2, "{log}");
+    assert!(
+        log.lines()
+            .next()
+            .unwrap()
+            .contains("AI-built changes by claude"),
+        "{log}"
+    );
+    assert!(
+        git(&["status", "--porcelain"]).is_empty(),
+        "the tree is committed"
+    );
+}
+
+#[cfg(unix)]
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one run checked from its arguments to its smoke test"
+)]
 fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test() {
     if !on_path("python3") {
         return;
@@ -1207,9 +1290,41 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
     assert!(args.contains(&"-p".to_owned()), "{args:?}");
     assert!(has("--output-format", "stream-json"), "{args:?}");
     assert!(has("--permission-mode", "acceptEdits"), "{args:?}");
-    assert!(has("--disallowedTools", "Bash"), "{args:?}");
+    // The language's own commands are allowed by prefix, the web is allowed, and the rest of the
+    // shell is not (no blanket `Bash` denial, which would beat the scoped allows); secrets stay
+    // unreadable.
+    assert!(!has("--disallowedTools", "Bash"), "{args:?}");
     assert!(
-        has("--max-turns", "40") && has("--model", "haiku"),
+        args.contains(&"Bash(python3 -m unittest:*)".to_owned()),
+        "{args:?}"
+    );
+    assert!(
+        args.contains(&"WebSearch".to_owned()) && args.contains(&"WebFetch".to_owned()),
+        "{args:?}"
+    );
+    // The project's own commands (atlas, memory) are allowed by prefix, named by the binary
+    // that ran; no curl and no network shell.
+    assert!(
+        args.iter()
+            .any(|a| a.starts_with("Bash(") && a.contains(" atlas new:*)")),
+        "{args:?}"
+    );
+    assert!(
+        args.iter().any(|a| a.contains(" memory remember:*)")),
+        "{args:?}"
+    );
+    assert!(
+        !args
+            .iter()
+            .any(|a| a.starts_with("Bash(") && a.contains("curl")),
+        "{args:?}"
+    );
+    assert!(
+        args.contains(&"--disallowedTools=Read(./.env)".to_owned()),
+        "{args:?}"
+    );
+    assert!(
+        has("--max-turns", "150") && has("--model", "sonnet"),
         "{args:?}"
     );
     // The prompt is several lines (the file holds one argument line by line): the description
@@ -1221,7 +1336,7 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
     );
     let today = args
         .iter()
-        .find(|l| l.starts_with("Today is "))
+        .find(|l| l.starts_with("- Today is "))
         .unwrap_or_else(|| panic!("no dated line: {args:?}"));
     assert!(
         today.contains("Use the newest edition or version published as of today;")
@@ -1229,16 +1344,27 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
         "{today}"
     );
     assert!(
-        today.as_bytes()[9..13].iter().all(u8::is_ascii_digit),
+        today.as_bytes()[11..15].iter().all(u8::is_ascii_digit),
         "{today}"
     );
-    assert!(&today[9..19] >= "2026-11-05", "{today}");
+    assert!(&today[11..21] >= "2026-11-05", "{today}");
+    assert!(
+        args.iter()
+            .any(|l| l.starts_with("- Installed toolchain: Python ")),
+        "{args:?}"
+    );
+    assert!(
+        args.iter().any(|l| l.contains("upstream repository")),
+        "{args:?}"
+    );
     let cwd = std::fs::read_to_string(h.path().join("out/cwd")).unwrap();
     assert_eq!(
         std::fs::canonicalize(cwd.trim()).unwrap(),
         std::fs::canonicalize(&d).unwrap()
     );
     assert!(d.join("built.txt").is_file());
+    assert_two_commits_the_second_ai_built(&d);
+    assert!(t.contains("done: the agent's work committed"), "{t}");
     // The smoke test ran on what the agent left, and the report says so.
     assert!(t.contains("done: smoke test, `python3 -m unittest"), "{t}");
     assert!(t.contains("done: agent build"), "{t}");
@@ -1307,6 +1433,37 @@ fn a_failing_or_stuck_agent_keeps_the_scaffold_exits_non_zero_and_says_how_to_re
     assert_eq!(o.status.code(), Some(1), "{t}");
     assert!(t.contains("did not finish in 1 s and was stopped"), "{t}");
     assert!(d.join("inorbit.toml").is_file());
+    // A run that hits its turn cap says so, prints how to continue and leaves a handoff note
+    // with what was asked, what was written and the agent's last words.
+    let h = tempfile::tempdir().unwrap();
+    let (o, d) = init_described(
+        h.path(),
+        &["--no-smoke", "--agent-turns", "7"],
+        "ask-claude-capped.jsonl",
+        "",
+        "1",
+    );
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{t}");
+    assert!(
+        t.contains("used all its 7 turns") && t.contains(".inorbit/handoff.md"),
+        "{t}"
+    );
+    assert!(
+        t.contains("ask --allow-edits \"continue the work\"") && t.contains("--agent-turns"),
+        "{t}"
+    );
+    let note = std::fs::read_to_string(d.join(".inorbit/handoff.md")).unwrap();
+    for want in [
+        "a watcher that logs a line",
+        "built.txt",
+        "> I wrote the first PRD. Left: the ADRs and the studies.",
+        "used all its 7 turns",
+    ] {
+        assert!(note.contains(want), "missing {want}: {note}");
+    }
+    // The timed-out run left a note too.
+    assert!(d.join("inorbit.toml").is_file());
     // The dry run starts nothing and shows the command it would run, bounds included.
     let h = tempfile::tempdir().unwrap();
     let (o, d) = init_described(h.path(), &["--dry-run", "--agent-turns", "9"], "", "", "0");
@@ -1321,6 +1478,123 @@ fn a_failing_or_stuck_agent_keeps_the_scaffold_exits_non_zero_and_says_how_to_re
     assert!(!d.exists() && !h.path().join("out/args").exists());
 }
 
+/// The documents variant of the blank template is a project of atlas and memory: no program, no
+/// smoke test, AGENTS.md names the binary that made it, and `atlas sync --dry-run` is its check.
+#[test]
+fn the_documents_language_makes_an_atlas_and_memory_project_with_no_smoke_test() {
+    let h = tempfile::tempdir().unwrap();
+    let d = h.path().join("w/kb");
+    let o = iohr(
+        h.path(),
+        &[
+            "project",
+            "init",
+            "kb",
+            "--template",
+            "blank",
+            "--lang",
+            "docs",
+            "--dir",
+            d.to_str().unwrap(),
+            "--yes",
+        ],
+    );
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(!t.contains("smoke test"), "{t}");
+    for f in ["atlas", ".inorbit/memory", "AGENTS.md", "README.md"] {
+        assert!(d.join(f).exists(), "{f}: {t}");
+    }
+    assert!(!d.join("src").exists() && !d.join("tests").exists());
+    let agents = std::fs::read_to_string(d.join("AGENTS.md")).unwrap();
+    assert!(
+        agents.contains("atlas new") && agents.contains("memory remember"),
+        "{agents}"
+    );
+}
+
+/// Init writes a starter IO.md at the project root naming the binary that ran it, `--no-io-md`
+/// skips it, and an IO.md or io.md the person already has is never touched.
+#[test]
+fn init_writes_a_starter_io_md_and_never_overwrites_one() {
+    let h = tempfile::tempdir().unwrap();
+    let d = h.path().join("w/starter");
+    let o = iohr(
+        h.path(),
+        &[
+            "project",
+            "init",
+            "starter",
+            "--template",
+            "blank",
+            "--dir",
+            d.to_str().unwrap(),
+            "--no-smoke",
+            "--yes",
+        ],
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    let io = std::fs::read_to_string(d.join("IO.md")).unwrap();
+    assert!(
+        io.contains("starter") && io.to_lowercase().contains("test"),
+        "{io}"
+    );
+    assert!(io.contains(" context"), "{io}");
+
+    let skip = h.path().join("w/skip");
+    let o = iohr(
+        h.path(),
+        &[
+            "project",
+            "init",
+            "skip",
+            "--template",
+            "blank",
+            "--dir",
+            skip.to_str().unwrap(),
+            "--no-smoke",
+            "--no-io-md",
+            "--yes",
+        ],
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(!skip.join("IO.md").exists() && !skip.join("io.md").exists());
+
+    // Run again in its own folder: an IO.md the person edited, or an io.md in its place, stays.
+    let args = [
+        "project",
+        "init",
+        "starter",
+        "--template",
+        "blank",
+        "--dir",
+        d.to_str().unwrap(),
+        "--no-smoke",
+        "--yes",
+    ];
+    std::fs::write(d.join("IO.md"), "MY OWN RULES\n").unwrap();
+    let o = iohr(h.path(), &args);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(
+        std::fs::read_to_string(d.join("IO.md")).unwrap(),
+        "MY OWN RULES\n"
+    );
+    std::fs::remove_file(d.join("IO.md")).unwrap();
+    std::fs::write(d.join("io.md"), "lower case\n").unwrap();
+    let o = iohr(h.path(), &args);
+    assert!(o.status.success(), "{}", text(&o));
+    let names: Vec<String> = std::fs::read_dir(&d)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.eq_ignore_ascii_case("io.md"))
+        .collect();
+    assert_eq!(names, ["io.md"], "no second spelling is written");
+    assert_eq!(
+        std::fs::read_to_string(d.join("io.md")).unwrap(),
+        "lower case\n"
+    );
+}
+
 /// Every template's init writes `.inorbit/space` (RFC 0103), committed with the first commit,
 /// and no template's ignore file excludes `.inorbit/`.
 #[test]
@@ -1331,16 +1605,11 @@ fn every_template_writes_the_space_link_and_git_commits_it() {
         let o = iohr(
             h.path(),
             &[
-                "project",
-                "init",
-                &format!("{id}-x"),
-                "--template",
-                id,
-                "--dir",
-                d.to_str().unwrap(),
-                "--no-smoke",
-                "--yes",
-            ],
+                &["project", "init", &format!("{id}-x"), "--template", id][..],
+                licence(id),
+                &["--dir", d.to_str().unwrap(), "--no-smoke", "--yes"],
+            ]
+            .concat(),
         );
         assert!(o.status.success(), "{id}: {}", text(&o));
         let link = std::fs::read_to_string(d.join(".inorbit/space")).unwrap();
@@ -1405,4 +1674,209 @@ fn every_blank_language_passes_the_smoke_test_through_init() {
         );
         assert!(!t.to_lowercase().contains("macos"), "{lang}: {t}");
     }
+}
+
+/// `project create` with the default template, signed out (no token anywhere), as JSON.
+/// The licence answer every floor template asks; `blank` has no such question.
+fn licence(template: &str) -> &'static [&'static str] {
+    if template == "blank" {
+        &[]
+    } else {
+        &["--set", "license=MIT"]
+    }
+}
+
+fn made(h: &Path, name: &str, extra: &[&str]) -> (Output, std::path::PathBuf, serde_json::Value) {
+    let dir = h.join(name);
+    let mut args = vec!["project", "create", name];
+    // The extension template unless the test names one; every floor template asks the licence.
+    let template = extra
+        .iter()
+        .position(|a| *a == "--template")
+        .and_then(|i| extra.get(i + 1).copied());
+    if template.is_none() {
+        args.extend(["--template", "extension"]);
+    }
+    if !matches!(template, Some("blank")) {
+        args.extend(["--set", "license=MIT"]);
+    }
+    args.extend(["--dir", dir.to_str().unwrap(), "--no-smoke", "--json"]);
+    args.extend_from_slice(extra);
+    let out = iohr(h, &args);
+    let v = serde_json::from_slice(&out.stdout).unwrap_or(serde_json::Value::Null);
+    (out, dir, v)
+}
+
+fn plan_step(v: &serde_json::Value) -> serde_json::Value {
+    v["steps"]
+        .as_array()
+        .and_then(|s| s.iter().find(|s| s["id"] == "plan"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null)
+}
+
+#[test]
+fn init_signed_out_leaves_the_plan_id_empty_and_says_how_to_set_it() {
+    let h = tempfile::tempdir().unwrap();
+    let (out, dir, v) = made(h.path(), "plain", &[]);
+    assert!(out.status.success(), "{}", text(&out));
+    // The default template is the coordinated one.
+    let manifest = std::fs::read_to_string(dir.join("coordination.toml")).unwrap();
+    let t: toml::Table = manifest.parse().unwrap();
+    assert_eq!(t["plan"]["id"].as_str(), Some(""));
+    let st = plan_step(&v);
+    assert_eq!(st["state"], "skipped", "{v}");
+    let said = st["said"].as_str().unwrap();
+    assert!(said.starts_with("you are not signed in;"), "{said}");
+    assert!(
+        said.contains("iohr coordinator plan create plain --external-id project:plain"),
+        "{said}"
+    );
+    // The project itself is fine.
+    assert!(dir.join("extension.toml").is_file());
+}
+
+/// A session that exists but cannot be used is not "not signed in": a token for another
+/// audience says so, and init still finishes with the step skipped.
+#[test]
+fn init_with_a_token_for_another_audience_says_why_the_plan_was_skipped() {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let enc = |v: serde_json::Value| URL_SAFE_NO_PAD.encode(v.to_string());
+    let bad = format!(
+        "{}.{}.SIG",
+        enc(serde_json::json!({"alg": "RS256"})),
+        enc(serde_json::json!({"sub": "x", "aud": ["somewhere-else"], "exp": 4_102_444_800_i64}))
+    );
+    let h = tempfile::tempdir().unwrap();
+    let dir = h.path().join("aud");
+    let out = iohr_env(
+        h.path(),
+        h.path(),
+        &[("IOHR_TOKEN", bad.as_str())],
+        &[
+            "project",
+            "create",
+            "--template",
+            "extension",
+            "--set",
+            "license=MIT",
+            "aud",
+            "--dir",
+            dir.to_str().unwrap(),
+            "--no-smoke",
+            "--json",
+        ],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let said = plan_step(&v)["said"].as_str().unwrap().to_owned();
+    assert!(
+        said.contains("your session cannot be used") && said.contains("not for the InOrbit API"),
+        "{said}"
+    );
+    assert!(!said.contains("not signed in"), "{said}");
+    assert!(dir.join("extension.toml").is_file());
+}
+
+#[test]
+fn init_no_plan_and_plan_id_and_dry_run() {
+    let h = tempfile::tempdir().unwrap();
+    let (out, dir, v) = made(h.path(), "none", &["--no-plan"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(plan_step(&v)["state"], "skipped");
+    assert!(
+        plan_step(&v)["said"]
+            .as_str()
+            .unwrap()
+            .contains("--no-plan")
+    );
+    assert!(
+        std::fs::read_to_string(dir.join("coordination.toml"))
+            .unwrap()
+            .contains("id = \"\"")
+    );
+
+    // A named plan is written as given when you are signed out, and said to be unchecked.
+    let (out, dir, v) = made(h.path(), "named", &["--plan-id", "plan_01OWN"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(plan_step(&v)["state"], "done", "{v}");
+    assert!(
+        plan_step(&v)["said"]
+            .as_str()
+            .unwrap()
+            .contains("not checked")
+    );
+    let t: toml::Table = std::fs::read_to_string(dir.join("coordination.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(t["plan"]["id"].as_str(), Some("plan_01OWN"));
+    // The template's own comments survive the edit.
+    assert!(
+        std::fs::read_to_string(dir.join("coordination.toml"))
+            .unwrap()
+            .contains('#')
+    );
+
+    // A plan id that is not a slug is refused, and so are the two flags together.
+    let (out, dir, _) = made(h.path(), "bad", &["--plan-id", "../x"]);
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    assert!(!dir.exists(), "nothing is written for a refused id");
+    let (out, _, _) = made(h.path(), "both", &["--no-plan", "--plan-id", "plan_1"]);
+    assert!(!out.status.success());
+
+    // A dry run writes nothing and makes no call: the step is a `would`.
+    let dir = h.path().join("dry");
+    let out = iohr(
+        h.path(),
+        &[
+            "project",
+            "create",
+            "--template",
+            "extension",
+            "--set",
+            "license=MIT",
+            "dry",
+            "--dir",
+            dir.to_str().unwrap(),
+            "--dry-run",
+        ],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!dir.exists());
+    assert!(
+        text(&out).contains("Planner plan"),
+        "the plan step is in the plan: {}",
+        text(&out)
+    );
+}
+
+#[test]
+fn the_demo_template_has_the_plan_step_like_every_template() {
+    let h = tempfile::tempdir().unwrap();
+    let (out, dir, v) = made(h.path(), "plaindemo", &["--template", "demo"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(dir.join("coordination.toml").is_file());
+    // The plan is still made or found (the shape item is filed in it), so the step always
+    // prints a mark or a reason; signed out, it is a skip that says why.
+    let st = plan_step(&v);
+    assert!(!st.is_null(), "{v}");
+    assert_eq!(st["state"], "skipped", "{v}");
+    assert!(st["said"].as_str().is_some_and(|s| !s.is_empty()), "{v}");
+}
+
+#[test]
+fn a_blank_project_kept_local_makes_no_plan_and_says_so() {
+    let h = tempfile::tempdir().unwrap();
+    let (out, dir, v) = made(h.path(), "localdemo", &["--template", "demo", "--no-sync"]);
+    assert!(out.status.success(), "{}", text(&out));
+    // Every template but blank ships coordination.toml now (the demo is the extension); kept
+    // local, no plan is made, so its `[plan] id` stays empty.
+    let file = std::fs::read_to_string(dir.join("coordination.toml")).unwrap();
+    let t: toml::Table = file.parse().unwrap();
+    assert_eq!(t["plan"]["id"].as_str(), Some(""), "{file}");
+    let st = plan_step(&v);
+    assert_eq!(st["state"], "skipped", "{v}");
+    assert!(st["said"].as_str().unwrap().contains("--no-sync"), "{v}");
 }

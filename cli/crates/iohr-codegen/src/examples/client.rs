@@ -14,13 +14,13 @@
 //! - the client is closed when the runtime gives it a close: Go (`defer api.Close()`),
 //!   Python (`with`), C# (`using var`); TypeScript (fetch), Java (JDK 17 `HttpClient`),
 //!   Swift (the session ends in `deinit`) and Rust (`Drop`) hold nothing to close;
-//! - Ctrl-C stops the program cleanly: Rust drops the call on `tokio::signal::ctrl_c`, so
-//!   streams and pages end and the client is closed; Python's `KeyboardInterrupt` leaves
-//!   its `with` blocks; the other runtimes, Go included, end the process, which closes
-//!   its connections;
+//! - Ctrl-C stops the program cleanly: Python's `KeyboardInterrupt` leaves its `with`
+//!   blocks; the other runtimes, Go and Rust included, end the process, which closes its
+//!   connections;
 //! - an API error prints its code, problem and request id on standard error and the
-//!   program exits with status 1 (Go's `log.Fatal` prints `APIError.Error`, which carries
-//!   them); any other error is left to the language's default, which also exits non-zero.
+//!   program exits with status 1 (Go's `log.Fatal` prints `APIError.Error` and Rust's
+//!   `main` prints the returned `Error`, which carry them); any other error is left to the
+//!   language's default, which also exits non-zero.
 
 /// The variable the examples call the operations on.
 pub const VAR: &str = "api";
@@ -179,36 +179,14 @@ pub const SWIFT: Construction = Construction {
     ],
 };
 
-/// Rust, on `inorbithr` and tokio: `run` returns the error and `main` maps it to the exit
-/// status; Ctrl-C drops `run`, which ends the call and drops the client.
+/// Rust, on `inorbithr` and tokio: `main` returns the error with `?`, and Rust prints a
+/// returned error (the API's code, message and request id) and exits with status 1.
 pub const RUST: Construction = Construction {
-    imports: &[
-        "inorbithr::Client",
-        "inorbithr::Error",
-        "std::process::ExitCode",
-    ],
+    imports: &["inorbithr::Client", "inorbithr::Error"],
     std: &[],
     program: &[
         "#[tokio::main]",
-        "async fn main() -> ExitCode {",
-        "    let result = tokio::select! {",
-        "        result = run() => result,",
-        "        _ = tokio::signal::ctrl_c() => Ok(()),",
-        "    };",
-        "    match result {",
-        "        Ok(()) => ExitCode::SUCCESS,",
-        "        Err(Error::Api(e)) => {",
-        "            eprintln!(\"{}: {} (request id {})\", e.code, e.message, e.raw.request_id);",
-        "            ExitCode::FAILURE",
-        "        }",
-        "        Err(e) => {",
-        "            eprintln!(\"{e}\");",
-        "            ExitCode::FAILURE",
-        "        }",
-        "    }",
-        "}",
-        "",
-        "async fn run() -> Result<(), Error> {",
+        "async fn main() -> Result<(), Error> {",
         "    // Reads INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET.",
         "    let api: Client = Client::from_env()?;",
         "    {body}",

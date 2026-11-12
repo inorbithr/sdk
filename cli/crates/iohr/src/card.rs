@@ -22,6 +22,60 @@ const RAIL: &str = "│  ";
 /// The braille spinner, one frame per tick.
 const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/// The spinner's frame for a tick: the one frame set the card, the terminal panel and its chat
+/// box all draw.
+pub(crate) fn spinner(frame: usize) -> &'static str {
+    FRAMES[frame % FRAMES.len()]
+}
+
+/// A colour as red, green, blue.
+pub(crate) type Rgb = (u8, u8, u8);
+
+/// The palette every drawn surface takes its colours from (the `?` card, the terminal panel).
+pub(crate) mod palette {
+    use super::Rgb;
+    pub(crate) const VIOLET: Rgb = (167, 139, 250);
+    pub(crate) const GREEN: Rgb = (74, 222, 128);
+    pub(crate) const CYAN: Rgb = (125, 211, 252);
+    pub(crate) const DIM: Rgb = (139, 144, 163);
+    pub(crate) const AMBER: Rgb = (251, 191, 36);
+    pub(crate) const RED: Rgb = (248, 113, 113);
+}
+
+/// The xterm 256-colour index nearest to `rgb`: the 6x6x6 cube or the grey ramp, whichever
+/// is closer (squared distance), for terminals without 24-bit colour.
+pub(crate) fn nearest_256(rgb: Rgb) -> u8 {
+    const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+    let dist = |a: Rgb, b: Rgb| -> u32 {
+        let d = |x: u8, y: u8| u32::from(x.abs_diff(y)).pow(2);
+        d(a.0, b.0) + d(a.1, b.1) + d(a.2, b.2)
+    };
+    let nearest_level = |v: u8| -> usize {
+        (0..LEVELS.len())
+            .min_by_key(|&i| LEVELS[i].abs_diff(v))
+            .unwrap_or(0)
+    };
+    let (ri, gi, bi) = (
+        nearest_level(rgb.0),
+        nearest_level(rgb.1),
+        nearest_level(rgb.2),
+    );
+    let cube = (LEVELS[ri], LEVELS[gi], LEVELS[bi]);
+    let cube_index = u8::try_from(16 + 36 * ri + 6 * gi + bi).unwrap_or(16);
+    // The grey ramp: 24 steps from 8 to 238.
+    let avg =
+        u8::try_from((u32::from(rgb.0) + u32::from(rgb.1) + u32::from(rgb.2)) / 3).unwrap_or(0);
+    let step = u8::try_from(((u32::from(avg).saturating_sub(8)) + 5) / 10)
+        .unwrap_or(23)
+        .min(23);
+    let grey = 8 + 10 * step;
+    if dist(rgb, (grey, grey, grey)) < dist(rgb, cube) {
+        232 + step
+    } else {
+        cube_index
+    }
+}
+
 /// How the card is drawn: colour or not, and 24-bit colour where the terminal has it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Look {
@@ -49,30 +103,52 @@ impl Look {
             s.color256(ansi)
         }
     }
-    fn violet(self) -> Style {
-        self.style((167, 139, 250), 141)
+
+    /// A style for any colours: the exact ones with 24-bit colour, else the nearest of the
+    /// 256 (the terminal panel's cells, which the palette's named styles do not cover).
+    #[cfg(unix)]
+    pub(crate) fn rgb(self, fg: Rgb, bg: Option<Rgb>) -> Style {
+        let mut s = Style::new().force_styling(self.fancy);
+        if self.truecolor {
+            s = s.true_color(fg.0, fg.1, fg.2);
+            if let Some(b) = bg {
+                s = s.on_true_color(b.0, b.1, b.2);
+            }
+        } else {
+            s = s.color256(nearest_256(fg));
+            if let Some(b) = bg {
+                s = s.on_color256(nearest_256(b));
+            }
+        }
+        s
     }
-    fn green(self) -> Style {
-        self.style((74, 222, 128), 114)
+    pub(crate) fn violet(self) -> Style {
+        self.style(palette::VIOLET, 141)
     }
-    fn cyan(self) -> Style {
-        self.style((125, 211, 252), 117)
+    pub(crate) fn green(self) -> Style {
+        self.style(palette::GREEN, 114)
     }
-    fn dim(self) -> Style {
-        self.style((139, 144, 163), 246)
+    pub(crate) fn cyan(self) -> Style {
+        self.style(palette::CYAN, 117)
     }
-    fn amber(self) -> Style {
-        self.style((251, 191, 36), 214)
+    pub(crate) fn dim(self) -> Style {
+        self.style(palette::DIM, 246)
+    }
+    pub(crate) fn amber(self) -> Style {
+        self.style(palette::AMBER, 214)
+    }
+    pub(crate) fn red(self) -> Style {
+        self.style(palette::RED, 203)
     }
     fn badge(self) -> Style {
         let s = Style::new().force_styling(self.fancy).black().bold();
         if self.truecolor {
-            s.on_true_color(167, 139, 250)
+            s.on_true_color(palette::VIOLET.0, palette::VIOLET.1, palette::VIOLET.2)
         } else {
             s.on_color256(141)
         }
     }
-    fn plain(self) -> Style {
+    pub(crate) fn plain(self) -> Style {
         Style::new().force_styling(self.fancy)
     }
 }
@@ -86,12 +162,25 @@ pub(crate) enum Body<'a> {
     Failed(&'a str),
 }
 
+/// One quiet row under the answer: what happened that the person chose, such as a command
+/// they allowed. Plain words in `text`; `detail` (a rule, a file) is dimmed under it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Status {
+    pub(crate) text: String,
+    pub(crate) detail: Option<String>,
+    /// A refusal, drawn in amber rather than green.
+    pub(crate) refused: bool,
+}
+
 /// One card.
 #[derive(Debug, Clone)]
 pub(crate) struct Card<'a> {
     /// The agent, as people read it: "Claude Code (local)".
     pub(crate) agent: &'a str,
     pub(crate) model: &'a str,
+    /// The `?` mode this answer ran in (`manual`, `plan` or `auto`), shown in the header
+    /// so the mode is never a guess; none for a run outside the three.
+    pub(crate) mode: Option<&'a str>,
     pub(crate) elapsed: Option<Duration>,
     /// The earlier question this one follows up, if any.
     pub(crate) follows: Option<&'a str>,
@@ -100,7 +189,7 @@ pub(crate) struct Card<'a> {
     /// The disclosure sentences that close a full footer.
     pub(crate) notice: &'a str,
     /// Whether the footer is the full disclosure (`read` and `notice`), or only `hint`. The
-    /// "AI answer" label in the header is on every card either way.
+    /// header's right side (engine, model, mode) is on every card either way.
     pub(crate) full: bool,
     /// The one-line label printed instead of a card when the look is plain.
     pub(crate) label: &'a str,
@@ -108,6 +197,9 @@ pub(crate) struct Card<'a> {
     pub(crate) hint: Option<&'a str>,
     /// The action row under the answer ([`crate::actions::row`]); drawn only by a fancy look.
     pub(crate) row: Option<&'a str>,
+    /// The status rows between the answer and the action row (the permission results of this
+    /// run); drawn only by a fancy look, the plain look prints them as notes.
+    pub(crate) status: &'a [Status],
     pub(crate) body: Body<'a>,
 }
 
@@ -187,6 +279,19 @@ pub(crate) fn render(card: &Card<'_>, width: usize, look: Look) -> String {
         }
     }
     let _ = writeln!(out, "{rail_end}");
+    for st in card.status {
+        let text = console::truncate_str(&st.text, inner.saturating_sub(2), "…");
+        let (mark, style) = if st.refused {
+            ("✗", look.amber())
+        } else {
+            ("✓", look.green())
+        };
+        let _ = writeln!(out, "{rail}{} {text}", style.apply_to(mark));
+        if let Some(d) = &st.detail {
+            let d = console::truncate_str(d, inner.saturating_sub(2), "…");
+            let _ = writeln!(out, "{rail}  {}", look.dim().apply_to(d));
+        }
+    }
     if let Some(row) = card.row {
         let row = console::truncate_str(row, inner, "…");
         let _ = writeln!(out, "{rail}{}", look.cyan().apply_to(row));
@@ -211,18 +316,59 @@ fn plain(card: &Card<'_>) -> String {
 }
 
 fn header(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
-    let badge = if matches!(card.body, Body::Failed(_)) {
-        " no answer "
+    let failed = matches!(card.body, Body::Failed(_));
+    // A good answer has no badge: the header is `Io` and the engine, model and mode on the right
+    // (they name the AI); only a failure is marked.
+    let badge = if failed { " no answer " } else { "" };
+    // A Role's card is titled with the Role (its agent reads `Role <name>`); every other is Io.
+    let (title, mut meta) = if card.agent.starts_with("Role ") {
+        (card.agent, vec![card.model.to_owned()])
     } else {
-        " AI answer "
+        ("Io", vec![card.agent.to_owned(), card.model.to_owned()])
     };
-    let mut meta = vec![card.agent.to_owned(), card.model.to_owned()];
+    if let Some(m) = card.mode {
+        meta.push(format!("{m} mode"));
+    }
     if let Some(d) = card.elapsed {
         meta.push(format!("{:.1}s", d.as_secs_f64()));
     }
-    let mut meta = meta.join(" · ");
-    // "╭─ ◆ Io " + badge + " " + filler + " " + meta
-    let fixed = measure_text_width("╭─ ◆ Io ") + measure_text_width(badge) + 2;
+    let _ = writeln!(
+        out,
+        "{}",
+        titled_line(title, badge, failed, &meta.join(" · "), width, look)
+    );
+}
+
+/// The top line of an Io card, `╭─ ◆ Io ` then the badge (none when it is empty), a rule and
+/// the dim `meta` at the right, `width` columns wide. The one header: the answer card, the permission ask and
+/// whatever draws an Io card next use it, so the AI label looks the same everywhere. `amber`
+/// draws the badge as a warning.
+#[must_use]
+pub(crate) fn header_line(
+    badge: &str,
+    amber: bool,
+    meta: &str,
+    width: usize,
+    look: Look,
+) -> String {
+    titled_line("Io", badge, amber, meta, width, look)
+}
+
+/// [`header_line`] with the card's own title: `Io`, or `Role <name>` on a Role's card, so a
+/// Role's answer or failure is never an unnamed `Io` card.
+fn titled_line(
+    title: &str,
+    badge: &str,
+    amber: bool,
+    meta: &str,
+    width: usize,
+    look: Look,
+) -> String {
+    let mut meta = meta.to_owned();
+    // "╭─ ◆ <title> " + badge + " " + filler + " " + meta (no badge: no space after it either)
+    let gap = if badge.is_empty() { "" } else { " " };
+    let fixed =
+        measure_text_width(&format!("╭─ ◆ {title} ")) + measure_text_width(badge) + gap.len() + 1;
     let room = width.saturating_sub(fixed + 2);
     if measure_text_width(&meta) > room {
         meta = console::truncate_str(&meta, room, "…").into_owned();
@@ -230,19 +376,18 @@ fn header(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
     let fill = width
         .saturating_sub(fixed + measure_text_width(&meta))
         .max(2);
-    let badge = if matches!(card.body, Body::Failed(_)) {
+    let badge = if amber {
         look.amber().bold().reverse().apply_to(badge).to_string()
     } else {
         look.badge().apply_to(badge).to_string()
     };
-    let _ = writeln!(
-        out,
-        "{}{}{badge} {} {}",
+    format!(
+        "{}{}{badge}{gap}{} {}",
         look.violet().apply_to("╭─ "),
-        look.violet().bold().apply_to("◆ Io "),
+        look.violet().bold().apply_to(format!("◆ {title} ")),
         look.violet().apply_to("─".repeat(fill)),
         look.dim().apply_to(meta),
-    );
+    )
 }
 
 fn footer(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
@@ -290,6 +435,8 @@ enum Block {
     Command(String),
     /// Code that is not a command, kept as written.
     Code(Vec<String>),
+    /// A table: the header row first, each row its cells (the divider row is dropped).
+    Table(Vec<Vec<String>>),
 }
 
 /// Shell fences: what is in them is a command to show, not code to read. The same list as the
@@ -441,6 +588,15 @@ fn item(line: &str) -> Option<(String, String)> {
     None
 }
 
+/// `---`, `***` or `___`: a rule between sections, which a terminal does not need drawn.
+fn is_rule(line: &str) -> bool {
+    let mut c = line.chars();
+    match c.next() {
+        Some(f @ ('-' | '*' | '_')) => line.len() >= 3 && line.chars().all(|x| x == f),
+        _ => false,
+    }
+}
+
 fn blocks(text: &str) -> Vec<Block> {
     let mut out = Vec::new();
     let mut cur: Option<Block> = None;
@@ -469,22 +625,58 @@ fn blocks(text: &str) -> Vec<Block> {
             Seg::Line(raw) => raw,
         };
         let line = raw.trim();
+        // A quote is read as the prose it quotes.
+        let line = if line.starts_with('>') {
+            line.trim_start_matches('>').trim()
+        } else {
+            line
+        };
         if line.is_empty() {
             flush(&mut cur, &mut out);
         } else if line.starts_with('#') {
             flush(&mut cur, &mut out);
             out.push(Block::Head(line.trim_start_matches('#').trim().to_owned()));
+        } else if is_rule(line) {
+            flush(&mut cur, &mut out);
+        } else if line.starts_with('|') {
+            if !matches!(cur, Some(Block::Table(_))) {
+                flush(&mut cur, &mut out);
+                cur = Some(Block::Table(Vec::new()));
+            }
+            if let Some(Block::Table(rows)) = cur.as_mut() {
+                let cells: Vec<String> = line
+                    .trim_matches('|')
+                    .split('|')
+                    .map(|c| c.trim().to_owned())
+                    .collect();
+                let divider = cells
+                    .iter()
+                    .all(|c| !c.is_empty() && c.chars().all(|ch| matches!(ch, '-' | ':' | ' ')));
+                if !divider {
+                    rows.push(cells);
+                }
+            }
         } else if let Some((mark, rest)) = item(line) {
             flush(&mut cur, &mut out);
-            cur = Some(Block::Item(mark, rest));
+            // A nested item is indented under its parent and marked with a hollow bullet.
+            let indent = raw
+                .chars()
+                .take_while(|c| matches!(c, ' ' | '\t'))
+                .map(|c| if c == '\t' { 4 } else { 1 })
+                .sum::<usize>();
+            let depth = (indent / 2).min(3);
+            let mark = if depth > 0 && mark == "\u{2022}" {
+                "\u{25e6}".to_owned()
+            } else {
+                mark
+            };
+            cur = Some(Block::Item(format!("{}{mark}", "  ".repeat(depth)), rest));
+        } else if let Some(Block::Para(p) | Block::Item(_, p)) = cur.as_mut() {
+            p.push(' ');
+            p.push_str(line);
         } else {
-            match cur.as_mut() {
-                Some(Block::Para(p) | Block::Item(_, p)) => {
-                    p.push(' ');
-                    p.push_str(line);
-                }
-                _ => cur = Some(Block::Para(line.to_owned())),
-            }
+            flush(&mut cur, &mut out);
+            cur = Some(Block::Para(line.to_owned()));
         }
     }
     flush(&mut cur, &mut out);
@@ -499,10 +691,23 @@ enum Kind {
     Code,
     Dim,
     Amber,
+    Head,
+}
+
+/// Text with no terminal escapes of its own: whole escape sequences and the orphaned tails of
+/// cut ones (`;252m`, `167;139;250m`, which a model copies from a screen it read) are dropped,
+/// so words and widths are measured on what shows and a stray fragment never reaches a card.
+fn scrub(text: &str) -> std::borrow::Cow<'_, str> {
+    static CUT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\x1b\[[0-9;:]*[A-Za-z]|\x1b|(?:\b\d{1,3})?(?:;\d{1,3}){1,4}m\b")
+            .unwrap_or_else(|_| unreachable!("a fixed pattern"))
+    });
+    CUT.replace_all(text, "")
 }
 
 /// Inline `code` and **bold**, the marks dropped; everything else is text.
 fn spans(text: &str) -> Vec<(Kind, String)> {
+    let text = &*scrub(text);
     let mut out: Vec<(Kind, String)> = Vec::new();
     let mut rest = text;
     while !rest.is_empty() {
@@ -540,6 +745,7 @@ fn paint(kind: Kind, s: &str, look: Look) -> String {
         Kind::Code => look.cyan().apply_to(s).to_string(),
         Kind::Dim => look.dim().apply_to(s).to_string(),
         Kind::Amber => look.amber().apply_to(s).to_string(),
+        Kind::Head => look.violet().bold().apply_to(s).to_string(),
     }
 }
 
@@ -648,11 +854,13 @@ fn wrap(spans: &[(Kind, String)], width: usize, look: Look, base: Kind) -> Vec<S
         .collect()
 }
 
-/// The answer's lines (without the rail), a blank line between blocks.
-fn body(text: &str, width: usize, look: Look) -> Vec<String> {
+/// The answer's lines (without the rail), a blank line between blocks: headings, **bold**,
+/// `code`, nested lists, tables and shell fences drawn for a terminal, wrapped to `width`, and
+/// plain text (no escape codes) when `look` is not fancy.
+pub(crate) fn body(text: &str, width: usize, look: Look) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut last: Option<&Block> = None;
-    let all = blocks(text);
+    let all = blocks(&scrub(text));
     for b in &all {
         // Items of one list and commands of one fence sit together; other blocks get air.
         let together = matches!(
@@ -666,7 +874,7 @@ fn body(text: &str, width: usize, look: Look) -> Vec<String> {
         }
         match b {
             Block::Para(p) => out.extend(wrap(&spans(p), width, look, Kind::Text)),
-            Block::Head(h) => out.extend(wrap(&spans(h), width, look, Kind::Bold)),
+            Block::Head(h) => out.extend(wrap(&spans(h), width, look, Kind::Head)),
             Block::Item(mark, t) => {
                 let lead = measure_text_width(mark) + 1;
                 let lines = wrap(&spans(t), width.saturating_sub(lead), look, Kind::Text);
@@ -691,6 +899,7 @@ fn body(text: &str, width: usize, look: Look) -> Vec<String> {
                     out.push(format!("  {}", look.dim().apply_to(l)));
                 }
             }
+            Block::Table(rows) => out.extend(table(rows, width, look)),
         }
         last = Some(b);
     }
@@ -700,18 +909,112 @@ fn body(text: &str, width: usize, look: Look) -> Vec<String> {
     out
 }
 
+/// A cell's text with its marks (`**`, backticks) dropped.
+fn cell_text(cell: &str) -> String {
+    spans(cell).into_iter().map(|(_, t)| t).collect()
+}
+
+/// A table as aligned columns, the header in bold. Too wide for `width`, each row is a line:
+/// its first cell in bold, then the others.
+fn table(rows: &[Vec<String>], width: usize, look: Look) -> Vec<String> {
+    let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let widths: Vec<usize> = (0..cols)
+        .map(|c| {
+            rows.iter()
+                .filter_map(|r| r.get(c))
+                .map(|t| measure_text_width(&cell_text(t)))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let total: usize = widths.iter().sum::<usize>() + 2 * cols.saturating_sub(1);
+    let mut out = Vec::new();
+    if total <= width {
+        for (i, row) in rows.iter().enumerate() {
+            let mut line = String::new();
+            for (c, w) in widths.iter().enumerate() {
+                let text = row.get(c).map_or("", String::as_str);
+                let base = if i == 0 { Kind::Bold } else { Kind::Text };
+                let painted: String = spans(text)
+                    .into_iter()
+                    .map(|(k, t)| paint(if k == Kind::Text { base } else { k }, &t, look))
+                    .collect();
+                line.push_str(&painted);
+                if c + 1 < cols {
+                    let pad = w.saturating_sub(measure_text_width(&cell_text(text))) + 2;
+                    line.push_str(&" ".repeat(pad));
+                }
+            }
+            out.push(line);
+        }
+        return out;
+    }
+    for row in rows.iter().skip(1) {
+        let mut parts = row.iter();
+        let first = parts.next().map_or_else(String::new, |f| {
+            if f.contains('`') || f.contains("**") {
+                f.clone()
+            } else {
+                format!("**{f}**")
+            }
+        });
+        let rest: Vec<&str> = parts.map(String::as_str).collect();
+        let text = if rest.is_empty() {
+            first
+        } else {
+            format!("{first} \u{2014} {}", rest.join("; "))
+        };
+        out.extend(wrap(&spans(&text), width, look, Kind::Text));
+    }
+    out
+}
+
+/// Set while a permission question is on the terminal, so the spinner leaves the line alone.
+static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Runs `ask`, a question put to the person in the terminal, with the panel's chat box
+/// stepping aside while it is open (RFC 0212).
+pub(crate) fn asking_person<T>(ask: impl FnOnce() -> T) -> T {
+    crate::panel::chat_report("back;1");
+    let answer = ask();
+    crate::panel::chat_report("back;0");
+    answer
+}
+
+/// Stops (or restarts) the spinner while a question is open.
+#[cfg(unix)]
+pub(crate) fn pause_spin(on: bool) {
+    // The panel's chat box (RFC 0212) steps aside for the question as well.
+    crate::panel::chat_report(if on { "back;1" } else { "back;0" });
+    // Held while the stderr lock is taken in `spin`, so no frame lands after this returns.
+    let _guard = std::io::stderr().lock();
+    PAUSED.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Writes a question's line over the spinner's, without a newline: the answer replaces it.
+#[cfg(unix)]
+pub(crate) fn say(line: &str) {
+    let mut err = std::io::stderr().lock();
+    let _ = write!(err, "\r\x1b[2K{line}");
+    let _ = err.flush();
+}
+
 /// One spinner frame on stderr, over the line before it.
 pub(crate) fn spin(frame: usize, elapsed: Duration, agent: &str, look: Look) {
-    let f = FRAMES[frame % FRAMES.len()];
+    let f = spinner(frame);
+    let mut err = std::io::stderr().lock();
+    if PAUSED.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     let _ = write!(
-        std::io::stderr().lock(),
+        err,
         "\r\x1b[2K{} {} {}",
         look.violet().bold().apply_to(f),
         look.violet().apply_to("Io is thinking"),
         look.dim()
             .apply_to(format!("{:.1}s · {agent}", elapsed.as_secs_f64())),
     );
-    let _ = std::io::stderr().flush();
+    let _ = err.flush();
 }
 
 /// Writes a rendered card to stderr.
@@ -743,20 +1046,44 @@ mod tests {
         Card {
             agent: "Claude Code (local)",
             model: "haiku",
+            mode: None,
             elapsed: Some(Duration::from_millis(1840)),
             follows: None,
             read: "Read: your question, the folder's path; nothing was run.",
             notice: "An AI model under your own subscription. Check it before you rely on it.",
-            label: "Io · AI answer -- Io running on Claude Code (local).",
+            label: "Io -- Io running on Claude Code (local).",
             full: true,
             hint: Some("`??` follows up."),
             row: None,
+            status: &[],
             body: Body::Answer(text),
         }
     }
 
     fn strip(s: &str) -> String {
         console::strip_ansi_codes(s).into_owned()
+    }
+
+    #[test]
+    fn the_header_names_a_plan_or_auto_mode_and_stays_quiet_for_none() {
+        let head = |c: &Card<'_>| {
+            strip(&render(c, 70, FANCY))
+                .lines()
+                .next()
+                .unwrap()
+                .to_owned()
+        };
+        let plain = card("x");
+        assert!(!head(&plain).contains("mode"), "{}", head(&plain));
+        let planned = Card {
+            mode: Some("plan"),
+            ..card("x")
+        };
+        assert!(
+            head(&planned).ends_with("Claude Code (local) · haiku · plan mode · 1.8s"),
+            "{}",
+            head(&planned)
+        );
     }
 
     #[test]
@@ -767,7 +1094,8 @@ mod tests {
                     ```sh\n$ cargo nextest run -p iohr --test project\n```";
         let out = strip(&render(&card(text), 60, FANCY));
         let lines: Vec<&str> = out.lines().collect();
-        assert!(lines[0].starts_with("╭─ ◆ Io  AI answer  ─"), "{out}");
+        assert!(lines[0].starts_with("╭─ ◆ Io ─"), "{out}");
+        assert!(!out.contains("AI answer"), "{out}");
         assert!(
             lines[0].ends_with("Claude Code (local) · haiku · 1.8s"),
             "{out}"
@@ -795,12 +1123,15 @@ mod tests {
     }
 
     #[test]
-    fn a_short_footer_is_one_line_and_the_label_stays_in_the_header() {
+    fn a_short_footer_is_one_line_and_the_header_still_names_the_model() {
         let mut c = card("Hi.");
         c.full = false;
         let out = strip(&render(&c, 60, FANCY));
         let lines: Vec<&str> = out.lines().collect();
-        assert!(lines[0].contains("AI answer"), "{out}");
+        assert!(
+            lines[0].contains("Claude Code (local) · haiku"),
+            "the model still names the AI: {out}"
+        );
         assert_eq!(lines.last(), Some(&"╰─ ?? follows up."), "{out}");
         assert!(
             !out.contains("Read:") && !out.contains("subscription"),
@@ -809,7 +1140,7 @@ mod tests {
         c.hint = None;
         let bare = strip(&render(&c, 60, FANCY));
         assert_eq!(bare.lines().last(), Some("╰─"), "{bare}");
-        assert!(bare.lines().next().is_some_and(|l| l.contains("AI answer")));
+        assert!(bare.lines().next().is_some_and(|l| l.contains("haiku")));
     }
 
     #[test]
@@ -846,7 +1177,7 @@ mod tests {
         let out = render(&card("Hi. What are you working on?"), 60, PLAIN);
         assert_eq!(
             out,
-            "Io · AI answer -- Io running on Claude Code (local). Read: your question, the folder's path; nothing was run.\nHi. What are you working on?\n"
+            "Io -- Io running on Claude Code (local). Read: your question, the folder's path; nothing was run.\nHi. What are you working on?\n"
         );
         let mut c = card("");
         c.body = Body::Failed("`claude` is not signed in");
@@ -861,6 +1192,57 @@ mod tests {
         assert!(out.starts_with("╭─ ◆ Io  no answer  ─"), "{out}");
         assert!(out.contains("│  claude is not signed in"), "{out}");
         assert!(out.contains("Nothing was run."), "{out}");
+    }
+
+    #[test]
+    fn a_roles_card_is_titled_with_the_role_and_says_why_it_failed() {
+        let mut c = card("");
+        c.agent = "Role rust-engineer";
+        c.model = "";
+        c.body = Body::Failed("the Role's turn ended with exit 1");
+        let out = strip(&render(&c, 60, FANCY));
+        assert!(
+            out.starts_with("╭─ ◆ Role rust-engineer  no answer  ─"),
+            "{out}"
+        );
+        assert!(!out.contains("◆ Io"), "{out}");
+        assert!(out.contains("the Role's turn ended with exit 1"), "{out}");
+        c.body = Body::Answer("It reads files.");
+        let out = strip(&render(&c, 60, FANCY));
+        assert!(out.starts_with("╭─ ◆ Role rust-engineer ─"), "{out}");
+    }
+
+    #[test]
+    fn a_permission_result_is_a_quiet_row_inside_the_card_above_the_action_row() {
+        let status = [
+            Status {
+                text: "ls allowed in this project from now on".into(),
+                detail: Some("Bash(ls:*) \u{b7} .inorbit/permissions.toml".into()),
+                refused: false,
+            },
+            Status {
+                text: "rm not allowed".into(),
+                detail: None,
+                refused: true,
+            },
+        ];
+        let mut c = card("Done.");
+        c.status = &status;
+        c.row = Some("Run   \u{2193} to choose");
+        let out = strip(&render(&c, 70, FANCY));
+        let at = |needle: &str| out.find(needle).unwrap_or(usize::MAX);
+        assert!(
+            out.contains("│  \u{2713} ls allowed in this project from now on"),
+            "{out}"
+        );
+        assert!(
+            out.contains("│    Bash(ls:*) \u{b7} .inorbit/permissions.toml"),
+            "{out}"
+        );
+        assert!(out.contains("│  \u{2717} rm not allowed"), "{out}");
+        assert!(at("Done.") < at("allowed in this project") && at("not allowed") < at("to choose"));
+        // The plain look has no row to carry it; the caller prints a note instead.
+        assert!(!render(&c, 70, PLAIN).contains("allowed"));
     }
 
     #[test]
@@ -1012,6 +1394,97 @@ mod tests {
         assert!(at("to choose") < at("Check it"), "{with}");
         for l in with.lines() {
             assert!(measure_text_width(l) <= 80, "{l}");
+        }
+    }
+
+    const SUMMARY: &str = "## What I built\n\nA **watcher** that logs a line every `5s`, with a long line that has to wrap at the width.\n\n- `src/app.py` the loop\n  - nested detail\n- a test\n\n| file | what |\n| --- | --- |\n| `a.py` | the loop |\n\n---\n\n```sh\npython3 src/app.py\n```";
+
+    #[test]
+    fn a_summary_is_drawn_without_its_markdown_marks() {
+        let lines = body(SUMMARY, 50, FANCY);
+        let text = strip(&lines.join("\n"));
+        for mark in ["##", "**", "`", "| ---", "---"] {
+            assert!(!text.contains(mark), "{mark} left in\n{text}");
+        }
+        assert_eq!(strip(&lines[0]), "What I built");
+        assert!(
+            lines[0].contains("\u{1b}[38;5;141m\u{1b}[1m"),
+            "{:?}",
+            lines[0]
+        );
+        assert!(text.contains("\u{2022} src/app.py the loop"), "{text}");
+        assert!(text.contains("  \u{25e6} nested detail"), "{text}");
+        assert!(text.contains("\u{276f} python3 src/app.py"), "{text}");
+        assert!(lines.iter().all(|l| measure_text_width(l) <= 50), "{text}");
+    }
+
+    #[test]
+    fn a_table_is_aligned_with_a_bold_header_and_falls_back_when_too_wide() {
+        let t =
+            "| file | what it does |\n|---|---|\n| `a.py` | the loop |\n| `long_name.py` | tests |";
+        let wide = body(t, 60, FANCY);
+        assert_eq!(strip(&wide[0]), "file          what it does");
+        assert_eq!(strip(&wide[1]), "a.py          the loop");
+        assert_eq!(strip(&wide[2]), "long_name.py  tests");
+        let narrow = body(t, 20, FANCY);
+        let text = strip(&narrow.join("\n"));
+        assert!(text.contains("a.py \u{2014} the loop"), "{text}");
+        assert!(narrow.iter().all(|l| measure_text_width(l) <= 20), "{text}");
+    }
+
+    #[test]
+    fn a_plain_look_draws_the_same_lines_with_no_escape_codes() {
+        let plain = body(SUMMARY, 50, PLAIN);
+        assert!(plain.iter().all(|l| !l.contains('\u{1b}')), "{plain:?}");
+        let fancy: Vec<String> = body(SUMMARY, 50, FANCY).iter().map(|l| strip(l)).collect();
+        assert_eq!(plain, fancy);
+    }
+
+    /// Every line of a card, through a real terminal model: no stray `NN;NNm` text and every
+    /// word still there, at several widths and both looks.
+    #[test]
+    fn styled_wrapped_text_never_leaks_an_escape_into_the_screen() {
+        let answer = "Use **reqwest and rustls** for `iohr ask --help` calls; the `;252m` and 167;139;250m \
+            fragments a model copies from a screen, plus \x1b[38;2;167;139;250mraw\x1b[0m escapes, must not show. \
+            A long `command --with --many --flags --that --wrap --across --lines` ends it.";
+        let words = [
+            "reqwest",
+            "and",
+            "rustls",
+            "iohr",
+            "ask",
+            "--help",
+            "fragments",
+            "wrap",
+            "ends",
+        ];
+        let stray = regex::Regex::new(r"\d;\d*m|;\d+m").unwrap();
+        for look in [
+            Look {
+                fancy: true,
+                truecolor: true,
+            },
+            Look {
+                fancy: true,
+                truecolor: false,
+            },
+        ] {
+            for cols in [40usize, 60, 80] {
+                let c = Card {
+                    body: Body::Answer(answer),
+                    full: false,
+                    hint: Some("`iohr ask --help` for flags."),
+                    ..card(answer)
+                };
+                let out = render(&c, cols, look).replace('\n', "\r\n");
+                let mut p = vt100::Parser::new(60, u16::try_from(cols).unwrap(), 0);
+                p.process(out.as_bytes());
+                let shown = p.screen().contents();
+                assert!(!stray.is_match(&shown), "{cols}: {shown}");
+                for w in words {
+                    assert!(shown.contains(w), "{w} lost at {cols}: {shown}");
+                }
+            }
         }
     }
 }

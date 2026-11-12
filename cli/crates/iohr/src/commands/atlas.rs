@@ -15,9 +15,8 @@ use crate::commands::decisions::{create_in, decisions, save_text, scoped};
 use crate::context::{Api, Ctx, session};
 use crate::error::Error;
 use crate::output::Out;
-use crate::project::read_space_link;
 use crate::roles::{self, Report};
-use crate::ui::Ui;
+use crate::ui::{Mark, Ui};
 use inorbithr::public::DecisionsGetDocumentParams as GetDocumentParams;
 
 const MESSAGE: &str = "Synced from atlas by iohr sync";
@@ -28,7 +27,348 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: AtlasCommand, out: Out) -> R
         AtlasCommand::New { kind, title, dir } => new(kind, &title, dir, out),
         AtlasCommand::Sync(args) => sync(g, env, &args, out).await,
         AtlasCommand::Roles(cmd) => roles_cmd(g, env, cmd, out).await,
+        AtlasCommand::Search {
+            query,
+            site,
+            limit,
+            dir,
+        } => kb_search(&query, site.as_deref(), limit, dir, out),
+        AtlasCommand::Facts {
+            site,
+            predicate,
+            grep,
+            limit,
+            dir,
+        } => kb_facts(
+            (site.as_deref(), predicate.as_deref(), grep.as_deref()),
+            limit,
+            dir,
+            out,
+        ),
+        AtlasCommand::Claims {
+            site,
+            prove,
+            limit,
+            dir,
+        } => kb_claims(site.as_deref(), prove.as_deref(), limit, dir, out),
+        AtlasCommand::Index {
+            pages,
+            site,
+            limit,
+            dir,
+        } => kb_index(pages, site.as_deref(), limit, dir, out),
     }
+}
+
+fn kb_site(site: Option<&str>) -> Option<String> {
+    site.map(crate::kb::site_name)
+}
+
+/// `iohr atlas search`: the best chunks for a query, with their sources.
+fn kb_search(
+    query: &str,
+    site: Option<&str>,
+    limit: usize,
+    dir: Option<PathBuf>,
+    out: Out,
+) -> Result<(), Error> {
+    let root = root_of(dir)?;
+    let site = kb_site(site);
+    let hits = crate::kb::search(&root, query, site.as_deref(), limit.clamp(1, 50))
+        .map_err(Error::Failed)?;
+    if out.json {
+        let items: Vec<_> = hits
+            .iter()
+            .map(|h| {
+                serde_json::json!({
+                    "chunk": h.id, "site": h.site, "url": h.url, "title": h.title,
+                    "heading": h.heading, "path": h.path, "start": h.start, "end": h.end,
+                    "tokens": h.tokens, "score": h.score, "text": h.text,
+                })
+            })
+            .collect();
+        Out::print_json(&serde_json::json!({
+            "query": query, "embeddings": crate::kb::embed::STATUS, "hits": items,
+        }));
+        return Ok(());
+    }
+    if hits.is_empty() {
+        Out::note(&format!("nothing in the knowledge base matches {query:?}"));
+        return Ok(());
+    }
+    for (i, h) in hits.iter().enumerate() {
+        let path = if h.path.is_empty() { &h.title } else { &h.path };
+        let text: String = h.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let shown: String = text.chars().take(280).collect();
+        let more = if text.chars().count() > 280 {
+            " ..."
+        } else {
+            ""
+        };
+        Out::note(&format!(
+            "{n}. {path}   [{tokens} words, score {score:.2}]\n   {url}   chars {s}-{e}   {id}\n   {shown}{more}",
+            n = i + 1,
+            tokens = h.tokens,
+            score = h.score,
+            url = h.url,
+            s = h.start,
+            e = h.end,
+            id = h.id,
+        ));
+    }
+    Ok(())
+}
+
+/// `iohr atlas facts`: what the site model says, with the chunk each fact came from.
+fn kb_facts(
+    (site, predicate, grep): (Option<&str>, Option<&str>, Option<&str>),
+    limit: usize,
+    dir: Option<PathBuf>,
+    out: Out,
+) -> Result<(), Error> {
+    let root = root_of(dir)?;
+    let site = kb_site(site);
+    let rows = crate::kb::facts(&root, site.as_deref(), predicate, grep, limit.clamp(1, 500))
+        .map_err(Error::Failed)?;
+    if out.json {
+        let items: Vec<_> = rows
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.fact.id, "site": r.site, "subject": r.fact.subject,
+                    "predicate": r.fact.predicate, "value": r.fact.value, "url": r.fact.url,
+                    "chunk": r.fact.chunk, "source": r.fact.source,
+                })
+            })
+            .collect();
+        Out::print_json(&serde_json::json!({ "facts": items }));
+        return Ok(());
+    }
+    if rows.is_empty() {
+        Out::note("no facts match");
+        return Ok(());
+    }
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| {
+            vec![
+                r.site.clone(),
+                r.fact.predicate.clone(),
+                r.fact.value.clone(),
+                r.fact.url.clone(),
+                r.fact.source.clone(),
+            ]
+        })
+        .collect();
+    Out::table(&["site", "predicate", "value", "page", "source"], &cells);
+    Ok(())
+}
+
+/// `iohr atlas claims`: the claims made from the facts, or with `--prove` one claim's proof.
+#[cfg(unix)]
+fn kb_claims(
+    site: Option<&str>,
+    prove: Option<&str>,
+    limit: usize,
+    dir: Option<PathBuf>,
+    out: Out,
+) -> Result<(), Error> {
+    let root = root_of(dir)?;
+    if let Some(id) = prove {
+        let p = crate::kb::prove(&root, id).map_err(Error::Failed)?;
+        let evidence: Vec<_> = p
+            .evidence
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "id": e.id, "digest": e.digest, "bytes": e.bytes,
+                    "read_at": e.at.iter().map(|(u, c)| serde_json::json!({"url": u, "kept": c}))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        let s = p.claim.statement();
+        let value = serde_json::json!({
+            "claim": id, "predicate": s.predicate.name.as_str(),
+            "value": serde_json::to_value(&s.value).unwrap_or_default(),
+            "support": crate::kb::claims::support_word(p.claim.state().support()),
+            "stale": p.stale, "integrity": p.integrity,
+            "complete": p.tree.is_complete(), "depth": p.tree.depth(),
+            "evidence": evidence,
+            "means": "a deterministic reader found this value in these bytes; it does not say the value is true",
+        });
+        if out.json {
+            Out::print_json(&value);
+            return Ok(());
+        }
+        let cells: Vec<Vec<String>> = p
+            .evidence
+            .iter()
+            .flat_map(|e| {
+                e.at.iter()
+                    .map(|(u, c)| vec![e.digest.clone(), u.clone(), c.clone()])
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        Out::note(&format!(
+            "{id}: {} ({}), {}{}",
+            s.predicate.name.as_str(),
+            value["support"].as_str().unwrap_or(""),
+            if p.tree.is_complete() {
+                "proof complete"
+            } else {
+                "proof incomplete"
+            },
+            if p.stale {
+                ", stale: its page changed or the fact went"
+            } else {
+                ""
+            },
+        ));
+        Out::table(&["evidence (sha256)", "read at", "kept"], &cells);
+        return Ok(());
+    }
+    let site = kb_site(site);
+    let rows =
+        crate::kb::claims(&root, site.as_deref(), limit.clamp(1, 500)).map_err(Error::Failed)?;
+    if out.json {
+        let items: Vec<_> = rows
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.id, "site": r.site, "subject": r.subject,
+                    "predicate": r.predicate, "value": r.value, "support": r.support,
+                    "stale": r.stale,
+                })
+            })
+            .collect();
+        Out::print_json(&serde_json::json!({ "claims": items }));
+        return Ok(());
+    }
+    if rows.is_empty() {
+        Out::note("no claims yet; `iohr project init --crawl <url>` reads a site");
+        return Ok(());
+    }
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| {
+            vec![
+                r.id.clone(),
+                r.predicate.clone(),
+                r.value.clone(),
+                r.support.clone() + if r.stale { " (stale)" } else { "" },
+            ]
+        })
+        .collect();
+    Out::table(&["claim", "predicate", "value", "support"], &cells);
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn kb_claims(
+    _site: Option<&str>,
+    _prove: Option<&str>,
+    _limit: usize,
+    _dir: Option<PathBuf>,
+    _out: Out,
+) -> Result<(), Error> {
+    Err(Error::Failed(
+        "the local index is not available on this build".to_owned(),
+    ))
+}
+
+/// `iohr atlas index`: the crawled sites (or, with `--pages`, their pages).
+fn kb_index(
+    pages: bool,
+    site: Option<&str>,
+    limit: usize,
+    dir: Option<PathBuf>,
+    out: Out,
+) -> Result<(), Error> {
+    let root = root_of(dir)?;
+    let site = kb_site(site);
+    if pages {
+        let rows = crate::kb::pages(&root, site.as_deref(), limit.clamp(1, 1000))
+            .map_err(Error::Failed)?;
+        if out.json {
+            let items: Vec<_> = rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "site": r.site, "url": r.url, "title": r.title, "lang": r.lang,
+                        "chunks": r.chunks, "tokens": r.tokens,
+                    })
+                })
+                .collect();
+            Out::print_json(&serde_json::json!({ "pages": items }));
+            return Ok(());
+        }
+        let cells: Vec<Vec<String>> = rows
+            .iter()
+            .map(|r| {
+                vec![
+                    r.url.clone(),
+                    r.title.clone(),
+                    r.lang.clone(),
+                    r.chunks.to_string(),
+                    r.tokens.to_string(),
+                ]
+            })
+            .collect();
+        Out::table(&["page", "title", "lang", "chunks", "words"], &cells);
+        return Ok(());
+    }
+    let mut sites = crate::kb::status(&root).map_err(Error::Failed)?;
+    if let Some(s) = &site {
+        sites.retain(|x| &x.site == s);
+    }
+    if out.json {
+        let items: Vec<_> = sites
+            .iter()
+            .map(|s| {
+                let kinds = crate::kb::entity_kinds(&root, &s.site).unwrap_or_default();
+                serde_json::json!({
+                    "site": s.site, "subject": s.subject, "crawled": s.crawled,
+                    "built": s.built, "embeddings": s.embeddings, "pages": s.pages,
+                    "chunks": s.chunks, "tokens": s.tokens, "entities": s.entities,
+                    "entity_kinds": kinds.into_iter().collect::<std::collections::BTreeMap<_, _>>(),
+                    "facts": s.facts, "links": s.links,
+                    "sections": s.sections.iter().map(|x| serde_json::json!({
+                        "name": x.name, "pages": x.pages, "chunks": x.chunks,
+                        "tokens": x.tokens, "summary": x.summary,
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        Out::print_json(&serde_json::json!({ "sites": items }));
+        return Ok(());
+    }
+    if sites.is_empty() {
+        Out::note("no site is indexed; run `iohr project init --crawl`");
+        return Ok(());
+    }
+    let cells: Vec<Vec<String>> = sites
+        .iter()
+        .map(|s| {
+            vec![
+                s.site.clone(),
+                s.pages.to_string(),
+                s.chunks.to_string(),
+                s.tokens.to_string(),
+                s.entities.to_string(),
+                s.facts.to_string(),
+                s.links.to_string(),
+                s.built.clone(),
+            ]
+        })
+        .collect();
+    Out::table(
+        &[
+            "site", "pages", "chunks", "words", "entities", "facts", "links", "built",
+        ],
+        &cells,
+    );
+    Ok(())
 }
 
 fn start(dir: Option<PathBuf>) -> Result<PathBuf, Error> {
@@ -99,6 +439,7 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
     let moved = move_legacy_roles(&root, out)?;
     let (name, template) = project_meta(&root);
     let created_at = super::project::now();
+    let bin = super::shell::running_bin();
     // The language the project declares, else the one its build file shows.
     let lang = roles::detect_language(&root);
     let mut written = atlas::ensure(
@@ -109,14 +450,15 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
             lang,
             describe: None,
             created_at: &created_at,
+            bin: &bin,
         },
     )
     .map_err(Error::Failed)?;
     if roles::ensure_record(&root, lang).map_err(Error::Failed)? {
         written.push("inorbit.toml".to_owned());
     }
-    written.extend(roles::ensure_agents(&root).map_err(Error::Failed)?);
-    let report = import_for(g, env, &root, false).await;
+    written.extend(roles::ensure_agents(&root, &bin).map_err(Error::Failed)?);
+    let report = import_for(g, env, &root, false, false).await;
     if out.json {
         Out::print_json(&serde_json::json!({
             "root": root.display().to_string(),
@@ -140,9 +482,15 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
 
 /// Imports the project's roles when signed in; never fails (a failed import is
 /// in the report, and `iohr sync` tries again).
-pub(crate) async fn import_for(g: &Global, env: &Env, root: &Path, dry: bool) -> Report {
+pub(crate) async fn import_for(
+    g: &Global,
+    env: &Env,
+    root: &Path,
+    dry: bool,
+    upgrade: bool,
+) -> Report {
     let session = session(g, env).await.ok();
-    roles::import(session.as_ref().map(|s| &s.api), root, dry).await
+    roles::import(session.as_ref().map(|s| &s.api), root, dry, upgrade).await
 }
 
 /// One line per role, then the one line about what could not happen.
@@ -152,6 +500,44 @@ pub(crate) fn show_report(ui: Ui, report: &Report) {
         return;
     }
     ui.note("Roles", &lines.join("\n"));
+}
+
+/// How the roles step of `init` ended, in one line: imported (a check), or kept in the folder
+/// only because nobody is signed in or a role did not go (a warning, with the fix `message` says).
+pub(crate) fn roles_result(report: &Report) -> (Mark, String) {
+    let names = |failed: bool| {
+        report
+            .outcomes
+            .iter()
+            .filter(|o| (o.action == "failed") == failed)
+            .map(|o| o.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let listed = |failed: bool| {
+        let n = names(failed);
+        if n.is_empty() {
+            String::new()
+        } else {
+            format!(" ({n})")
+        }
+    };
+    let fix = report.message.clone().unwrap_or_else(|| {
+        "the roles stay in atlas/roles/; run `iohr login`, then `iohr sync` imports them".to_owned()
+    });
+    if report.outcomes.iter().any(|o| o.action == "failed") {
+        (
+            Mark::Warn,
+            format!("Roles not imported{}: {fix}", listed(true)),
+        )
+    } else if report.signed_in {
+        (Mark::Ok, format!("Roles in your account: {}", names(false)))
+    } else {
+        (
+            Mark::Warn,
+            format!("Roles kept in atlas/roles/{}: {fix}", listed(false)),
+        )
+    }
 }
 
 async fn roles_cmd(g: &Global, env: &Env, cmd: RolesCommand, out: Out) -> Result<(), Error> {
@@ -203,10 +589,14 @@ async fn roles_cmd(g: &Global, env: &Env, cmd: RolesCommand, out: Out) -> Result
             );
             Ok(())
         }
-        RolesCommand::Import { dry_run, dir } => {
+        RolesCommand::Import {
+            dry_run,
+            upgrade,
+            dir,
+        } => {
             let root = root_of(dir)?;
             move_legacy_roles(&root, out)?;
-            let report = import_for(g, env, &root, dry_run).await;
+            let report = import_for(g, env, &root, dry_run, upgrade).await;
             if out.json {
                 Out::print_json(&serde_json::json!({ "dry_run": dry_run, "roles": report }));
                 return Ok(());
@@ -362,7 +752,7 @@ async fn sync_documents(
     let space = args
         .space
         .clone()
-        .or_else(|| read_space_link(&root).map(|(id, _)| id))
+        .or_else(|| crate::project::space::read_link_for(&root, g.environment_name()).map(|(id, _)| id))
         .ok_or_else(|| {
             Error::Usage(
                 "no Decisions space: give `--space ID`, or link the project with `/inorbit:link <space>`"
@@ -378,7 +768,7 @@ async fn sync_documents(
     }
     let local = atlas::local_only(&root);
     // The built-in roles go with the documents; a failed import never fails the sync.
-    let report = import_for(g, env, &root, args.dry_run).await;
+    let report = import_for(g, env, &root, args.dry_run, false).await;
     if out.json {
         Out::print_json(&serde_json::json!({
             "space": space,
@@ -566,5 +956,66 @@ async fn sync_one(
             ))
         }
         Err(e) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::roles_result;
+    use crate::roles::{Outcome, Report};
+    use crate::ui::Mark;
+
+    fn outcome(name: &str, action: &'static str) -> Outcome {
+        Outcome {
+            name: name.to_owned(),
+            action,
+            version: None,
+            from: None,
+            note: String::new(),
+        }
+    }
+
+    #[test]
+    fn roles_in_the_account_are_a_check_and_roles_kept_local_are_a_warning_with_the_fix() {
+        let ok = Report {
+            outcomes: vec![
+                outcome("security", "written"),
+                outcome("python-engineer", "written"),
+            ],
+            signed_in: true,
+            ..Report::default()
+        };
+        assert_eq!(
+            roles_result(&ok),
+            (
+                Mark::Ok,
+                "Roles in your account: security, python-engineer".to_owned()
+            )
+        );
+        let local = Report {
+            outcomes: vec![outcome("security", "local")],
+            signed_in: false,
+            message: Some("Not signed in: run `iohr login`.".to_owned()),
+            ..Report::default()
+        };
+        let (mark, said) = roles_result(&local);
+        assert_eq!(mark, Mark::Warn);
+        assert_eq!(
+            said,
+            "Roles kept in atlas/roles/ (security): Not signed in: run `iohr login`."
+        );
+        let failed = Report {
+            outcomes: vec![outcome("security", "failed")],
+            signed_in: true,
+            message: Some("InOrbit answered 500".to_owned()),
+            ..Report::default()
+        };
+        assert_eq!(
+            roles_result(&failed),
+            (
+                Mark::Warn,
+                "Roles not imported (security): InOrbit answered 500".to_owned()
+            )
+        );
     }
 }

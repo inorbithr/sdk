@@ -2,7 +2,9 @@
 //! own (RFC 0120, "Provider checks, every turn"; study 0021 conditions 1, 2 and 10;
 //! study 0023 constraint 4).
 //!
-//! The runner runs a model only on the person's own subscription. Only the variables
+//! The runner's own environment never carries a model credential through: the one key
+//! `claude` gets is the stored API key, added beside this list at spawn
+//! (`ClaudeExec::command`, RFC 0214), never through it. Only the variables
 //! `claude` needs to run and to find its own sign-in are passed on (`PATH`, `HOME`, the
 //! locale, the temp directory, `CLAUDE_CONFIG_DIR` and the XDG directories). Everything
 //! else is dropped, so a variable nobody thought of (`GH_TOKEN`, `AZURE_API_KEY`, a
@@ -16,7 +18,7 @@ use std::ffi::OsString;
 use std::path::Path;
 
 /// The only variables passed on, by exact name (compared in upper case: Windows is
-/// case-blind). `claude` finds its subscription sign-in through `HOME` (the macOS
+/// case-blind). `claude` finds its own sign-in through `HOME` (the macOS
 /// keychain, `~/.claude`), `CLAUDE_CONFIG_DIR` and the XDG directories.
 pub(crate) const ALLOW_EXACT: &[&str] = &[
     "PATH",

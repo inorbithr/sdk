@@ -1,0 +1,21 @@
+manifest-version = "2"
+date = "2026-10-15"
+
+[pkg.cargo]
+version = "0.100.0 (5f94df478 2026-08-27)"
+git_commit_hash = "58cf8f9c35b355199727627d07ae34a4e2846d67"
+
+[pkg.cargo.target.aarch64-apple-darwin]
+available = true
+url = "https://static.rust-lang.org/dist/2026-10-15/cargo-1.99.1-aarch64-apple-darwin.tar.gz"
+hash = "b5cc7634f919949c3e5e131123f813416dc47f6b809a5371d12f1f593595ae13"
+xz_url = "https://static.rust-lang.org/dist/2026-10-15/cargo-1.99.1-aarch64-apple-darwin.tar.xz"
+
+[pkg.rust]
+version = "1.99.1 (58cf8f9c3 2026-10-13)"
+git_commit_hash = "58cf8f9c35b355199727627d07ae34a4e2846d67"
+
+[pkg.rust.target.aarch64-apple-darwin]
+available = true
+url = "https://static.rust-lang.org/dist/2026-10-15/rust-1.99.1-aarch64-apple-darwin.tar.gz"
+hash = "b73b6a78c4e7171a8fe1b4bee5342273605c5c9a9a4997554c15bb3ce2753b6a"

@@ -7,26 +7,23 @@ use crate::Env;
 use crate::ask::stream::{Look, Thinking};
 use crate::ask::{self, Agent};
 use crate::atlas;
-use crate::cli::{Global, ProjectCommand, TemplateCommand};
+use crate::cli::{Global, InitArgs, ProjectCommand, TemplateCommand};
 use crate::commands::ask::Run;
-use crate::context::{Ctx, session};
+use crate::context::{Ctx, shared_session};
 use crate::error::Error;
+use crate::handoff::{self, Stop};
 use crate::output::Out;
 use std::fmt::Write as _;
 
+use super::project_space::{self, Outcome};
 use super::project_template;
 use crate::project::folder::{self, Kind as Place, Proposal, Where};
 use crate::project::wizard::{self, Draft, Stage, Walk, Went};
 use crate::project::{self, Report, Smoke, check_name, choose_template, lines};
+use crate::roles::runtime;
 use crate::template::{self, Answer, Answers, Kind, LANGUAGE, Question, Spec, StepName, Template};
-use crate::ui::{Choice, Nav, Ui, cancel};
-
-/// The project's own state: `~/.inorbit/projects/<name>/`, never inside the repository.
-fn state_root() -> Result<PathBuf, Error> {
-    etcetera::home_dir()
-        .map(|h| h.join(".inorbit").join("projects"))
-        .map_err(|e| Error::Failed(format!("no home folder: {e}")))
-}
+use crate::toolchain::{self, Lang, State};
+use crate::ui::{Choice, Mark, Nav, Ui, cancel};
 
 /// The publisher half of the id: `--publisher`, else the account's slug when signed in,
 /// else `local`. The private listing takes it when that step lands.
@@ -50,64 +47,12 @@ const DESCRIBE: &str = "@describe";
 /// The template a described project is made from, unless one is named.
 const DESCRIBE_TEMPLATE: &str = "blank";
 
-/// What the person said to `init`, as the flags carry it.
-struct InitArgs {
-    name: Option<String>,
-    template: Option<String>,
-    set: Vec<String>,
-    answers: Option<PathBuf>,
-    describe: Option<String>,
-    agent_turns: Option<u32>,
-    agent_timeout: Option<u64>,
-    dry_run: bool,
-    yes: bool,
-    dir: Option<PathBuf>,
-    lang: Option<String>,
-    publisher: Option<String>,
-    no_smoke: bool,
-}
-
 pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) -> Result<(), Error> {
     match cmd {
-        ProjectCommand::Init {
-            name,
-            template,
-            set,
-            answers,
-            describe,
-            agent_turns,
-            agent_timeout,
-            dry_run,
-            yes,
-            dir,
-            lang,
-            publisher,
-            no_smoke,
-        } => {
-            init(
-                g,
-                env,
-                InitArgs {
-                    name,
-                    template,
-                    set,
-                    answers,
-                    describe,
-                    agent_turns,
-                    agent_timeout,
-                    dry_run,
-                    yes,
-                    dir,
-                    lang,
-                    publisher,
-                    no_smoke,
-                },
-                out,
-            )
-            .await
-        }
+        ProjectCommand::Init(a) => init(g, env, *a, out).await,
+        ProjectCommand::Sync(a) => project_space::sync_command(g, env, a, out).await,
         // The old name of `template list`: the same handler, so the output is identical.
-        ProjectCommand::Templates => template_command(g, TemplateCommand::List, out),
+        ProjectCommand::Templates => template_command(g, TemplateCommand::List { all: false }, out),
         ProjectCommand::Template { cmd } => template_command(g, cmd, out),
     }
 }
@@ -121,7 +66,7 @@ fn default_template(g: &Global) -> Result<String, Error> {
 
 fn template_command(g: &Global, cmd: TemplateCommand, out: Out) -> Result<(), Error> {
     match cmd {
-        TemplateCommand::List => project_template::list(&default_template(g)?, out),
+        TemplateCommand::List { all } => project_template::list(&default_template(g)?, all, out),
         TemplateCommand::Show { id } => project_template::show(&id, &default_template(g)?, out),
         TemplateCommand::Path { id } => project_template::path(&id, out),
         TemplateCommand::New { id, extends } => {
@@ -180,7 +125,11 @@ impl Flow {
     fn gate(&mut self, id: &str, what: &str) -> bool {
         if self.dry {
             self.would.push((id.to_owned(), what.to_owned()));
-            self.ui.info(&format!("would: {what}"));
+            // Drawn, the plan is one numbered box at the end of the dry run; plain, each
+            // action is a `would:` line as it is planned.
+            if !self.ui.fancy() {
+                self.ui.info(&format!("would: {what}"));
+            }
             false
         } else {
             true
@@ -229,9 +178,14 @@ fn live_names(rows: &[template::Row]) -> String {
 
 /// The language menu: every language of the template, the live ones first, each marked with
 /// whether its toolchain is on the PATH (`have`); the cursor starts on the first live one that
-/// has its toolchain (else on the template's default). The ones still coming are listed, dim,
-/// and refused when picked.
-fn language_choices(tpl: &Template, have: impl Fn(&str) -> bool) -> (Vec<Choice>, String) {
+/// has its toolchain (else on the template's default). A variant still coming is not shown
+/// (`--lang` names it and is refused). `behind` says, for a toolchain that is found, where it stands
+/// against the latest stable (`rustc 1.90.0, 1.93.0 is out`), or nothing.
+fn language_choices(
+    tpl: &Template,
+    have: impl Fn(&str) -> bool,
+    behind: impl Fn(&template::VariantDef) -> Option<String>,
+) -> (Vec<Choice>, String) {
     let found = |v: &template::VariantDef| v.needs.iter().all(|n| have(n));
     let live = tpl.live_variants();
     let recommended = live
@@ -239,13 +193,16 @@ fn language_choices(tpl: &Template, have: impl Fn(&str) -> bool) -> (Vec<Choice>
         .find(|v| found(v))
         .copied()
         .or_else(|| tpl.default_variant());
-    let mut out: Vec<Choice> = live
+    let out: Vec<Choice> = live
         .iter()
         .map(|v| {
             let what = if v.needs.is_empty() {
                 "nothing to install".to_owned()
             } else if found(v) {
-                format!("{} found", v.needs.join(", "))
+                match behind(v) {
+                    Some(note) => format!("{} found \u{b7} {note}", v.needs.join(", ")),
+                    None => format!("{} found", v.needs.join(", ")),
+                }
             } else {
                 format!("{} not on your PATH", v.needs.join(", "))
             };
@@ -263,19 +220,6 @@ fn language_choices(tpl: &Template, have: impl Fn(&str) -> bool) -> (Vec<Choice>
             }
         })
         .collect();
-    out.extend(
-        tpl.meta
-            .variants
-            .iter()
-            .filter(|v| v.status != template::Status::Live)
-            .map(|v| Choice {
-                value: v.id.clone(),
-                label: v.label.clone(),
-                hint: String::new(),
-                available: false,
-                key: None,
-            }),
-    );
     let initial = recommended.map(|v| v.id.clone()).unwrap_or_default();
     (out, initial)
 }
@@ -474,8 +418,14 @@ fn ask_question(
     let default = prev.cloned().or_else(|| q.default.clone());
     if q.key == LANGUAGE && !tpl.meta.variants.is_empty() {
         let path = std::env::var_os("PATH").unwrap_or_default();
-        let (choices, mut initial) =
-            language_choices(tpl, |n| ask::find_on_path(n, &path).is_some());
+        let (choices, mut initial) = language_choices(
+            tpl,
+            |n| ask::find_on_path(n, &path).is_some(),
+            |v| {
+                let lang = Lang::of_toolchain(&v.toolchain)?;
+                toolchain::state(lang).map(|s| s.hint(lang))
+            },
+        );
         if let Some(p) = prev {
             initial = p.text();
         }
@@ -533,6 +483,24 @@ fn ask_question(
     }
 }
 
+/// The iohr commands an `init` agent may run, by the name the binary runs under: new documents,
+/// the dry-run listing of what `sync` would send, and memory. Each is a prefix, so `sync` itself
+/// (which writes to Decisions) is not among them: the person runs that.
+fn init_allow(bin: &str) -> Vec<String> {
+    [
+        "atlas new",
+        "atlas sync --dry-run",
+        "memory remember",
+        "memory recall",
+        "memory list",
+        "memory check",
+    ]
+    .iter()
+    .map(|c| format!("{bin} {c}"))
+    .chain(["git status", "git log", "git diff", "ls"].map(str::to_owned))
+    .collect()
+}
+
 /// The agent and the prompt it would get, when one is to run.
 struct AgentRun {
     agent: Agent,
@@ -541,17 +509,156 @@ struct AgentRun {
     /// The arguments of the print-mode run ([`ask::argv`]), the prompt last.
     args: Vec<String>,
     model: Option<String>,
+    /// The Role it builds in (`--role`), as `--json` names it.
+    role: Option<serde_json::Value>,
     max_turns: u32,
     timeout: Duration,
     thinking: Thinking,
 }
 
-/// The most turns the agent gets in `init` when no flag says: init's own default, because
-/// `[ask]` in config.toml has no bound. Enough to write a small project; a wrong request cannot
-/// run away.
-const AGENT_TURNS: u32 = 40;
-/// The most seconds the agent gets in `init` when no flag says (init's own default).
-const AGENT_SECONDS: u64 = 600;
+/// Starts the latest-stable lookups: every language at a terminal (the menu shows each one's
+/// state), else only the language `--lang` names (the lookup of any other starts if it is
+/// asked for). Not under `--json`.
+fn start_toolchain_check(a: &InitArgs, interactive: bool, out: Out) {
+    if out.json {
+        return;
+    }
+    let langs: Vec<Lang> = if interactive {
+        Lang::ALL.to_vec()
+    } else {
+        a.lang
+            .as_deref()
+            .and_then(lang_of_variant)
+            .into_iter()
+            .collect()
+    };
+    toolchain::start(&langs);
+}
+
+/// The language of a built-in variant id (`typescript` is Node).
+fn lang_of_variant(id: &str) -> Option<Lang> {
+    match id {
+        "rust" => Some(Lang::Rust),
+        "go" => Some(Lang::Go),
+        "typescript" => Some(Lang::Node),
+        "python" => Some(Lang::Python),
+        _ => None,
+    }
+}
+
+/// What the toolchain check did, for the report.
+struct ToolchainCheck {
+    step: project::Step,
+    /// An upgrade ran and succeeded: read the version again.
+    upgraded: bool,
+}
+
+/// Puts the check's result in the plan (a dry run says what it would do), and, when the
+/// toolchain is behind, offers the upgrade: at a terminal a yes/no question that defaults to
+/// no, and the command runs only on a yes; without a terminal, with `--yes` or in a dry run
+/// the command is printed and never run. Nothing here fails `init`. The question is asked in
+/// the planning pass (`preview`, before the review) and kept in `kept`; the real run, after
+/// Create, only reads that answer and asks nothing.
+///
+/// # Errors
+/// The person cancelled the question.
+fn check_toolchain(
+    flow: &mut Flow,
+    interactive: bool,
+    preview: bool,
+    kept: &mut Option<(String, bool)>,
+    lang: Lang,
+    state: &State,
+) -> Result<ToolchainCheck, Error> {
+    let ui = flow.ui;
+    let said = state.said(lang);
+    let step = |st: &str, text: String| project::step("toolchain", "Toolchain", st, text, "");
+    let State::Behind { latest, .. } = state else {
+        flow.gate("toolchain", &format!("report the toolchain check: {said}"));
+        let (st, text) = if matches!(state, State::Unchecked { .. }) {
+            ("skipped", said)
+        } else {
+            ("done", said)
+        };
+        return Ok(ToolchainCheck {
+            step: step(st, text),
+            upgraded: false,
+        });
+    };
+    let up = toolchain::upgrade_here(lang, latest);
+    let how = if up.run.is_some() {
+        "asked first, never run by default"
+    } else {
+        "for you to run"
+    };
+    if !flow.gate(
+        "toolchain",
+        &format!(
+            "report the toolchain check: {said}; upgrade with `{}` ({how})",
+            up.shown
+        ),
+    ) {
+        // The planning pass for the review asks it now, so nothing is asked after Create.
+        if preview && interactive && up.run.is_some() && kept.is_none() {
+            ui.info(&said);
+            let yes = ui.confirm(
+                &format!("Upgrade {} now with `{}`?", lang.label(), up.shown),
+                false,
+            )?;
+            *kept = Some((lang.label().to_owned(), yes));
+        }
+        return Ok(ToolchainCheck {
+            step: step("ask", format!("{said}; upgrade with `{}`", up.shown)),
+            upgraded: false,
+        });
+    }
+    let behind = format!("{said}; upgrade with `{}`", up.shown);
+    if up.run.is_none() || !interactive {
+        ui.info(&format!("{behind} (iohr did not run it)"));
+        return Ok(ToolchainCheck {
+            step: step("ask", behind),
+            upgraded: false,
+        });
+    }
+    // Answered in the planning pass; never asked here. No answer is no.
+    let yes = kept
+        .as_ref()
+        .is_some_and(|(l, yes)| *yes && l == lang.label());
+    if !yes {
+        return Ok(ToolchainCheck {
+            step: step("ask", behind),
+            upgraded: false,
+        });
+    }
+    match toolchain::run_upgrade(&up) {
+        Ok(()) => Ok(ToolchainCheck {
+            step: step(
+                "done",
+                format!("upgraded {} with `{}`", lang.label(), up.shown),
+            ),
+            upgraded: true,
+        }),
+        Err(why) => {
+            ui.warn(&format!("the upgrade did not finish: {why}"));
+            Ok(ToolchainCheck {
+                step: step("skipped", format!("{behind}; it did not finish: {why}")),
+                upgraded: false,
+            })
+        }
+    }
+}
+
+/// The most turns the agent gets in `init` when neither a flag nor `[project] agent_turns` says:
+/// init's own default, because `[ask]` in config.toml has no bound. Enough to fetch a site and
+/// write a knowledge base; a wrong request still cannot run away.
+const AGENT_TURNS: u32 = 150;
+/// The most seconds the agent gets in `init` when neither a flag nor `[project] agent_timeout`
+/// says (init's own default).
+const AGENT_SECONDS: u64 = 1800;
+/// The Claude model an `init` agent run uses when neither the flag (`--agent-model`,
+/// `IOHR_INIT_AGENT_MODEL`) nor `[project] agent_model` names one: a build of many files needs
+/// more than the small fast tier `iohr ask` answers with.
+const AGENT_MODEL: &str = "sonnet";
 
 #[allow(
     clippy::too_many_lines,
@@ -574,7 +681,9 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             "--describe needs words: what do you want built?".into(),
         ));
     }
-    if a.agent_turns == Some(0) || a.agent_timeout == Some(0) {
+    if a.agent_turns.or(cfg.project.agent_turns) == Some(0)
+        || a.agent_timeout.or(cfg.project.agent_timeout) == Some(0)
+    {
         return Err(Error::Usage(
             "--agent-turns and --agent-timeout need a number above 0".into(),
         ));
@@ -583,6 +692,9 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         return Err(Error::Failed(no_agent_help()));
     }
     let root = template::user_root()?;
+    // The latest stable of each installed language is looked up on threads of its own while
+    // the person answers; never under --json, and never a reason for init to fail.
+    start_toolchain_check(&a, interactive, out);
     if ui.fancy() {
         ui.intro(if dry {
             "iohr project init (dry run)"
@@ -591,6 +703,25 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         });
     }
 
+    // The Role, before anything is made: a name that is nowhere ends the run here (a dry run
+    // asks nobody, so it looks in the project and the built-in catalogue only).
+    let role = match a.role.as_deref() {
+        Some(name) => Some(
+            runtime::resolve(
+                g,
+                env,
+                runtime::Lookup {
+                    name,
+                    job: None,
+                    root: crate::memory::find_root(&std::env::current_dir().unwrap_or_default())
+                        .as_deref(),
+                    online: !dry,
+                },
+            )
+            .await?,
+        ),
+        None => None,
+    };
     let here = Where::here(cfg.project.root.clone());
     let cx = Exec {
         g,
@@ -599,9 +730,19 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         ui,
         interactive,
         agent: &agent,
-        ask_model: cfg.ask.model.clone(),
+        agent_model: a.agent_model.clone().or(cfg.project.agent_model.clone()),
+        agent_turns: a
+            .agent_turns
+            .or(cfg.project.agent_turns)
+            .unwrap_or(AGENT_TURNS),
+        agent_timeout: a
+            .agent_timeout
+            .or(cfg.project.agent_timeout)
+            .unwrap_or(AGENT_SECONDS),
         ask_thinking: cfg.ask.thinking.clone(),
+        role,
         out,
+        asked: std::cell::RefCell::default(),
     };
     let mut wiz = Wizard {
         ui,
@@ -616,18 +757,43 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         given: None,
         at: Walk::new(),
     };
+    // The team and who reads the project's space: flags answer, else a question at a terminal
+    // (once, after the wizard's own steps, and only when the person is in more than one account).
+    let mut space: Option<project::space::Ask> = None;
     loop {
         wiz.run_to_the_end()?;
+        if space.is_none() {
+            space = Some(
+                project_space::ask(
+                    g,
+                    env,
+                    ui,
+                    a.space.team.as_deref(),
+                    a.space.visibility.as_deref(),
+                    interactive && !dry && !a.space.no_sync,
+                )
+                .await?,
+            );
+        }
+        let resolved = |wiz: &Wizard<'_>| -> Result<Resolved, Error> {
+            let mut r = wiz.resolved()?;
+            r.space = space.clone().unwrap_or_default();
+            Ok(r)
+        };
         // Without a terminal, with `--yes` and in a dry run there is no review: the dry run is
         // the plan, and the flags are the answers.
         if !interactive || dry {
-            return execute(&cx, &wiz.resolved()?, false).await;
+            return execute(&cx, &resolved(&wiz)?, false).await;
         }
-        let r = wiz.resolved()?;
+        let r = resolved(&wiz)?;
         let planned = execute(&cx, &r, true).await;
         wiz.draft.agent_ok = r.agent_ok.get();
         match review(ui, &wiz, planned.err())? {
-            Review::Create => return execute(&cx, &wiz.resolved()?, false).await,
+            Review::Create => {
+                // No question after Create: every answer was taken before the review.
+                let _closed = Ui::close_questions();
+                return execute(&cx, &resolved(&wiz)?, false).await;
+            }
             Review::Change(stage) => wiz.at.jump(stage),
         }
     }
@@ -697,6 +863,7 @@ impl Wizard<'_> {
             describe: self.draft.describe.clone(),
             place: self.draft.folder.clone().ok_or_else(|| missing("folder"))?,
             here: self.here.clone(),
+            space: project::space::Ask::default(),
             agent_ok: std::cell::Cell::new(self.draft.agent_ok),
         })
     }
@@ -789,7 +956,7 @@ impl Wizard<'_> {
         let mut went = Went::Skip;
         if self.a.template.is_none() && self.interactive {
             let default = choose_template(None, self.configured.as_deref());
-            let rows = template::list(&self.root, &default);
+            let rows = template::list(&self.root, &default, self.a.experimental);
             let mut choices = vec![Choice {
                 value: DESCRIBE.into(),
                 label: "Describe it, your agent builds it".into(),
@@ -850,7 +1017,7 @@ impl Wizard<'_> {
         }
         let tpl: Template = template::load(&spec, &self.root).map_err(Error::Usage)?;
         if tpl.meta.status == template::Status::Coming {
-            let rows = template::list(&self.root, "");
+            let rows = template::list(&self.root, "", false);
             return Err(Error::Usage(format!(
                 "the `{}` template is coming; live today: {}",
                 tpl.meta.id,
@@ -904,6 +1071,15 @@ impl Wizard<'_> {
                 )));
             }
             given.insert(LANGUAGE.into(), Answer::Text(l.to_owned()));
+        }
+        if let Some(ci) = a.ci {
+            if !tpl.meta.questions.iter().any(|q| q.key == "ci") {
+                return Err(Error::Usage(format!(
+                    "the `{}` template writes no CI files, so --ci does not apply",
+                    tpl.meta.id
+                )));
+            }
+            given.insert("ci".into(), Answer::Text(ci.word().to_owned()));
         }
         Ok(given)
     }
@@ -1058,9 +1234,57 @@ struct Exec<'a> {
     ui: Ui,
     interactive: bool,
     agent: &'a Option<(Agent, PathBuf)>,
-    ask_model: Option<String>,
+    /// `--agent-model`, `IOHR_INIT_AGENT_MODEL`, else `[project] agent_model`.
+    agent_model: Option<String>,
+    /// The turn cap and the time cap: the flag, else `[project]`, else init's own default.
+    agent_turns: u32,
+    agent_timeout: u64,
     ask_thinking: Option<String>,
+    /// The Role the agent builds in (`--role`, RFC 0211), found before the plan starts.
+    role: Option<runtime::Applied>,
     out: Out,
+    /// What the preview asked, so the real run does not ask it again.
+    asked: std::cell::RefCell<Asked>,
+}
+
+/// The questions `execute` puts to the person (where to keep the data, whether to read the
+/// site), settled once. The review page runs `execute` twice, as a preview and for real; the
+/// second run takes these answers, so nothing is asked or shown twice. They are dropped when
+/// the project's folder, name or description change, because the answers depend on them.
+#[derive(Default)]
+struct Asked {
+    key: String,
+    place: Option<super::project_place::Decision>,
+    crawl: Option<CrawlAnswer>,
+    /// The project's shape, once asked.
+    shape: Option<ShapeAnswer>,
+    /// Whether to upgrade the behind toolchain of that language.
+    upgrade: Option<(String, bool)>,
+    /// The extensions the person said yes to installing, once the offer was put.
+    extensions: Option<(String, Vec<String>)>,
+}
+
+/// What the crawl question settled: the plan, or no crawl (also an answer, not asked again),
+/// and whether to install the crawler first when it is missing (asked with it, before the
+/// review).
+#[derive(Clone)]
+struct CrawlAnswer(Option<super::init_crawl::Plan>, bool);
+
+/// What the shape question settled: the shape, or `None` when nobody answered (the item stays
+/// open; also an answer, not asked again).
+#[derive(Clone)]
+struct ShapeAnswer(Option<String>);
+
+impl Asked {
+    /// Forgets the answers unless they were given for the same project.
+    fn for_project(&mut self, key: String) {
+        if self.key != key {
+            *self = Self {
+                key,
+                ..Self::default()
+            };
+        }
+    }
 }
 
 /// What the person answered, settled: the input of the plan.
@@ -1071,6 +1295,8 @@ struct Resolved {
     describe: Option<String>,
     place: Proposal,
     here: Where,
+    /// The team and who reads the project's space (asked once, after the wizard's steps).
+    space: project::space::Ask,
     /// Whether the agent step was confirmed (asked once, however often the plan is built).
     agent_ok: std::cell::Cell<Option<bool>>,
 }
@@ -1089,6 +1315,10 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     let (g, env, a, ui, interactive, agent, out) =
         (cx.g, cx.env, cx.a, cx.ui, cx.interactive, cx.agent, cx.out);
     let dry = a.dry_run || preview;
+    // A plan id that cannot be one is refused before anything is written.
+    if let Some(id) = a.plan.plan_id.as_deref() {
+        crate::planner::plan_segment(id)?;
+    }
     // The plan: everything below is derived from the answers, and changes nothing but through `flow`.
     let publisher = publisher_of(a.publisher.as_deref(), None);
     let Resolved {
@@ -1098,6 +1328,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         describe,
         place,
         here,
+        space: space_ask,
         ..
     } = r;
     let dir = place.dir.clone();
@@ -1119,6 +1350,52 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             project::one_line_description(describe.as_deref()),
         ));
     }
+    // The installed toolchain, read once: its version fills the files that name one
+    // (`rust-version`) and is told to the agent. A toolchain that will not run keeps the
+    // variant's own default and is not told.
+    let variant = lang.as_deref().and_then(|l| tpl.variant(l));
+    let docs_only = variant.is_some_and(template::VariantDef::is_docs_only);
+    // What this binary is called: the agent runs it by that name, AGENTS.md names it.
+    let me = super::shell::running_bin();
+    // Everything that changes anything goes through `flow`.
+    let mut flow = Flow {
+        dry,
+        ui,
+        would: Vec::new(),
+    };
+    let mut toolchain = variant.and_then(|v| project::toolchain_line(&v.toolchain));
+    // Is it behind the latest stable? (Off under --json, and when the lookup found nothing.)
+    let tool_lang = variant.and_then(|v| Lang::of_toolchain(&v.toolchain));
+    let mut tool_step = None;
+    if let Some(l) = tool_lang
+        && let Some(state) = toolchain::state(l)
+    {
+        // A lookup that ran out of time under load has not read the installed version; this
+        // function has (the line above), so the report still names what is installed.
+        let state = match state {
+            State::Unchecked { installed: None } => State::Unchecked {
+                installed: toolchain.as_deref().and_then(project::installed_version),
+            },
+            other => other,
+        };
+        let mut kept = cx.asked.borrow().upgrade.clone();
+        let done = check_toolchain(&mut flow, interactive, preview, &mut kept, l, &state)?;
+        cx.asked.borrow_mut().upgrade = kept;
+        if done.upgraded {
+            // The files and the agent are told the version that is there now.
+            toolchain = variant.and_then(|v| project::toolchain_line(&v.toolchain));
+        }
+        tool_step = Some(done.step);
+    }
+    if let Some((full, minor)) = toolchain.as_deref().and_then(template::version_in) {
+        for (k, v) in [
+            ("@@TOOLCHAIN_VERSION@@", full),
+            ("@@TOOLCHAIN_MINOR@@", minor),
+        ] {
+            vals.retain(|(x, _)| x != k);
+            vals.push((k.to_owned(), v));
+        }
+    }
     let mut files = template::render(&tpl_lang, &vals).map_err(Error::Failed)?;
     // Every project gets its InOrbit space link, whatever the template (RFC 0103).
     project::add_space_link(&mut files, None);
@@ -1131,12 +1408,30 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             lang: lang.as_deref(),
             describe: describe.as_deref(),
             created_at: &created_at,
+            bin: &me,
         },
     );
     let programs = template::programs(tpl, &vals);
     let runner = lang.as_deref().and_then(|l| tpl.runner(l, &vals));
+    // The folder's context file for `?` and `??`: written once, never over a person's own.
+    if !a.no_io_md && !crate::iomd::has_file(&dir) {
+        let line = |v: &[String]| (!v.is_empty()).then(|| v.join(" "));
+        let (build, test) = runner
+            .as_ref()
+            .map_or((None, None), |r| (line(&r.build), line(&r.test)));
+        crate::iomd::add_starter(
+            &mut files,
+            name,
+            describe.as_deref(),
+            (build.as_deref(), test.as_deref()),
+            &me,
+        );
+    }
     // Reads only, so a dry run finds the same problems a real one would.
     project::check_target(&dir, &files).map_err(Error::Failed)?;
+    // Init run again in the folder it made: files already there are left alone, nothing is
+    // committed over them.
+    let rerun = project::is_rerun(&dir, &files);
     project::check_manifest(&files).map_err(Error::Failed)?;
     if !a.no_smoke
         && let Some(v) = lang.as_deref().and_then(|l| tpl.variant(l))
@@ -1163,7 +1458,8 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
 
     // The steps, and the agent that will run, if one will.
     let mut steps = tpl.steps();
-    if a.no_smoke {
+    // A documents-only language has no program: no smoke test, the plan says nothing about one.
+    if a.no_smoke || docs_only {
         steps.retain(|s| s.name != StepName::Smoke);
     }
     let step_prompt = steps
@@ -1181,6 +1477,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         } else if has_agent_step && interactive {
             if let Some(v) = r.agent_ok.get() {
                 v
+            } else if !dry {
+                // After Create nothing is asked: the planning pass took this answer.
+                false
             } else {
                 let v = ui.confirm(
                     &format!(
@@ -1203,21 +1502,51 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 &tpl.meta.id,
                 answers,
                 &vals,
-                &crate::front::today(),
+                project::Facts {
+                    toolchain: toolchain.as_deref(),
+                    today: &crate::front::today(),
+                    bin: &me,
+                    docs_only,
+                },
             );
-            // The `[ask]` model (else the small fast tier), edits to files only, never shell,
-            // and init's own bounds: nothing the agent is told or says is stored here.
-            let model =
-                ask::choose_model(*ag, None, cx.ask_model.as_deref()).map_err(Error::Usage)?;
-            let max_turns = a.agent_turns.unwrap_or(AGENT_TURNS);
+            // The language's own build and test commands, scoped, and iohr's own document and
+            // memory commands by the name this binary runs under; nothing else of the shell.
+            let mut allow: Vec<String> = variant.map(|v| v.agent_allow.clone()).unwrap_or_default();
+            allow.extend(init_allow(&me));
+            // Init's own model (sonnet unless named), edits to files, the commands above and
+            // init's own bounds: nothing the agent is told or says is stored here.
+            let model = ask::choose_model(
+                *ag,
+                ask::ModelChoice {
+                    flag: cx.agent_model.as_deref(),
+                    role: cx.role.as_ref().and_then(|r| r.model.as_deref()),
+                    default: Some(AGENT_MODEL),
+                    ..ask::ModelChoice::default()
+                },
+            )
+            .map_err(Error::Usage)?;
+            let max_turns = cx.agent_turns;
             agent_run = Some(AgentRun {
                 agent: *ag,
                 bin: bin.clone(),
-                args: ask::argv(*ag, model.as_deref(), true, Some(max_turns), &prompt),
+                args: ask::argv(
+                    *ag,
+                    model.as_deref(),
+                    (true, false),
+                    &allow,
+                    Some(max_turns),
+                    cx.role
+                        .as_ref()
+                        .map(runtime::Applied::system_text)
+                        .as_deref(),
+                    &prompt,
+                )
+                .map_err(Error::Usage)?,
                 prompt,
                 model,
+                role: cx.role.as_ref().map(runtime::Applied::json),
                 max_turns,
-                timeout: Duration::from_secs(a.agent_timeout.unwrap_or(AGENT_SECONDS)),
+                timeout: Duration::from_secs(cx.agent_timeout),
                 thinking: ask::choose_thinking(None, cx.ask_thinking.as_deref())
                     .map_err(Error::Usage)?,
             });
@@ -1244,20 +1573,71 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         steps.insert(st, agent_step);
     }
 
-    // Everything below that changes anything goes through `flow`.
-    let mut flow = Flow {
-        dry,
-        ui,
-        would: Vec::new(),
+    // Where the notes, the crawl and the machine state live (light PRD 0210): asked once,
+    // recorded in inorbit.toml, then every writer follows it through one resolver.
+    cx.asked.borrow_mut().for_project(format!(
+        "{}\n{name}\n{}",
+        dir.display(),
+        describe.as_deref().unwrap_or_default()
+    ));
+    let kept = cx.asked.borrow().place.clone();
+    let placed = if let Some(d) = kept {
+        d
+    } else {
+        let d = super::project_place::decide(a, &dir, name, interactive && dry, ui)?;
+        cx.asked.borrow_mut().place = Some(d.clone());
+        d
     };
-    let state_root = state_root()?;
-    let state = state_root.join(name);
+    let layout = placed.layout.clone();
+    let seed = super::project_place::split_seed(&placed, &mut files);
+    let state = layout
+        .state()
+        .ok_or_else(|| Error::Failed("cannot find the home folder".into()))?;
     let signed_in = flow
         .act_async("signin", "check your sign-in (one call to /v1/me)", || {
             check_sign_in(g, env, ui)
         })
         .await
         .flatten();
+    // The project's space in InOrbit: made or found under the chosen team before anything is
+    // written, so the first commit holds the link. Never a reason for init to fail: what
+    // waiting cures is queued (`iohr project sync` does it later); only a `--team` the person
+    // is not in is refused here.
+    let env_name = g.environment_name().to_owned();
+    let synced: Option<Outcome> = if a.space.no_sync {
+        None
+    } else {
+        let asked = flow
+            .act_async(
+                "space",
+                "make or find the project's space in InOrbit under the chosen team, and link this folder to it",
+                || async {
+                    if signed_in.is_none() {
+                        Ok(Outcome::Queued("you are not signed in".to_owned()))
+                    } else {
+                        project_space::sync(g, env, name, space_ask).await
+                    }
+                },
+            )
+            .await;
+        asked.transpose()?
+    };
+    if let Some(Outcome::Linked(l)) = &synced {
+        if env_name == project::space::PRODUCTION {
+            for (p, text) in &mut files {
+                if p == project::SPACE_FILE {
+                    *text = project::space::link_text(&env_name, &l.id, &l.name, &l.account);
+                } else if p == "inorbit.toml" {
+                    *text = project::space::fill_manifest(text, &l.id);
+                }
+            }
+        } else {
+            files.push((
+                project::space::link_file(&env_name),
+                project::space::link_text(&env_name, &l.id, &l.name, &l.account),
+            ));
+        }
+    }
     let mut report = Report {
         name: name.clone(),
         id: format!("{publisher}/{name}"),
@@ -1266,6 +1646,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         files: files.iter().map(|(p, _)| p.clone()).collect(),
         steps: Vec::new(),
     };
+    report.steps.extend(tool_step);
     let setup = format!(
         "write {} files into {} ({})",
         files.len(),
@@ -1286,6 +1667,34 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             }
             report.files = written;
             report.steps.push(st);
+            // The place: recorded, the machine state ignored when it sits in the project,
+            // the starter notes written where they belong.
+            let at = flow.act("place", &placed.would(), || placed.apply(&dir, &seed));
+            match at {
+                Some(Ok(st)) => report.steps.push(st),
+                Some(Err(e)) => return Err(Error::Failed(e)),
+                None => {}
+            }
+            report
+                .steps
+                .push(project_space::step(synced.as_ref(), &env_name));
+            match &synced {
+                Some(Outcome::Queued(why)) => {
+                    let q = project::space::Queued {
+                        name: name.clone(),
+                        dir: dir.clone(),
+                        env: env_name.clone(),
+                        ask: space_ask.clone(),
+                        queued_at: created_at.clone(),
+                        why: why.clone(),
+                    };
+                    if let Err(e) = project::space::queue(&state, &q) {
+                        warnings.push(e);
+                    }
+                }
+                Some(Outcome::Linked(_)) => project::space::dequeue(&state, &env_name),
+                _ => {}
+            }
         }
         Some(Err(e)) => {
             if let Some(sp) = sp {
@@ -1293,28 +1702,160 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             }
             return Err(Error::Failed(e));
         }
-        None => {}
+        // A preview or a dry run: the place is listed as a step, as the others are.
+        None => {
+            flow.gate("place", &placed.would());
+        }
     }
-    // The built-in roles (security and the language's engineer): imported when signed in.
-    let roles = flow
+    // The built-in roles (security and the language's engineer) go to the account only as part
+    // of the account step above: a local-only init (`--no-sync`) or one without a sign-in
+    // leaves them in the folder, says so, and makes no call. `iohr sync` imports them later.
+    let roles_skip = if a.space.no_sync {
+        Some("init is local only (--no-sync)")
+    } else if !dry && signed_in.is_none() {
+        Some("you are not signed in")
+    } else {
+        None
+    };
+    let roles = if let Some(why) = roles_skip {
+        let said = format!(
+            "the built-in roles stay in atlas/roles/, nothing was sent to your account ({why}); `iohr sync` imports them"
+        );
+        ui.info(&format!("Roles: {said}"));
+        report
+            .steps
+            .push(project::step("roles", "Roles", "skipped", said, ""));
+        None
+    } else {
+        let roles_sp = (!dry && ui.fancy()).then(|| ui.step("Importing the built-in roles"));
+        let roles = flow
+            .act_async(
+                "roles",
+                "import the built-in roles into your InOrbit account (they stay in the project when you are signed out)",
+                || super::atlas::import_for(g, env, &dir, false, false),
+            )
+            .await;
+        match (roles.as_ref().filter(|_| !out.json), roles_sp) {
+            // Drawn: one line that says how it went, the role names in it.
+            (Some(r), Some(sp)) if !r.outcomes.is_empty() || r.message.is_some() => {
+                let (mark, said) = super::atlas::roles_result(r);
+                sp.end(mark, &said);
+            }
+            (Some(r), None) => super::atlas::show_report(ui, r),
+            (_, Some(sp)) => sp.clear(),
+            (None, None) => {}
+        }
+        roles
+    };
+    // The Planner plan the project's builds go through (RFC 0211): made or found, and its id
+    // written into coordination.toml. Signed out, init goes on and says how to set it later.
+    let planned = flow
         .act_async(
-            "roles",
-            "import the built-in roles into InOrbit (kept local when signed out)",
-            || super::atlas::import_for(g, env, &dir, false),
+            "plan",
+            "create or find the project's Planner plan (its id goes into coordination.toml when the project has one)",
+            || {
+                super::project_plan::run(
+                    g,
+                    env,
+                    &dir,
+                    name,
+                    a.plan.plan_id.as_deref(),
+                    a.plan.no_plan,
+                    a.space.no_sync,
+                )
+            },
         )
         .await;
-    if let Some(r) = roles.as_ref().filter(|_| !out.json) {
-        super::atlas::show_report(ui, r);
+    let plan_id = planned.as_ref().and_then(|p| p.id.clone());
+    if let Some(p) = planned {
+        if p.step.state == "skipped" && !out.json {
+            ui.note("Planner", &p.step.said);
+        }
+        report.steps.push(p.step);
+    }
+    // The project's shape (PRD 0210): asked once, in the planning pass before the review, kept
+    // in `Asked`, then recorded and filed as an item in the plan. A dry run asks nothing and
+    // only says what it would do; the real run, after Create, only reads the answer.
+    {
+        let kept = cx.asked.borrow().shape.clone();
+        let answer = if let Some(ShapeAnswer(k)) = kept {
+            k
+        } else if dry && !preview {
+            a.place_args.shape.clone()
+        } else {
+            let k = super::project_shape::pick(
+                a.place_args.shape.as_deref(),
+                interactive && preview,
+                ui,
+                &dir,
+            )?;
+            if preview {
+                cx.asked.borrow_mut().shape = Some(ShapeAnswer(k.clone()));
+            }
+            k
+        };
+        let what = super::project_shape::would(answer.as_deref());
+        let st = flow
+            .act_async("shape", &what, || {
+                super::project_shape::run(g, env, &dir, answer.as_deref(), plan_id.as_deref())
+            })
+            .await;
+        if let Some(st) = st {
+            if st.state == "skipped" && !out.json {
+                ui.note("Planner", &st.said);
+            }
+            report.steps.push(st);
+        }
+    }
+    // A public site, read on this machine when the person said so (PRD 0190.1).
+    let kept = cx.asked.borrow().crawl.clone();
+    let (crawl, install_crawler) = if let Some(CrawlAnswer(c, install)) = kept {
+        (c, install)
+    } else {
+        let c = super::init_crawl::decide(
+            &a.crawl,
+            describe.as_deref(),
+            &layout.shown(&layout.crawl()),
+            interactive && dry,
+            ui,
+            out,
+        )?;
+        // Whether to install a missing crawler is asked here too, before the review.
+        let install = if c.is_some() && preview {
+            super::init_crawl::ask_install(g, ui, out, interactive)?
+        } else {
+            false
+        };
+        cx.asked.borrow_mut().crawl = Some(CrawlAnswer(c.clone(), install));
+        (c, install)
+    };
+    if let Some(plan) = crawl {
+        let what = plan.would();
+        let st = flow
+            .act_async("crawl", &what, || {
+                super::init_crawl::run(g, env, ui, out, install_crawler, &dir, &plan)
+            })
+            .await;
+        if let Some(st) = st {
+            report.steps.push(st);
+        }
     }
     let mut smoke: Option<Smoke> = None;
     let mut agent_failed: Option<String> = None;
+    let mut agent_built = false;
+    let mut stop_note: Option<String> = None;
     for s in &steps {
         match s.name {
             StepName::Git => {
+                let sp = (!dry).then(|| ui.step("Making a git repository"));
                 let r = flow.act("git", "make a git repository with one commit", || {
-                    project::git_step(&dir, name, &tpl.meta.id)
+                    project::git_step(&dir, name, &tpl.meta.id, rerun)
                 });
                 if let Some(st) = r {
+                    if let Some(sp) = sp {
+                        let (mark, said) = step_line(&st);
+                        sp.end(mark, &said);
+                    }
                     report.steps.push(st);
                 }
             }
@@ -1323,15 +1864,25 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                     "register the project: state and cache under {}",
                     state.display()
                 );
+                let sp = (!dry).then(|| ui.step("Registering the project"));
                 let r = flow.act("register", &what, || {
-                    project::register_step(&dir, &state_root, name, &tpl.meta.id, &created_at)
+                    project::register_in(&dir, &state, name, &tpl.meta.id, &created_at)
                 });
                 match r {
                     Some(Ok((_, st))) => {
+                        if let Some(sp) = sp {
+                            let (mark, said) = step_line(&st);
+                            sp.end(mark, &said);
+                        }
                         report.steps.push(st);
                         report.steps.extend(project::cloud_steps(name));
                     }
-                    Some(Err(e)) => return Err(Error::Failed(e)),
+                    Some(Err(e)) => {
+                        if let Some(sp) = sp {
+                            sp.fail(&format!("Could not register the project: {e}"));
+                        }
+                        return Err(Error::Failed(e));
+                    }
                     None => {}
                 }
             }
@@ -1367,18 +1918,22 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             StepName::Agent => {
                 if let Some(r) = &agent_run {
                     let what = format!(
-                        "run {} once in print mode in {} (files only, never shell; at most {} turns and {} s) with the prompt below (not started in a dry run)",
+                        "run {} ({}) once in print mode in {} (it may edit files, fetch pages and run only the language's build and test commands and iohr's atlas and memory commands; at most {} turns and {} s) with the prompt below (not started in a dry run)",
                         r.agent.name(),
+                        r.model.as_deref().unwrap_or("its own model"),
                         dir.display(),
                         r.max_turns,
                         r.timeout.as_secs()
                     );
-                    // The AI label is printed either way; the agent starts only past the gate.
-                    Out::note(&ask::label_for(
-                        "iohr project init",
-                        "AI-built project",
-                        r.agent,
-                    ));
+                    // The AI label is printed once: in the plan pass that a real run follows
+                    // it would show twice, so only the run (or a `--dry-run`) draws it.
+                    if !preview || a.dry_run {
+                        ui.info(&ask::label_for(
+                            "iohr project init",
+                            "AI-built project",
+                            r.agent,
+                        ));
+                    }
                     if dry {
                         flow.gate("agent", &what);
                     } else if flow.gate("agent", &what) {
@@ -1396,6 +1951,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                                 model: r.model.clone(),
                                 rows: true,
                                 made: Some("AI-built"),
+                                summary: true,
                             },
                             ui,
                             waiting: "Your agent is building it",
@@ -1412,26 +1968,54 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                                 "timed_out": ended.timed_out,
                                 "max_turns": r.max_turns,
                                 "timeout_seconds": r.timeout.as_secs(),
+                                "role": r.role,
                             });
                             Out::raw(format!("{line}\n").as_bytes());
                         }
                         if ended.code == 0 {
+                            ui.done(&format!("{} built it in {secs} s", r.agent.name()));
+                            agent_built = true;
                             report.steps.push(project::step(
                                 "agent",
                                 "Agent build",
                                 "done",
                                 format!(
-                                    "{} built it in {secs} s, files only, never shell; AI-built, check it",
-                                    r.agent.name()
+                                    "{} built it in {secs} s with edits{}; AI-built, check it",
+                                    r.agent.name(),
+                                    if docs_only {
+                                        ", the project's atlas and memory commands and the web"
+                                    } else {
+                                        " and the language's build and test commands only"
+                                    }
                                 ),
                                 "",
                             ));
                         } else {
-                            let why = if ended.timed_out {
-                                format!(
-                                    "it did not finish in {} s and was stopped",
-                                    r.timeout.as_secs()
-                                )
+                            let stopped = if ended.timed_out {
+                                Some(Stop::Time(r.timeout.as_secs()))
+                            } else {
+                                ended.turn_capped.then_some(Stop::Turns)
+                            };
+                            let why = if let Some(st) = stopped {
+                                let why = st.said(r.max_turns);
+                                // The work so far is on disk: leave a short note for the run
+                                // that goes on from it (`ask --allow-edits` reads it).
+                                match handoff::write(
+                                    &dir,
+                                    describe.as_deref().unwrap_or("the template's prompt"),
+                                    &ended.last_said,
+                                    &why,
+                                    &me,
+                                ) {
+                                    Ok(n) => {
+                                        stop_note = Some(format!(
+                                            "{n} files are in the folder; {} says what is left",
+                                            handoff::FILE
+                                        ));
+                                    }
+                                    Err(e) => ui.warn(&format!("no handoff note: {e}")),
+                                }
+                                why
                             } else {
                                 ended.failure.clone().unwrap_or_else(|| {
                                     format!("it exited with code {}", ended.code)
@@ -1444,6 +2028,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                                 why.clone(),
                                 "",
                             ));
+                            ui.failed(&format!("{} did not finish: {why}", r.agent.name()));
                             agent_failed = Some(why);
                         }
                     }
@@ -1452,6 +2037,64 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
     }
 
+    // The agent's work is its own commit, once the smoke test has passed it.
+    if agent_built
+        && !dry
+        && agent_failed.is_none()
+        && let Some(r) = &agent_run
+    {
+        let st = project::ai_commit(
+            &dir,
+            name,
+            r.agent.name(),
+            smoke.as_ref().map(|s| s.ok),
+            docs_only,
+        );
+        if !out.json {
+            if st.state == "skipped" {
+                ui.warn(&st.said);
+            } else {
+                ui.info(&st.said);
+            }
+        }
+        report.steps.push(st);
+    }
+    // Extensions that fit the project: one more step, offered at a terminal, a hint
+    // line otherwise.
+    // The question is put in the planning pass; the run after Create installs what was said yes to.
+    let ext_key = format!(
+        "{}\n{}",
+        tpl.meta.id,
+        describe.as_deref().unwrap_or_default()
+    );
+    let mut ext_kept = cx
+        .asked
+        .borrow()
+        .extensions
+        .clone()
+        .filter(|(k, _)| *k == ext_key)
+        .map(|(_, ids)| ids);
+    let offered = super::init_extensions::offer(
+        g,
+        env,
+        ui,
+        out,
+        dry,
+        preview,
+        interactive,
+        &super::init_extensions::Signals {
+            template: &tpl.meta.id,
+            describe: describe.as_deref(),
+        },
+        &mut ext_kept,
+    )
+    .await;
+    if preview {
+        cx.asked.borrow_mut().extensions = ext_kept.map(|ids| (ext_key, ids));
+    }
+    if let Some(st) = offered {
+        report.steps.push(st);
+    }
     if dry {
         dry_report(
             &flow,
@@ -1481,6 +2124,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             "answered": answers.keys().collect::<Vec<_>>(),
             "files": report.files, "signed_in": signed_in, "steps": report.steps, "smoke": smoke,
             "roles": roles,
+            "role": cx.role.as_ref().map(runtime::Applied::json),
             "lines": lines(&report, smoke.as_ref(), signed_in.as_deref()),
         });
         if ran {
@@ -1521,9 +2165,20 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     }
     if let Some(why) = agent_failed {
         // The scaffold stays; one line says how to go on from it.
+        let kept = stop_note.map_or_else(String::new, |n| format!(" ({n})"));
         return Err(Error::Failed(format!(
-            "the agent did not finish: {why}. The project is kept in {}; retry the agent there with `cd {} && iohr ask --allow-edits \"what you want\"`",
+            "the agent did not finish: {why}. The project is kept in {}{kept}; continue with `cd {} && {me} ask --allow-edits \"continue the work\"` (it reads the note), or raise the caps with --agent-turns and --agent-timeout",
             place.shown, place.shown
+        )));
+    }
+    if let Some(st) = report
+        .steps
+        .iter()
+        .find(|s| s.id == "plan" && s.state == "failed")
+    {
+        return Err(Error::Failed(format!(
+            "{}. The project is kept in {}",
+            st.said, place.shown
         )));
     }
     match smoke {
@@ -1574,25 +2229,33 @@ fn dry_report(
                 "cwd": report.dir,
                 "prompt": r.prompt,
                 "model": r.model,
+                "role": r.role,
                 "max_turns": r.max_turns,
                 "timeout_seconds": r.timeout.as_secs(),
             })),
         }));
         return;
     }
+    flow.ui.plan(
+        "What init will do",
+        &flow
+            .would
+            .iter()
+            .map(|(_, w)| w.clone())
+            .collect::<Vec<_>>(),
+    );
     flow.ui.note(
         &format!("{} files, none written", files.len()),
-        &files
-            .iter()
-            .map(|(p, t)| format!("{p}  ({} bytes)", t.len()))
-            .collect::<Vec<_>>()
-            .join("\n"),
+        &plan_lines(files.iter().map(|(p, t)| (p.as_str(), t.len()))).join("\n"),
     );
     if let Some(r) = agent {
         flow.ui.note(
             "The agent would get (AI)",
             &format!(
-                "cd {}\n{}\n\n{}",
+                "model {}, at most {} turns and {} s\n\ncd {}\n{}\n\n{}",
+                r.model.as_deref().unwrap_or("its own"),
+                r.max_turns,
+                r.timeout.as_secs(),
                 report.dir.display(),
                 ask::shell_line(
                     &r.bin.display().to_string(),
@@ -1616,7 +2279,7 @@ fn dry_report(
 /// found here and not later). `Some(who)` when signed in.
 async fn check_sign_in(g: &Global, env: &Env, ui: Ui) -> Option<String> {
     let sign_in = ui.step("Checking your sign-in");
-    let signed_in = match session(g, env).await {
+    let signed_in = match shared_session(g, env).await {
         Ok(s) => match s.api.get::<serde_json::Value>("/v1/me", &[]).await {
             Ok(me) => Some(format!(
                 "{} ({}, account {})",
@@ -1639,8 +2302,21 @@ async fn check_sign_in(g: &Global, env: &Env, ui: Ui) -> Option<String> {
     signed_in
 }
 
-/// The drawn ending: what is left to do in one line (`--verbose` lists it), and an outro
-/// with the next commands. Nothing here claims a step that did not happen.
+/// How a finished report step reads on the terminal: its mark and one line. Only `done` is a
+/// check; a step that was skipped or waits on a decision says so in its line.
+pub(super) fn step_line(st: &project::Step) -> (Mark, String) {
+    let mark = Mark::of(&st.state);
+    let said = match st.state.as_str() {
+        "done" => format!("{}: {}", st.title, st.said),
+        "skipped" => format!("{} skipped: {}", st.title, st.said),
+        "failed" => format!("{} failed: {}", st.title, st.said),
+        _ => format!("{} waits: {}", st.title, st.said),
+    };
+    (mark, said)
+}
+
+/// The drawn ending: the next commands, and under `--verbose` what init did not do. Nothing
+/// here claims a step that did not happen.
 fn finish(
     ui: Ui,
     verbose: bool,
@@ -1650,21 +2326,8 @@ fn finish(
     smoke: Option<&Smoke>,
     signed_in: Option<&str>,
 ) {
-    let later: Vec<String> = lines(r, smoke, signed_in)
-        .into_iter()
-        .filter(|l| l.starts_with("not yet:"))
-        .collect();
-    let asked: Vec<String> = lines(r, smoke, signed_in)
-        .into_iter()
-        .filter(|l| l.starts_with("asked:"))
-        .collect();
-    for a in &asked {
-        ui.info(a);
-    }
-    if verbose {
-        ui.note("Comes later", &later.join("\n"));
-    } else if !later.is_empty() {
-        ui.info(&later_line(later.len()));
+    if verbose && let Some(body) = not_built_yet(&lines(r, smoke, signed_in)) {
+        ui.note("Not built yet (RFC 0127.1, RFC 0127.2)", &body);
     }
     let next = next_lines(is_extension(r), runs_in_ext_dev(lang));
     let width = next.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
@@ -1677,23 +2340,77 @@ fn finish(
     ui.outro("Done.");
 }
 
-/// The one line that replaces the list of what waits on an API that does not exist yet.
-fn later_line(n: usize) -> String {
-    let things = if n == 1 { "thing comes" } else { "things come" };
-    format!("{n} {things} later (RFC 0127.x): run with --verbose to list them")
+/// What init does not do, listed only under `--verbose`: the steps that wait on an API that
+/// does not exist yet (`not yet:`). The editor's own ask is Desktop's, not init's, so it is not
+/// a line here: the ending already says Code asks first.
+fn not_built_yet(lines: &[String]) -> Option<String> {
+    let picked: Vec<&str> = lines
+        .iter()
+        .map(String::as_str)
+        .filter(|l| l.starts_with("not yet:"))
+        .collect();
+    (!picked.is_empty()).then(|| picked.join("\n"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{later_line, publisher_of};
+    use super::{Lang, lang_of_variant, language_choices, not_built_yet, publisher_of};
+    use crate::template::{self, Spec};
+    use std::path::Path;
 
     #[test]
-    fn the_later_line_counts_and_points_at_verbose() {
-        assert_eq!(
-            later_line(5),
-            "5 things come later (RFC 0127.x): run with --verbose to list them"
+    fn the_picker_hint_says_where_the_installed_toolchain_stands() {
+        let tpl =
+            template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
+        let hint_of = |id: &str, behind: Option<&str>| {
+            let (choices, _) = language_choices(
+                &tpl,
+                |_| true,
+                |v| {
+                    (v.id == "rust")
+                        .then(|| behind.map(str::to_owned))
+                        .flatten()
+                },
+            );
+            choices.into_iter().find(|c| c.value == id).unwrap().hint
+        };
+        assert!(
+            hint_of("rust", Some("rustc 1.90.0, 1.93.0 is out"))
+                .starts_with("cargo found \u{b7} rustc 1.90.0, 1.93.0 is out"),
+            "{}",
+            hint_of("rust", Some("rustc 1.90.0, 1.93.0 is out"))
         );
-        assert!(later_line(1).starts_with("1 thing comes later"));
+        // No lookup (offline off, --json, a language with no source): the hint is as before.
+        assert!(hint_of("rust", None).starts_with("cargo found"));
+        assert!(!hint_of("rust", None).contains('\u{b7}'));
+    }
+
+    #[test]
+    fn a_variant_id_is_its_language() {
+        assert_eq!(lang_of_variant("typescript"), Some(Lang::Node));
+        assert_eq!(lang_of_variant("rust"), Some(Lang::Rust));
+        assert_eq!(lang_of_variant("go"), Some(Lang::Go));
+        assert_eq!(lang_of_variant("python"), Some(Lang::Python));
+        assert_eq!(lang_of_variant("cobol"), None);
+    }
+
+    #[test]
+    fn only_steps_init_did_not_do_are_listed_and_only_when_there_are_some() {
+        let lines: Vec<String> = [
+            "done: wrote inorbit.toml",
+            "not yet: a Keychain slot for the project's own token",
+            "not yet: its own monitors",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(
+            not_built_yet(&lines).as_deref(),
+            Some("not yet: a Keychain slot for the project's own token\nnot yet: its own monitors")
+        );
+        assert_eq!(
+            not_built_yet(&["done: wrote inorbit.toml".to_owned()]),
+            None
+        );
     }
 
     #[test]
@@ -1703,5 +2420,52 @@ mod tests {
         assert_eq!(publisher_of(None, None), "local");
         assert_eq!(publisher_of(Some("bad slug"), None), "local");
         assert_eq!(publisher_of(Some("x"), None), "local");
+    }
+}
+
+/// The dry run's file list: one line per file, except that a folder holding more than
+/// [`FOLDED`] files (the memory facts) is one line with its count and size.
+fn plan_lines<'a>(files: impl Iterator<Item = (&'a str, usize)> + Clone) -> Vec<String> {
+    const FOLDED: usize = 5;
+    let folder = |p: &'a str| p.rsplit_once('/').map_or("", |(d, _)| d);
+    let mut counts: std::collections::BTreeMap<&str, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for (p, n) in files.clone() {
+        let c = counts.entry(folder(p)).or_default();
+        c.0 += 1;
+        c.1 += n;
+    }
+    let mut shown = std::collections::BTreeSet::new();
+    let mut lines = Vec::new();
+    for (p, n) in files {
+        let d = folder(p);
+        match counts.get(d) {
+            Some(&(count, bytes)) if !d.is_empty() && count > FOLDED => {
+                if shown.insert(d) {
+                    lines.push(format!("{d}/  ({count} files, {bytes} bytes)"));
+                }
+            }
+            _ => lines.push(format!("{p}  ({n} bytes)")),
+        }
+    }
+    lines
+}
+
+#[cfg(test)]
+mod plan_lines_tests {
+    #[test]
+    fn a_folder_of_many_files_is_one_line_and_the_rest_stay_one_per_file() {
+        let mut files = vec![("README.md", 10), ("src/main.rs", 20)];
+        let facts: Vec<String> = (0..7).map(|i| format!(".inorbit/memory/f{i}.md")).collect();
+        files.extend(facts.iter().map(|p| (p.as_str(), 3)));
+        let lines = super::plan_lines(files.iter().copied());
+        assert_eq!(
+            lines,
+            [
+                "README.md  (10 bytes)",
+                "src/main.rs  (20 bytes)",
+                ".inorbit/memory/  (7 files, 21 bytes)"
+            ]
+        );
     }
 }

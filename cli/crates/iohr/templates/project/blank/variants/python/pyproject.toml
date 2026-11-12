@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "@@NAME@@"
 version = "0.1.0"
 description = "@@ID@@"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 
 [tool.setuptools.packages.find]
 where = ["src"]

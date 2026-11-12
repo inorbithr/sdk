@@ -24,14 +24,15 @@ use crate::environments::{self, Environment, Environments};
     long_about,
     propagate_version = true,
     max_term_width = 100,
-    styles = crate::ui::clap_styles(),
-    after_help = "Exit codes: 0 ok, 1 a finding or a failure, 2 usage, 3 not signed in, 4 forbidden."
+    styles = crate::ui::clap_styles()
 )]
 pub struct Cli {
     #[command(flatten)]
     pub global: Global,
+    /// None is bare `iohr`: on a terminal it enters the session (the shell with the panel);
+    /// anywhere else the binary prints the usage report.
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 /// Flags every command takes.
@@ -72,20 +73,49 @@ pub struct Global {
         long,
         global = true,
         env = "IOHR_SIGN_IN",
+        hide_short_help = true,
         value_enum,
         value_name = "WHO"
     )]
     pub sign_in: Option<SignIn>,
-    /// With `--sign-in io`: the personality named in the `x-iohr-via` attribution header
-    /// (RFC 0065.2), such as `improver`. Attribution only, it grants nothing. Not `--via`,
-    /// which `iohr ask` uses for where an answer comes from.
-    #[arg(long, global = true, env = "IOHR_VIA_PERSONALITY", value_name = "NAME")]
+    /// With `--sign-in io`: the role named in the `x-iohr-via` attribution header, such as
+    /// `improver`. Attribution only, it grants nothing. Not `--via`, which `iohr ask` uses for
+    /// where an answer comes from.
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_ROLE",
+        value_name = "NAME",
+        hide_short_help = true
+    )]
+    pub via_role: Option<String>,
+    /// The old name of `--via-role`, kept so scripts keep working. The header it sets is
+    /// unchanged (`personality=...`).
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_PERSONALITY",
+        value_name = "NAME",
+        hide = true
+    )]
     pub via_personality: Option<String>,
     /// With `--sign-in io`: the agent session named in `x-iohr-via`.
-    #[arg(long, global = true, env = "IOHR_VIA_SESSION", value_name = "ID")]
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_SESSION",
+        value_name = "ID",
+        hide_short_help = true
+    )]
     pub via_session: Option<String>,
     /// With `--sign-in io`: the coordinator job named in `x-iohr-via`.
-    #[arg(long, global = true, env = "IOHR_VIA_JOB", value_name = "ID")]
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_JOB",
+        value_name = "ID",
+        hide_short_help = true
+    )]
     pub via_job: Option<String>,
     /// Where profiles are kept (default: the platform's config directory).
     #[arg(long, global = true, env = "IOHR_CONFIG_DIR", hide = true)]
@@ -93,6 +123,27 @@ pub struct Global {
     /// Where extensions are kept (default: the platform's data directory).
     #[arg(long, global = true, env = "IOHR_DATA_DIR", hide = true)]
     pub data_dir: Option<PathBuf>,
+}
+
+/// The global flags that take a value, as they are typed (`--profile`, `-p`), read from the
+/// definition above so a new one is never forgotten. Code that walks a raw command line
+/// uses it to tell a flag's value from the command (`iohr --profile session session`).
+#[must_use]
+pub fn global_value_flags() -> Vec<OsString> {
+    let command = Global::augment_args(clap::Command::new("iohr"));
+    let mut flags = Vec::new();
+    for arg in command.get_arguments() {
+        if !arg.get_action().takes_values() {
+            continue;
+        }
+        if let Some(long) = arg.get_long() {
+            flags.push(OsString::from(format!("--{long}")));
+        }
+        if let Some(short) = arg.get_short() {
+            flags.push(OsString::from(format!("-{short}")));
+        }
+    }
+    flags
 }
 
 /// Who signs in when it is not a person.
@@ -103,6 +154,21 @@ pub enum SignIn {
 }
 
 impl Global {
+    /// The role named for attribution: `--via-role` (`IOHR_VIA_ROLE`), else the hidden old
+    /// name `--via-personality` (`IOHR_VIA_PERSONALITY`).
+    #[must_use]
+    pub fn via_role(&self) -> Option<&String> {
+        self.via_role.as_ref().or(self.via_personality.as_ref())
+    }
+
+    /// The name of the environment this run targets: `--env`, `IOHR_ENV`, else the default.
+    #[must_use]
+    pub fn environment_name(&self) -> &str {
+        self.env
+            .as_deref()
+            .unwrap_or_else(|| Environments::builtin().default_name())
+    }
+
     /// The environment this run targets: `--env`, `IOHR_ENV`, else the default.
     #[must_use]
     pub fn environment(&self) -> &'static Environment {
@@ -165,6 +231,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     (
         "Build",
         &[
+            "init",
             "project",
             "atlas",
             "sync",
@@ -178,13 +245,37 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ),
     (
         "Agents",
-        &["ask", "shell", "runner", "coordinator", "memory"],
+        &[
+            "ask",
+            "asks",
+            "context",
+            "permissions",
+            "shell",
+            "theme",
+            "runner",
+            "session",
+            "stop",
+            "coordinator",
+            "memory",
+        ],
     ),
     (
         "Operate",
-        &["tunnel", "browser", "upgrade", "completion", "help"],
+        &[
+            "ui",
+            "tunnel",
+            "browser",
+            "doctor",
+            "upgrade",
+            "completion",
+            "help",
+        ],
     ),
 ];
+
+/// The exit codes, as the root help ends with them. They are a contract (`Error::exit_code`).
+pub const EXIT_CODES: &str = "Exit codes: 0 ok, 1 a finding or a failure, 2 usage, 3 not signed in, \
+     4 forbidden, 75 a runner stopped to restart after an upgrade.";
 
 /// The command tree `main` parses with: [`Cli`]'s, with the root help grouped by
 /// [`GROUPS`] and colour off under `--json` (a pipe and `NO_COLOR` are clap's own rules).
@@ -203,6 +294,31 @@ pub fn command(json: bool) -> clap::Command {
     }
     let styles = cmd.get_styles().clone();
     let (head, lit) = (styles.get_header(), styles.get_literal());
+    // The examples every command ends its help with: the same table the usage errors read.
+    let paint = |style: &clap::builder::styling::Style, text: &str| {
+        format!("{}{text}{}", style.render(), style.render_reset())
+    };
+    for (path, list) in crate::examples::ALL {
+        let mut text = crate::examples::block(
+            list,
+            &crate::examples::Style {
+                head: &|t| paint(head, t),
+                command: &|t| paint(lit, t),
+                note: &str::to_owned,
+            },
+        );
+        if path.is_empty() {
+            // The root also says where to begin and what its exit codes mean.
+            let _ = write!(
+                text,
+                "\n\n{} {}, then {}\n\n{EXIT_CODES}",
+                paint(head, "Get started:"),
+                paint(lit, "iohr login"),
+                paint(lit, "iohr doctor"),
+            );
+        }
+        cmd = with_after_help(cmd, path, &text);
+    }
     let listed: Vec<(String, String)> = cmd
         .get_subcommands()
         .filter(|c| !c.is_hide_set())
@@ -245,6 +361,14 @@ pub fn command(json: bool) -> clap::Command {
     cmd.help_template(template)
 }
 
+/// `text` as the `after_help` of the command at `path` (a subcommand's, however deep).
+fn with_after_help(cmd: clap::Command, path: &[&str], text: &str) -> clap::Command {
+    match path.split_first() {
+        None => cmd.after_help(text.to_owned()),
+        Some((first, rest)) => cmd.mut_subcommand(first, |c| with_after_help(c, rest, text)),
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Sign in and add a profile.
@@ -284,6 +408,14 @@ pub enum Command {
     /// The coordinator's jobs and queued asks: list and file work.
     #[command(subcommand)]
     Coordinator(CoordinatorCommand),
+    /// Read and answer the asks waiting for you: list, show, deny, question.
+    ///
+    /// The asks agents file for you (a pull request to merge, a roll, a review). `list` and
+    /// `show` stay live on a terminal and print once with `--once`, `--json` or in a pipe.
+    /// You can deny an ask or put a question to its agent here; approving needs your phone's
+    /// key, so `approve` says so and waits for it.
+    #[command(subcommand)]
+    Asks(AsksCommand),
     /// Keep what a project knows as files, check it, and sync it when you choose.
     ///
     /// Memory is local first: one Markdown file per memory in `.inorbit/memory/` (committed with
@@ -316,6 +448,18 @@ pub enum Command {
     /// machine, and what is installed. The same as `iohr ext packages`.
     #[command(hide = true)]
     Packages,
+    /// Check this machine for the known problems with iohr and say how to fix each.
+    ///
+    /// Looks for a sign-in that is gone, the MCP bridge not answering, a nearly full disk
+    /// and a `config.toml` that does not parse. Exits 1 when something fails. `--fix` runs
+    /// the safe fixes (those that only restart something already down) now; with
+    /// `[doctor] auto_fix = true` in `config.toml` they also run on their own, and the `?`
+    /// card tells you what it found. Every other fix is shown, never run.
+    Doctor {
+        /// Run the safe fixes for this run.
+        #[arg(long)]
+        fix: bool,
+    },
     /// Update iohr to the newest release.
     ///
     /// Update this `iohr` to the newest release, the way it was installed: Homebrew runs
@@ -327,6 +471,19 @@ pub enum Command {
         /// Only say whether a newer release exists and what would run; change nothing.
         #[arg(long)]
         check: bool,
+    },
+    /// Sign a built iohr the way releases are signed (the preview install, `cli:preview-install`).
+    ///
+    /// Signs the binary at PATH with this Mac's Apple Development or Developer ID
+    /// certificate and the identifier `hr.inorbit.iohr`, the same signing `iohr upgrade`
+    /// does (`IOHR_SIGN_IDENTITY` names an identity; unset is `auto`; `-`, which
+    /// means "do not sign", is refused), so the Keychain
+    /// trusts every build of it alike. Fails when it cannot sign: a preview that stays
+    /// ad hoc is the problem this exists to remove.
+    #[command(hide = true)]
+    SignBinary {
+        /// The binary to sign, in place.
+        path: PathBuf,
     },
     /// Settings besides profiles: where extensions come from, which keys may sign them.
     #[command(subcommand)]
@@ -349,6 +506,11 @@ pub enum Command {
     /// from sign-in to a smoke test, and reports what you now have.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Create a project: the same as `iohr project init`.
+    ///
+    /// Sets up a project of your own and creates it in InOrbit under your team, for the
+    /// environment `--env` names, linked in `.inorbit/space`. See `iohr project init --help`.
+    Init(Box<InitArgs>),
     /// Keep the project's PRDs, RFCs, ADRs and studies in its atlas/ folder.
     ///
     /// The atlas: plain files in the project's `atlas/` folder (PRDs, RFCs, ADRs and studies as
@@ -373,19 +535,84 @@ pub enum Command {
     /// JSON lines. Nothing is changed unless you pass `--allow-edits` (files only); shell
     /// commands are never allowed. iohr never stores the question or the answer. Defaults
     /// come from `[ask]` in config.toml; the flags win for one call.
-    Ask(AskArgs),
+    Ask(Box<AskArgs>),
+    /// The IO.md files `?` and `??` read in this folder.
+    ///
+    /// Prints the chain of `IO.md` (or `io.md`) files that `? question` loads, the way a
+    /// `CLAUDE.md` works: your own file in the config folder, then the project root's down
+    /// to this folder, farthest first, the nearest winning. The root is the folder with
+    /// `inorbit.toml`, else the git root. Each file is cut at 4 KiB, all together at 8 KiB;
+    /// a cut is said. `--full` also prints the text that is sent; `--json` the same as data.
+    Context(ContextArgs),
     /// Shell integration: `? question` at your prompt asks your AI agent.
     ///
     /// `iohr shell hook zsh` prints what makes `? question` at your prompt ask your own AI
     /// agent. Add `eval "$(iohr shell hook zsh)"` to ~/.zshrc.
     #[command(subcommand)]
     Shell(ShellCommand),
+    /// The app's terminal look for Terminal.app and zsh
+    ///
+    /// `iohr theme list` shows the themes (the app's own, generated from it); `iohr theme
+    /// install NAME` writes the Terminal.app profile under ~/.inorbit/term and remembers the
+    /// theme; `--terminal` opens the profile in Terminal.app and `--prompt` turns on the zsh
+    /// prompt (it needs the shell hook, and keeps a prompt you set yourself unless you pass
+    /// `--replace-prompt`). `iohr theme off` turns the prompt off. Local files only; ~/.zshrc
+    /// is never edited.
+    #[command(subcommand)]
+    Theme(ThemeCommand),
+    /// Rules for what Io may run or open when you ask it something.
+    ///
+    /// `iohr ask` (and `?` at your prompt) asks you before Io runs a command. Your answers
+    /// are rules in Claude Code's own grammar (`Bash(ls:*)`, `Read(./src/**)`,
+    /// `WebFetch(domain:example.com)`), kept in `.inorbit/permissions.toml` in the project
+    /// and in your config folder. A deny rule beats an allow rule, and keys, `.env` files
+    /// and credentials are never allowed by any rule or answer. Every decision is appended
+    /// to `.inorbit/permissions.log` (the tool and the rule, never output or file contents).
+    #[command(subcommand)]
+    Permissions(PermissionsCommand),
+    /// Runs your shell with the floating InOrbit panel over it (menu, approvals, workloads).
+    ///
+    /// `--demo` fills the panel with labelled stub data; `--demo --variant rail|accordion|band`
+    /// prints the older static design drawings instead.
+    #[command(hide = true)]
+    Panel(PanelArgs),
+    /// Serves the permission questions of one `iohr ask` run to Claude Code (not for you).
+    #[command(name = "permission-server", hide = true)]
+    PermissionServer {
+        /// The private socket of the `iohr ask` that started it.
+        #[arg(long, value_name = "PATH")]
+        socket: std::path::PathBuf,
+    },
     /// Run coordinator turns on this machine.
     ///
     /// The coordinator's runner: this machine runs coordinator turns on your own
-    /// installed `claude`, on your own subscription.
+    /// installed `claude`, on an Anthropic API key you store with `iohr runner api-key
+    /// set` (the path for an organisation's work). Running on your own Claude plan
+    /// instead is for personal use only: it is off until you turn it on in config.toml
+    /// and accept the notice `iohr runner personal-use` shows.
     #[command(subcommand)]
     Runner(RunnerCommand),
+    /// Open this project's session: one process hosts its Roles while iohr is open.
+    ///
+    /// Joins this project's session host (RFC 0213), starting it when none runs: one
+    /// `iohr runner run --session DIR` process per project that hosts its Roles and works from
+    /// a durable queue (a `DuckDB` file in iohr's data directory, so nothing is lost when it
+    /// stops or the machine restarts). The command stays open as the session and prints
+    /// nothing on stdout; Ctrl-C, SIGTERM or the terminal closing leaves it. The host stops
+    /// when the last session has left, or on `iohr stop`.
+    ///
+    /// RFC 0213: every `?` and `??` ask in the project's folder is queued for the hosted
+    /// Roles (`--role` narrows them), which answer it at the same time and show each answer
+    /// as it lands. A task still waiting when the host stops is answered by the next host.
+    Session(SessionArgs),
+    /// Stop this project's session host.
+    ///
+    /// Tells the project's session host to stop. An answer a Role is still writing is cut
+    /// short and goes back to the queue (the next host gives it again), then
+    /// the host ends; `--wait` (15 seconds by default) waits until it has, and says
+    /// `stopping` when it has not yet. A task cut short by a crash instead is taken again by
+    /// the next host as soon as it starts.
+    Stop(StopArgs),
     /// Install the InOrbit Trails browser extension.
     ///
     /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
@@ -398,6 +625,14 @@ pub enum Command {
     /// `ssh -N -L` until Ctrl-C; binds 127.0.0.1 only and goes through Envoy, never to a
     /// service directly. The environment is `--env` (production by default).
     Tunnel(Tunnel),
+    /// Serve and open the InOrbit web UI on this machine.
+    ///
+    /// The web UI (`sdk/ui`) with the desktop app's window: frame, header, sidebar, menus
+    /// and right pane, and the panels of installed extensions. Bare `iohr ui` serves the
+    /// built UI on a loopback address and opens it; `iohr ui serve` serves without
+    /// opening. It listens on 127.0.0.1 only (`[::1]` when that is unavailable) and
+    /// answers only requests addressed to that host and port.
+    Ui(UiArgs),
     /// Print a shell completion script.
     Completion {
         /// The shell.
@@ -505,9 +740,12 @@ pub enum RunnerCommand {
     ///
     /// Register this machine as one of your runners: its name, system and what it can run.
     ///
-    /// Needs `claude` on your PATH, signed in with your subscription (`claude`, then
-    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the seat
-    /// `claude auth status` names (organisation and email). Run it again and it says the runner exists; with
+    /// Needs `claude` on your PATH and an Anthropic API key stored with `iohr runner
+    /// api-key set`; or, for personal use only, `claude` signed in to your own plan
+    /// (`claude`, then `/login`) with `claude_auth = "any"` or `"plan"` in `[runner]` and the notice
+    /// accepted. The key never leaves the machine; on your own plan nothing about the
+    /// sign-in does except a hash of the seat `claude auth status` names (organisation
+    /// and email). Run it again and it says the runner exists; with
     /// `--refresh` it sends the registration again with the key this machine holds, so
     /// the runner keeps its id and the coordinator records its current sign-in.
     Register {
@@ -571,6 +809,11 @@ pub enum RunnerCommand {
         /// verified path and restarts itself.
         #[arg(long)]
         no_auto_upgrade: bool,
+        /// Run as a project's session host (RFC 0213): the runner hosts the project's
+        /// Roles beside its turns, never upgrades itself, and stops when the last session
+        /// has left, on `iohr stop`, on SIGTERM or on Ctrl-C. `iohr session` starts it.
+        #[arg(long, value_name = "DIR")]
+        session: Option<PathBuf>,
         #[command(flatten)]
         account: AccountArg,
     },
@@ -622,6 +865,31 @@ pub enum RunnerCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Store or remove the Anthropic API key this machine's runner runs Claude on.
+    ///
+    /// The key is kept in your profile's credential store (the macOS Keychain on a Mac;
+    /// a file only for a profile made with `--insecure-storage`), never in config.toml,
+    /// and is given to `claude` alone when it starts, as `ANTHROPIC_API_KEY`. A running
+    /// runner reads it at start: restart it after a change.
+    #[command(subcommand)]
+    ApiKey(RunnerApiKeyCommand),
+    /// Read, accept or withdraw the personal-use notice for your own Claude plan.
+    ///
+    /// Running the runner on your own Claude plan, rather than an API key, is for
+    /// personal use only. With no flag this shows the notice and whether you accepted
+    /// it; `--accept` records that you accept it on this machine (the notice's version
+    /// and the date, kept in `runner/personal-use.json`, never sent), for a year or
+    /// until the notice changes. It takes `claude_auth = "any"` or `"plan"` in `[runner]` as
+    /// well.
+    /// Needs no sign-in.
+    PersonalUse {
+        /// Accept the notice shown.
+        #[arg(long)]
+        accept: bool,
+        /// Withdraw an acceptance: the runner no longer runs on your own plan.
+        #[arg(long, conflicts_with = "accept")]
+        withdraw: bool,
+    },
     /// Show or enrol this machine's run key.
     ///
     /// This machine's run key: the P-256 key that signs what it reports on approved
@@ -648,6 +916,84 @@ pub enum RunnerCommand {
         /// ask nothing.
         #[arg(long, conflicts_with_all = ["proof", "label"])]
         show: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Remove job checkouts, mirrors and build directories nothing uses.
+    ///
+    /// Remove what nothing has used for `workspace_keep_days` (14 by default): job
+    /// checkouts, repository mirrors with no checkout left on them, and their build
+    /// directories; with `workspace_max_gb` set, also the oldest unused while everything
+    /// takes more than that. A checkout a live lease holds is never touched, nor anything
+    /// used in the last hour. The runner does the same on its own while it holds no
+    /// lease. Needs no sign-in.
+    Prune {
+        /// List what would be removed; remove nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Install the runner as a service of your user, started at login.
+    ///
+    /// On macOS a `LaunchAgent` (`hr.inorbit.runner`, or `hr.inorbit.runner-<profile>`
+    /// with `--profile`), on Linux a systemd user unit (`iohr-runner.service`, or
+    /// `iohr-runner-<profile>.service`); never needs sudo.
+    #[command(subcommand)]
+    Service(RunnerServiceCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerServiceCommand {
+    /// Write the service file and start `iohr runner run` as a service of your user.
+    ///
+    /// Writes the `LaunchAgent` (macOS) or systemd user unit (Linux) that runs this `iohr`
+    /// as `iohr runner run` (with `--profile`, for that profile), and starts it: on macOS
+    /// with `launchctl bootstrap gui/<uid>`, on Linux with `systemctl --user enable` and
+    /// `restart`. Says each step first. Needs no sign-in and never sudo; the runner itself
+    /// needs `iohr runner register` first.
+    Install {
+        /// Print the steps and the file; write and start nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Replace a service file of that name that differs from this one.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Stop the service and remove its file.
+    ///
+    /// Stops the service (`launchctl bootout`, or `systemctl --user disable --now`) and
+    /// removes its file. `--purge` also removes the profile's runner key and run key from
+    /// the credential store and the runner's approvals state; the shared checkouts,
+    /// mirrors and build directories go too once no other runner service is installed.
+    /// `--purge` needs the profile's sign-in, to name the account.
+    Uninstall {
+        /// Print the steps; stop and remove nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Also remove the runner's keys and state.
+        #[arg(long)]
+        purge: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerApiKeyCommand {
+    /// Store the key: asked for without echo on a terminal, or read from a file or
+    /// standard input. Never give it as an argument.
+    Set {
+        /// Read the key from this file (at most 64 KiB; surrounding white space is
+        /// dropped).
+        #[arg(long, value_name = "PATH", conflicts_with = "stdin")]
+        file: Option<std::path::PathBuf>,
+        /// Read the key from standard input.
+        #[arg(long)]
+        stdin: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Remove the stored key.
+    Remove {
         #[command(flatten)]
         account: AccountArg,
     },
@@ -1204,13 +1550,15 @@ pub enum ExtCommand {
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=200))]
         page_size: Option<u32>,
     },
-    /// Show one extension in the catalogue.
+    /// Show one extension in the catalogue, or list them all.
     ///
     /// One extension in the catalogue: what it does, its publisher, signer, scopes,
     /// privileges in plain words, evidence, versions and the line that installs it.
+    /// With no name, the catalogue itself, the list `ext search` prints (a listing not
+    /// released yet reads "coming").
     Show {
-        /// PUBLISHER/NAME, such as inorbit/agent.
-        extension: String,
+        /// PUBLISHER/NAME, such as inorbit/agent (default: list the catalogue).
+        extension: Option<String>,
     },
     /// Verify and install an extension.
     ///
@@ -1367,9 +1715,10 @@ pub struct AskArgs {
     pub question: Vec<String>,
     #[command(flatten)]
     pub headless: HeadlessArgs,
-    /// Open the menu under a `?` card, for the shell hook: pick Run, Copy, Follow up, Explain
-    /// or Open with a letter or the arrows. It asks no model, runs nothing, and prints the one
-    /// line to put on the prompt (or nothing) on stdout.
+    /// Open the menu under a `?` card, for the shell hook: pick Run, Copy, Follow up, Explain,
+    /// Open or Undo with a letter or the arrows. It asks no model, runs nothing, and prints the one
+    /// line for the hook (or nothing) on stdout: Run's command ends with a 0x1e character and
+    /// `run`, which the hook executes at once.
     #[arg(long, conflicts_with_all = ["interactive", "headless", "card", "hook"])]
     pub menu: bool,
     /// With `--menu`: the command the answer suggested.
@@ -1378,6 +1727,42 @@ pub struct AskArgs {
     /// With `--menu`: the file (relative to `--cwd`) or `https://` link the answer named.
     #[arg(long, value_name = "LINK", requires = "menu")]
     pub link: Option<String>,
+    /// With `--menu`: the permission rules this answer's run saved, separated by the unit
+    /// separator (U+001F). Undo takes back the ones the project file still holds.
+    #[arg(
+        long,
+        value_name = "RULES",
+        requires = "menu",
+        value_delimiter = '\u{1f}'
+    )]
+    pub undo: Vec<String>,
+    /// With `--menu`: the folder Io needs your OK to read (Allow keeps the yes for it).
+    #[arg(long, value_name = "FOLDER", requires = "menu")]
+    pub access: Option<std::path::PathBuf>,
+    /// With `--menu`: the next steps the answer offered as `kind:value` (`read:api`,
+    /// `search:TODO`, `run:cargo test`), separated by the unit separator (U+001F).
+    #[arg(
+        long,
+        value_name = "STEPS",
+        requires = "menu",
+        value_delimiter = '\u{1f}'
+    )]
+    pub step: Vec<String>,
+    /// With `--menu`: the question that was asked, so Allow and Attach output can put it back on
+    /// the prompt to ask again.
+    #[arg(long, value_name = "QUESTION", requires = "menu")]
+    pub asked: Option<String>,
+    /// With `--menu`: the last command, when it failed. With `--failed-exit` and `--asked`
+    /// (a failure question) the menu offers to re-run it with its output captured, or to
+    /// paste the output.
+    #[arg(long, value_name = "COMMAND", requires = "menu")]
+    pub failed_command: Option<String>,
+    /// With `--menu`: the exit status of `--failed-command`.
+    #[arg(long, value_name = "N", allow_hyphen_values = true, requires = "menu")]
+    pub failed_exit: Option<i32>,
+    /// With `--menu`: the file (private, made by the hook) the attached output is written to.
+    #[arg(long, value_name = "FILE", requires = "menu")]
+    pub output_to: Option<std::path::PathBuf>,
     /// Where the answer comes from: `local`, your own agent (default; `[ask] via`).
     #[arg(long, value_name = "WHERE")]
     pub via: Option<String>,
@@ -1389,11 +1774,33 @@ pub struct AskArgs {
     /// only when you name one.
     #[arg(long, value_name = "MODEL", env = "IOHR_ASK_MODEL")]
     pub model: Option<String>,
+    /// Work in a Role: its text joins the prompt and its model is used when you name none
+    /// (project `atlas/roles/`, then your account, then the built-in catalogue).
+    #[arg(long, value_name = "NAME")]
+    pub role: Option<String>,
+    /// With `--role`: the job whose brief the Role compiles (its core, then matching recall).
+    #[arg(long, value_name = "ID", requires = "role")]
+    pub job: Option<String>,
+    /// How Io works: `manual` asks before each command (default at a terminal), `plan` reads
+    /// and proposes a plan and changes nothing (Claude's plan mode; Codex's read-only
+    /// sandbox), `auto` runs commands no rule decides without asking (a deny rule and the
+    /// secret list still win). In the shell hook shift+tab on a `?` line switches between
+    /// them. Beats `--permissions`. `[ask] mode`, `IOHR_ASK_MODE`.
+    #[arg(long, value_name = "MODE", env = "IOHR_ASK_MODE")]
+    pub mode: Option<String>,
     /// Let the agent edit files in this folder (Claude `--permission-mode acceptEdits`, Codex
     /// `--sandbox workspace-write`). Without it nothing is changed: print mode refuses edits
-    /// rather than ask. Shell commands are never allowed by iohr. `[ask] allow_edits`.
+    /// rather than ask. Shell commands are never allowed by iohr. It is the plain run's `--mode
+    /// auto` (`--mode plan` wins over it). `[ask] allow_edits`.
     #[arg(long)]
     pub allow_edits: bool,
+    /// What happens when Io wants to run a command or open a file no rule decides: `manual`
+    /// (or `prompt`) asks you at the terminal (default at a terminal), `plan` and `auto` are
+    /// the modes of `--mode`, `rules` only follows your rules and says no to the rest (default
+    /// without a terminal), `deny` offers no commands at all. `--mode` wins over it. Rules:
+    /// `iohr permissions`. `[ask] permissions`.
+    #[arg(long, value_name = "HOW", env = "IOHR_ASK_PERMISSIONS")]
+    pub permissions: Option<String>,
     /// How the thinking is drawn at a terminal: `show` (streamed, dim, in a quiet block;
     /// default) or `collapse` (one line). `[ask] thinking`.
     #[arg(long, value_name = "HOW")]
@@ -1439,6 +1846,82 @@ pub enum AtlasCommand {
     /// The built-in roles of this project.
     #[command(subcommand, alias = "personalities")]
     Roles(RolesCommand),
+    /// Search the text of the sites this project crawled (PRD 0192).
+    ///
+    /// The best matching chunks of page text, each with its page, heading path and offsets.
+    /// Local: it reads `.inorbit/crawl/kb.duckdb`, which `iohr project init --crawl` builds.
+    /// The search is lexical (BM25); there is no embedding model on this machine.
+    Search {
+        /// What to look for.
+        #[arg(value_name = "QUERY")]
+        query: String,
+        /// Only this site (a name as the crawl folders have it).
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// The most chunks to show.
+        #[arg(long, default_value_t = 8, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// The facts the site model holds, each with the chunk it came from.
+    ///
+    /// `contact_email`, `phone`, `lists_price`, `offers`, `located_in`, `has_profile`,
+    /// `names_person`, `hosts_event`, `published`, `built_with`, `mentions_organization`,
+    /// `description`, `language`.
+    Facts {
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// Only this predicate (for example `contact_email`).
+        #[arg(long, value_name = "NAME")]
+        predicate: Option<String>,
+        /// Only facts whose value or subject contains this text.
+        #[arg(long, value_name = "TEXT")]
+        grep: Option<String>,
+        /// The most facts to show.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// The claims made from the facts, and with `--prove ID` why one is believed.
+    ///
+    /// A claim is a fact with its proof: the page it was read from, kept by its digest.
+    /// `verified` says a deterministic reader found the value in those bytes; it does not
+    /// say the value is true. A claim whose page changed or whose fact went is `stale`, and
+    /// stays listed.
+    Claims {
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// Show the proof of this claim: its tree, the evidence and where it was read.
+        #[arg(long, value_name = "ID")]
+        prove: Option<String>,
+        /// The most claims to show.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// List the crawled sites: pages, chunks, tokens, entities, facts and sections.
+    Index {
+        /// List the pages of the sites instead of the sites.
+        #[arg(long)]
+        pages: bool,
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// The most pages to show with `--pages`.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1454,15 +1937,74 @@ pub enum RolesCommand {
     },
     /// Import the project's roles into your InOrbit account.
     ///
-    /// The same import `iohr sync` does. A role already in your account that did not
-    /// come from this project, or that changed in InOrbit since, is left alone.
+    /// The same import `iohr sync` does. A built-in role already in your account that nobody
+    /// changed is upgraded to the catalogue's newer version; one you changed, or that is not
+    /// a built-in, is left alone (`--upgrade` takes the catalogue's version over a changed one).
     Import {
         /// Say what would be sent and send nothing.
         #[arg(long)]
         dry_run: bool,
+        /// Also replace a copy you changed with the catalogue's newer version (InOrbit keeps
+        /// the old version, so it can be reverted).
+        #[arg(long)]
+        upgrade: bool,
         /// The project folder. Default: the nearest folder up from here that has `atlas/`.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
+    },
+}
+
+/// Which rule file: the project's or yours. Neither means the default for the command.
+#[derive(Debug, Clone, Copy, Args)]
+pub struct PermissionScope {
+    /// The project's `.inorbit/permissions.toml` (committed with the code).
+    #[arg(long, conflicts_with = "user")]
+    pub project: bool,
+    /// Your own file in the config folder (every project).
+    #[arg(long)]
+    pub user: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PermissionsCommand {
+    /// Show the rules, and where each one is kept.
+    List {
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Allow a command or file, like `Bash(ls:*)` or `Read(./src/**)`.
+    ///
+    /// Default: the project file. Refused for anything that could open keys, `.env` files or
+    /// credentials, and for a rule that would allow every command.
+    Allow {
+        /// The rule, in Claude Code's grammar.
+        rule: String,
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Never allow a command or file; this beats any allow rule.
+    Deny {
+        /// The rule, in Claude Code's grammar.
+        rule: String,
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Forget a rule, from the allow or deny list, in both files unless one is named.
+    Remove {
+        /// The rule, exactly as `list` shows it.
+        rule: String,
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Show what the rules say about one call, without running it.
+    ///
+    /// `iohr permissions check Bash 'git status'`, `... check Read ./src/main.rs`,
+    /// `... check WebFetch https://example.com`. Says allow, deny or ask, and which rule.
+    Check {
+        /// The tool: Bash, Read, Edit, Write, Grep, Glob or `WebFetch`.
+        tool: String,
+        /// The command, the file or the address.
+        input: String,
     },
 }
 
@@ -1575,6 +2117,33 @@ pub enum MemoryCommand {
 }
 
 #[derive(Debug, Clone, Args)]
+pub struct ContextArgs {
+    /// The folder to read the chain for (default: here).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// Also print the text that goes to the model.
+    #[arg(long)]
+    pub full: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SessionArgs {
+    /// The project folder (default: here).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct StopArgs {
+    /// The project folder (default: here).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// Seconds to wait for the host to end (0 to 600).
+    #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(0..=600))]
+    pub wait: u64,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct SyncArgs {
     /// Say what would be created or saved and send nothing.
     #[arg(long)]
@@ -1587,6 +2156,87 @@ pub struct SyncArgs {
     pub dir: Option<PathBuf>,
 }
 
+/// `iohr panel`: runs your shell (or the command after `--`) with the floating panel over its
+/// top right corner. `--demo` runs it on labelled stub data (with an older `--variant`, it
+/// draws that static design instead). Bare `iohr` on a terminal runs the same panel inside the
+/// project's session; `iohr stop` closes it.
+#[derive(Debug, Args)]
+pub struct PanelArgs {
+    /// Stub data: draw a static design (see `--variant`), or with `--variant float` run the
+    /// floating panel on stub asks.
+    #[arg(long)]
+    pub demo: bool,
+    /// The command to run under the panel (after `--`); your shell by default.
+    #[arg(last = true)]
+    pub command: Vec<String>,
+    /// The layout: a framed rail, an accordion, or a band for terminals without margins.
+    #[arg(long, value_enum, default_value = "rail")]
+    pub variant: PanelVariant,
+    /// What the panel shows (default: the resting pill; a static demo's default is the menu).
+    #[arg(long, value_enum)]
+    pub view: Option<PanelView>,
+    /// The state of auto mode in the demo.
+    #[arg(long, value_enum, default_value = "on")]
+    pub auto: PanelAuto,
+    /// The terminal's width in columns.
+    #[arg(long, default_value_t = 100)]
+    pub cols: u16,
+    /// The terminal's height in rows.
+    #[arg(long, default_value_t = 28)]
+    pub rows: u16,
+    /// The highlighted row, counted from 0.
+    #[arg(long, default_value_t = 0)]
+    pub selected: usize,
+    /// Print the lines only, one per row, with no cursor movement.
+    #[arg(long)]
+    pub lines: bool,
+    /// Also print the sequences that reserve (and, last, give back) the panel's room.
+    #[arg(long)]
+    pub setup: bool,
+}
+
+/// How the panel is laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelVariant {
+    /// A framed column at the top right; a submenu replaces the list in place.
+    Rail,
+    /// A ruled column; a submenu opens under its row.
+    Accordion,
+    /// Top rows across the terminal: for terminals that cannot reserve columns.
+    Band,
+    /// The floating band: a small box at the top right over the shell, painted last, taking no
+    /// room. The panel `iohr panel` runs; with `--demo` on stub asks.
+    Float,
+}
+
+/// What the demo panel shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelView {
+    /// Closed: three quiet lines.
+    Rest,
+    /// The menu.
+    Menu,
+    /// Waiting approvals, with deny, question and details.
+    Approvals,
+    /// The workload tree: sessions on this Mac and the coordinator's queue.
+    Workloads,
+    /// Subcommands that can be run.
+    Run,
+    /// The auto mode switch.
+    Auto,
+    /// Where the panel stands.
+    Status,
+}
+
+/// The auto mode the demo shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelAuto {
+    Off,
+    /// Asked, waiting for the phone.
+    Asking,
+    On,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum ShellCommand {
     /// Print the hook for a shell, to be evaluated by it: `? question` (and `?? follow-up`)
@@ -1597,6 +2247,36 @@ pub enum ShellCommand {
         #[arg(value_enum)]
         shell: HookShell,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ThemeCommand {
+    /// List the themes and the one that is on.
+    List,
+    /// Show a theme's colours, font and cursor.
+    Show {
+        /// The theme (`iohr theme list`).
+        name: String,
+    },
+    /// Write a theme's Terminal.app profile and remember it; the prompt and Terminal.app are flags.
+    Install(ThemeInstallArgs),
+    /// Turn the prompt off and forget the chosen theme (Terminal.app profiles stay).
+    Off,
+}
+
+#[derive(Debug, Args)]
+pub struct ThemeInstallArgs {
+    /// The theme (`iohr theme list`).
+    pub name: String,
+    /// Open the profile in Terminal.app, which imports it (macOS; it is not made the default).
+    #[arg(long)]
+    pub terminal: bool,
+    /// Turn on the zsh prompt (it comes with `eval "$(iohr shell hook zsh)"`); a prompt you set yourself is kept.
+    #[arg(long)]
+    pub prompt: bool,
+    /// Turn on the zsh prompt and replace the prompt you set yourself.
+    #[arg(long)]
+    pub replace_prompt: bool,
 }
 
 /// A shell `iohr shell hook` names.
@@ -1640,9 +2320,20 @@ pub struct HeadlessArgs {
         conflicts_with = "interactive"
     )]
     pub exit_code: Option<i32>,
-    /// A file with that command's output; only its last 200 lines or 8 KiB are used.
+    /// A file with that command's output; only its last 200 lines or 8 KiB are used, and
+    /// secrets in it are redacted first. Without it the card says the output was not sent.
     #[arg(long, value_name = "FILE", conflicts_with = "interactive")]
     pub output_file: Option<std::path::PathBuf>,
+    /// Where `--output-file` came from, for the card's footer and `--json`: `attached` (a
+    /// file you gave, the default), `captured` (a re-run you allowed) or `pasted`.
+    #[arg(
+        long,
+        value_name = "HOW",
+        value_parser = ["attached", "captured", "pasted"],
+        requires = "output_file",
+        conflicts_with = "interactive"
+    )]
+    pub output_kind: Option<String>,
     /// An earlier question this one follows up (with `--prior-answer`).
     #[arg(
         long,
@@ -1659,6 +2350,18 @@ pub struct HeadlessArgs {
         conflicts_with = "interactive"
     )]
     pub prior_answer: Option<String>,
+    /// A folder you allow Io to read for this question, besides the one it is asked in: the
+    /// answer to the card's "needs your OK to read" note, for a run with no terminal to ask on
+    /// (a script, `--json`, the app). Repeat it for more folders; `--add-dir` is the same flag,
+    /// as in Claude Code. `IOHR_ASK_READ` (a path list) and `[ask] read` add to these. Secrets
+    /// stay blocked.
+    #[arg(
+        long,
+        visible_alias = "add-dir",
+        value_name = "FOLDER",
+        conflicts_with = "interactive"
+    )]
+    pub read: Vec<std::path::PathBuf>,
 }
 
 impl HeadlessArgs {
@@ -1670,7 +2373,308 @@ impl HeadlessArgs {
             || self.exit_code.is_some()
             || self.output_file.is_some()
             || self.prior_question.is_some()
+            || !self.read.is_empty()
     }
+}
+
+/// Which Planner plan `iohr project init` uses (RFC 0211).
+#[derive(Debug, Args)]
+pub struct InitPlanArgs {
+    /// Use this existing Planner plan for the project instead of making one: its id is
+    /// written under `[plan]` in `coordination.toml` (checked when you are signed in).
+    /// Without it, a signed-in init makes the plan named after the project, or finds the
+    /// one it made before; signed out, the id stays empty and init says how to set it.
+    #[arg(long = "plan-id", value_name = "PLAN")]
+    pub plan_id: Option<String>,
+    /// Leave `[plan] id` in `coordination.toml` empty: no plan is made or looked up.
+    #[arg(long = "no-plan", conflicts_with = "plan_id")]
+    pub no_plan: bool,
+}
+
+/// What `project init --ci` takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InitCi {
+    /// Write the GitHub Actions workflows and the dependency updates.
+    Github,
+    /// Write none of them.
+    None,
+}
+
+impl InitCi {
+    /// The answer the template reads.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Github => "github",
+            Self::None => "none",
+        }
+    }
+}
+
+/// The flags of `project init`: one struct, boxed in [`ProjectCommand::Init`] because the
+/// variant is far larger than its siblings (clippy `large_enum_variant`, seen on Windows where
+/// `PathBuf` is wider).
+#[derive(Debug, Args)]
+#[allow(clippy::struct_excessive_bools)] // independent command-line switches, not a state
+pub struct InitArgs {
+    /// The project's name: lowercase letters, digits and dashes, like demo or my-shop.
+    /// At a terminal it is asked for when missing (the folder's name is the default);
+    /// anywhere else it is required.
+    pub name: Option<String>,
+    /// The template: an id (`iohr project template list` shows them), a folder
+    /// (`./my-template`), or a git repository (`gh:owner/repo[//subdir][@ref]`,
+    /// `git:URL[//subdir][@ref]`). Default: `[project] template` in iohr's config.toml,
+    /// else service. A template that is coming says so and refuses. At a terminal, leaving
+    /// it out offers the templates as a menu.
+    #[arg(long)]
+    pub template: Option<String>,
+    /// Answer a template question: `--set key=value`, repeatable.
+    #[arg(long = "set", value_name = "KEY=VALUE")]
+    pub set: Vec<String>,
+    /// Answers from a .json or .toml file (a table of key to value); `--set` wins.
+    #[arg(long, value_name = "FILE")]
+    pub answers: Option<PathBuf>,
+    /// Describe the project and your own agent (claude or codex, on your PATH) builds it
+    /// in the new folder, from the template's agent prompt. It runs in the background of
+    /// this command, in print mode (no session opens): it may edit files, read, search and fetch from the web,
+    /// and run only the language's own build and test commands (cargo, go, python, node), a few
+    /// read-only ones (git status, log and diff, ls) and this program's `atlas new`,
+    /// `atlas sync --dry-run` and `memory` commands, never any other shell command (no curl);
+    /// iohr draws its progress. The smoke test runs after it. Its output is
+    /// labelled AI. `--json` passes the agent's events through as JSON lines.
+    #[arg(long, value_name = "TEXT")]
+    pub describe: Option<String>,
+    /// The most turns the agent may take (Claude only; Codex has no turn limit). Default
+    /// `[project] agent_turns`, else 150, init's own: `[ask]` in config.toml has no bound.
+    #[arg(long, value_name = "N")]
+    pub agent_turns: Option<u32>,
+    /// The most seconds the agent may run before iohr stops it. Default `[project]
+    /// agent_timeout`, else 1800, init's own. When it stops at a cap, iohr says so,
+    /// writes `.inorbit/handoff.md` and prints how to continue.
+    #[arg(long, value_name = "SECONDS")]
+    pub agent_timeout: Option<u64>,
+    /// The model the agent builds with: a Claude alias such as `sonnet` or a full model
+    /// name. Default `[project] agent_model`, else `sonnet` (a whole site needs more than
+    /// the small fast tier `iohr ask` uses). With Codex it is passed on only when named.
+    #[arg(long, value_name = "MODEL", env = "IOHR_INIT_AGENT_MODEL")]
+    pub agent_model: Option<String>,
+    /// Build in a Role: its text joins the agent's prompt and its model is used when you
+    /// name none (the new project's `atlas/roles/`, then your account, then the built-in
+    /// catalogue).
+    #[arg(long, value_name = "NAME")]
+    pub role: Option<String>,
+    /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
+    /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
+    /// agent is not started (its command and prompt are printed). Every step shows as
+    /// `would: ...`; with `--json` the plan is data. `--plan` is the same.
+    #[arg(long, visible_alias = "plan")]
+    pub dry_run: bool,
+    #[command(flatten)]
+    pub plan: InitPlanArgs,
+    /// Answer the questions with their defaults: no menu, no confirmation.
+    #[arg(short = 'y', long)]
+    pub yes: bool,
+    /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
+    /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
+    /// when you are inside a git repository, or a path of your own. It must not exist
+    /// or be empty, or be the folder this project was made in: run again there, init
+    /// leaves every file that is already there alone and commits nothing.
+    #[arg(long, value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// The language, for a template that offers several (the same as `--set
+    /// language=ID`); `iohr project template show ID` lists them. At a terminal,
+    /// leaving it out offers a menu that marks the toolchains you have.
+    #[arg(long, value_name = "ID")]
+    pub lang: Option<String>,
+    /// The publisher half of the extension id (default: your account's slug, else
+    /// "local"); the private listing takes it when that step lands.
+    #[arg(long)]
+    pub publisher: Option<String>,
+    /// Skip the smoke test (it runs the project once with the language's own runtime).
+    #[arg(long)]
+    pub no_smoke: bool,
+    /// The CI files: `github` writes the workflows, the release and the dependency updates
+    /// (every template but `blank`, which writes none unless you say `github`); `none`
+    /// writes none of them. The rest of the enterprise floor stays.
+    #[arg(long, value_enum)]
+    pub ci: Option<InitCi>,
+    /// Also show the templates that are not ready (coming) in the menu.
+    #[arg(long)]
+    pub experimental: bool,
+    /// Do not write the starter IO.md at the project root.
+    ///
+    /// `IO.md` is the file `?` and `??` read for context in this folder, like a CLAUDE.md:
+    /// what the project is, how to build and test it. An IO.md or io.md already there is
+    /// never touched, with or without this flag.
+    #[arg(long)]
+    pub no_io_md: bool,
+    /// Where the project lives in InOrbit: team, who reads it, or none.
+    #[command(flatten)]
+    pub space: InitSpaceArgs,
+    /// Reading a public site on this machine (the agent extension's crawler).
+    #[command(flatten)]
+    pub crawl: InitCrawlArgs,
+    /// Where the project keeps what iohr learns about it, and what shape it has.
+    #[command(flatten)]
+    pub place_args: InitPlaceArgs,
+}
+
+/// Where the project's notes, crawl and state live, and the project's shape (light PRD 0210).
+#[derive(Debug, Args)]
+pub struct InitPlaceArgs {
+    /// Keep the project's notes (ADRs, memory), the crawl and the state in the project
+    /// folder (`project`: `.inorbit/`, travels with the repository), in your home folder
+    /// (`home`: `~/.inorbit/projects/NAME/`, stays on this machine) or in a folder you name
+    /// (`~/notes/shop`, `../shared`, `/srv/shop`: `~` is your home, a relative path starts at
+    /// the project; the folder is made when the run is confirmed). The answer is written to
+    /// `[project] data` in inorbit.toml and every later command follows it. At a terminal it
+    /// is asked once; without a choice the layout older versions made stays as it is.
+    #[arg(long = "keep-in", value_name = "WHERE", env = "IOHR_INIT_KEEP_IN")]
+    pub keep_in: Option<String>,
+    /// When the place changes, copy what the old place holds into the new one (nothing is
+    /// ever deleted, nothing already there is overwritten). At a terminal it is offered.
+    #[arg(long = "copy-data")]
+    pub copy_data: bool,
+    /// The project's shape: `monolith`, `microservices` or `combined`. Without it, a terminal
+    /// is asked once and anywhere else the question stays an open item in the project's
+    /// Planner plan for the Mac app or the phone to answer.
+    #[arg(long, value_name = "SHAPE", env = "IOHR_INIT_SHAPE", value_parser = ["monolith", "microservices", "combined"])]
+    pub shape: Option<String>,
+}
+
+/// The slowest, the fastest and the usual `--crawl-rate`, requests a second to one host
+/// (RFC 0163). The only copy: the flag's default and the check both read these. The ceiling
+/// of 50 is a judgement and the default of 10 the owner's choice (2026-11-08); the agent's
+/// own `atlas crawl --rate` has the same bounds.
+pub const CRAWL_RATE_MIN: u32 = 1;
+pub const CRAWL_RATE_MAX: u32 = 50;
+pub const CRAWL_RATE_DEFAULT: u32 = 10;
+
+/// What `--crawl-rate` or `IOHR_CRAWL_RATE` was given. Parsing never fails: a bad value in
+/// the environment must not stop `project init --no-crawl`, which never reads it. It is
+/// checked by [`CrawlRate::get`] when a crawl is about to run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrawlRate(String);
+
+impl CrawlRate {
+    /// A rate already known to be right (a test, a caller in code).
+    #[must_use]
+    pub fn of(per_second: u32) -> Self {
+        Self(per_second.to_string())
+    }
+
+    /// The rate, when it is a whole number from [`CRAWL_RATE_MIN`] to [`CRAWL_RATE_MAX`].
+    ///
+    /// # Errors
+    /// A sentence for the person: what was given and what is allowed.
+    pub fn get(&self) -> Result<u32, String> {
+        match self.0.parse::<u32>() {
+            Ok(n) if (CRAWL_RATE_MIN..=CRAWL_RATE_MAX).contains(&n) => Ok(n),
+            _ => Err(format!(
+                "`{}` is not a crawl rate: use a whole number of requests a second from \
+                 {CRAWL_RATE_MIN} to {CRAWL_RATE_MAX} (--crawl-rate, IOHR_CRAWL_RATE)",
+                self.0
+            )),
+        }
+    }
+}
+
+impl std::str::FromStr for CrawlRate {
+    type Err = std::convert::Infallible;
+
+    /// Never fails: the value is checked later, by [`CrawlRate::get`].
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Ok(Self(raw.trim().to_owned()))
+    }
+}
+
+impl Default for CrawlRate {
+    fn default() -> Self {
+        Self::of(CRAWL_RATE_DEFAULT)
+    }
+}
+
+impl std::fmt::Display for CrawlRate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The flags of `project init` that read a public site on this machine and keep what it finds
+/// in the project (PRD 0190.1). Nothing is sent to InOrbit.
+#[derive(Debug, Args)]
+pub struct InitCrawlArgs {
+    /// Read this public site on this machine with iohr-agent and keep its pages as atlas
+    /// facts and a memory entry: `--crawl https://acme.example`. Giving it is the consent;
+    /// without it, init asks at a terminal only when your description names a site, and
+    /// never without one. Needs the `inorbit/agent` extension.
+    #[arg(long, value_name = "URL")]
+    pub crawl: Option<String>,
+    /// Do not read a site, and do not ask about one.
+    #[arg(long, conflicts_with = "crawl")]
+    pub no_crawl: bool,
+    /// The most pages the crawl reads (the crawler's own cap is 20000).
+    #[arg(long, value_name = "N", default_value_t = 200)]
+    pub crawl_pages: u32,
+    /// The most minutes the crawl runs (the crawler's own cap is 240).
+    #[arg(long, value_name = "N", default_value_t = 5)]
+    pub crawl_minutes: u32,
+    /// The most requests a second the crawl asks of one host (1 to 50, the default is 10; a
+    /// value outside that is refused when a crawl would run, not before). A slower
+    /// `Crawl-delay` in the site's robots.txt still wins. An older agent keeps its own fixed
+    /// pace of one a second until it is updated.
+    #[arg(
+        long,
+        value_name = "N",
+        env = "IOHR_CRAWL_RATE",
+        default_value_t = CrawlRate::default(),
+        value_parser = clap::value_parser!(CrawlRate)
+    )]
+    pub crawl_rate: CrawlRate,
+    /// Follow every other name in the site's domain (a link to `blog.acme.example` from
+    /// `acme.example`) without asking. Without it the crawl stays on the host you gave: at a
+    /// terminal init asks once per such name (yes, no, yes to all; the default is no), and
+    /// with `--yes` or no terminal it follows none. The pages, minutes, host, size and
+    /// per-page limits cover them all together.
+    #[arg(long, conflicts_with = "no_crawl")]
+    pub crawl_subdomains: bool,
+}
+
+/// The flags of `project init` that say where the project lives in InOrbit.
+#[derive(Debug, Args)]
+pub struct InitSpaceArgs {
+    /// The team the project lives under in InOrbit: an account's id or slug
+    /// (`iohr accounts list` shows yours). Default: the account you are signed in on; at a
+    /// terminal, with more than one account, init asks. The environment is the global
+    /// `--env` (`production` by default, or `local`).
+    #[arg(long, value_name = "ACCOUNT")]
+    pub team: Option<String>,
+    /// Who can see the project in that account: `team` (everyone in it; only you in your own
+    /// account, the default) or `managers` (its owners and admins). At a terminal, init asks.
+    #[arg(long, value_name = "WHO", value_parser = clap::builder::PossibleValuesParser::new(crate::project::space::Readers::NAMES))]
+    pub visibility: Option<String>,
+    /// Keep the project on this machine: do not create it in InOrbit or queue that.
+    #[arg(long)]
+    pub no_sync: bool,
+}
+
+/// The flags of `project sync`.
+#[derive(Debug, Args)]
+pub struct ProjectSyncArgs {
+    /// The project folder. Default: the folder you are in.
+    #[arg(long, value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// The team the project lives under: an account's id or slug. Default: what init
+    /// queued, else the account you are signed in on.
+    #[arg(long, value_name = "ACCOUNT")]
+    pub team: Option<String>,
+    /// Who can see the project in that account: `team` or `managers`. Default: what init
+    /// queued, else `team`.
+    #[arg(long, value_name = "WHO", value_parser = clap::builder::PossibleValuesParser::new(crate::project::space::Readers::NAMES))]
+    pub visibility: Option<String>,
+    /// Say what would be made or linked and change nothing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1680,69 +2684,19 @@ pub enum ProjectCommand {
     /// Set up a project of your own: sign-in checked, the folder scaffolded from a
     /// template with its manifest, a git repository with one commit, its own state under
     /// ~/.inorbit/projects/NAME/, a Keychain slot by name, a smoke test that runs it once,
-    /// and a report. Idempotent: a step already done is done again without harm, and a
-    /// step that waits on an API says so instead of pretending. `create` is the same command.
+    /// and a report. Idempotent: run again in the folder it made, it leaves every file that
+    /// is already there as it is and says which, and a step that waits on an API says so
+    /// instead of pretending. `iohr init` and `create` are the same command.
     #[command(visible_alias = "create")]
-    Init {
-        /// The project's name: lowercase letters, digits and dashes, like demo or my-shop.
-        /// At a terminal it is asked for when missing (the folder's name is the default);
-        /// anywhere else it is required.
-        name: Option<String>,
-        /// The template: an id (`iohr project template list` shows them), a folder
-        /// (`./my-template`), or a git repository (`gh:owner/repo[//subdir][@ref]`,
-        /// `git:URL[//subdir][@ref]`). Default: `[project] template` in iohr's config.toml,
-        /// else demo. A template that is coming says so and refuses. At a terminal, leaving
-        /// it out offers the templates as a menu.
-        #[arg(long)]
-        template: Option<String>,
-        /// Answer a template question: `--set key=value`, repeatable.
-        #[arg(long = "set", value_name = "KEY=VALUE")]
-        set: Vec<String>,
-        /// Answers from a .json or .toml file (a table of key to value); `--set` wins.
-        #[arg(long, value_name = "FILE")]
-        answers: Option<PathBuf>,
-        /// Describe the project and your own agent (claude or codex, on your PATH) builds it
-        /// in the new folder, from the template's agent prompt. It runs in the background of
-        /// this command, in print mode (no session opens): it may edit files, never run shell
-        /// commands, and iohr draws its progress. The smoke test runs after it. Its output is
-        /// labelled AI. `--json` passes the agent's events through as JSON lines.
-        #[arg(long, value_name = "TEXT")]
-        describe: Option<String>,
-        /// The most turns the agent may take (Claude only; Codex has no turn limit). Default
-        /// 40, init's own: `[ask]` in config.toml has no bound.
-        #[arg(long, value_name = "N")]
-        agent_turns: Option<u32>,
-        /// The most seconds the agent may run before iohr stops it. Default 600, init's own.
-        #[arg(long, value_name = "SECONDS")]
-        agent_timeout: Option<u64>,
-        /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
-        /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
-        /// agent is not started (its command and prompt are printed). Every step shows as
-        /// `would: ...`; with `--json` the plan is data. `--plan` is the same.
-        #[arg(long, visible_alias = "plan")]
-        dry_run: bool,
-        /// Answer the questions with their defaults: no menu, no confirmation.
-        #[arg(short = 'y', long)]
-        yes: bool,
-        /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
-        /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
-        /// when you are inside a git repository, or a path of your own. It must not exist
-        /// or be empty.
-        #[arg(long, value_name = "DIR")]
-        dir: Option<PathBuf>,
-        /// The language, for a template that offers several (the same as `--set
-        /// language=ID`); `iohr project template show ID` lists them. At a terminal,
-        /// leaving it out offers a menu that marks the toolchains you have.
-        #[arg(long, value_name = "ID")]
-        lang: Option<String>,
-        /// The publisher half of the extension id (default: your account's slug, else
-        /// "local"); the private listing takes it when that step lands.
-        #[arg(long)]
-        publisher: Option<String>,
-        /// Skip the smoke test (it runs the project once with the language's own runtime).
-        #[arg(long)]
-        no_smoke: bool,
-    },
+    Init(Box<InitArgs>),
+    /// Create the project in InOrbit, or link to it, from its folder.
+    ///
+    /// The part of `init` that makes the project in InOrbit: a Decisions space of kind
+    /// project under your team, for the environment `--env` names. Idempotent: it finds the
+    /// space by the project's name and links to it, so a repeat, a retry after init could not
+    /// reach InOrbit, and a teammate who cloned the project all end at the same space. The
+    /// link is written to `.inorbit/space` (production, committed) or `.inorbit/space.local`.
+    Sync(ProjectSyncArgs),
     /// The same as `template list`, kept so older scripts work.
     #[command(hide = true)]
     Templates,
@@ -1763,9 +2717,14 @@ pub enum TemplateCommand {
     /// List the templates `init` accepts.
     ///
     /// The templates `init` and `create` accept: name, live or coming, where each comes
-    /// from, which one is the default (`[project] template` in config.toml, else demo) and
-    /// what it is. `--json` prints the same as a list.
-    List,
+    /// from, which one is the default (`[project] template` in config.toml, else service) and
+    /// what it is. `--json` prints the same as a list. `--all` adds the hidden ones (demo and
+    /// coordinated, still there by name) and the ones that are coming.
+    List {
+        /// Also the hidden and the coming templates.
+        #[arg(long)]
+        all: bool,
+    },
     /// Show what a template asks, writes and runs.
     ///
     /// Show one template: where it comes from, what it extends, every question (id, type,
@@ -2196,6 +3155,60 @@ pub struct BrowserInstall {
     pub print: bool,
 }
 
+#[derive(Debug, Args)]
+pub struct UiArgs {
+    /// What to do; none serves the built UI and opens it.
+    #[command(subcommand)]
+    pub command: Option<UiCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum UiCommand {
+    /// Serve the built UI on a loopback address until Ctrl-C.
+    ///
+    /// Serves a built `ui/dist` (the nearest one above this folder, or `--dir`) on
+    /// 127.0.0.1. GET and HEAD only; a request for another host, a path outside the folder
+    /// or a method other than those is refused. Unknown page paths get `index.html`, so
+    /// the app's own routes load.
+    Serve(UiServe),
+    /// Build the UI package into `ui/dist` (its `build` script).
+    ///
+    /// Runs `pnpm run build` in the UI package: the nearest `ui/` with a `package.json`
+    /// above this folder, or `--package`. The mise task `ui:build` runs this.
+    Build(UiPackage),
+    /// Run the UI package's dev server with live reload (its `dev` script).
+    Dev(UiPackage),
+    /// Check the UI package: types, lint and tests (its `check` script).
+    Check(UiPackage),
+    /// Open the UI that `iohr ui serve` is serving in the default browser.
+    ///
+    /// Reads the address the running `iohr ui serve` recorded and opens it; only a
+    /// loopback address is opened. With `IOHR_NO_BROWSER` set, prints it instead.
+    Open,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct UiPackage {
+    /// The UI package folder, holding `package.json` (default: the nearest `ui/` above
+    /// this folder).
+    #[arg(long)]
+    pub package: Option<PathBuf>,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct UiServe {
+    /// The port to listen on (default: one the system picks).
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// The built UI folder, holding `index.html` (default: the nearest `ui/dist` above
+    /// this folder).
+    #[arg(long, env = "IOHR_UI_DIR")]
+    pub dir: Option<PathBuf>,
+    /// Open the UI in the default browser once it listens.
+    #[arg(long)]
+    pub open: bool,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum CoordinatorCommand {
     /// The coordinator's jobs.
@@ -2204,6 +3217,12 @@ pub enum CoordinatorCommand {
     /// The coordinator's queued asks.
     #[command(subcommand)]
     Asks(CoordinatorAsksCommand),
+    /// The Planner's plans: create one, list yours, show one with its items.
+    #[command(subcommand)]
+    Plan(CoordinatorPlanCommand),
+    /// One item of a plan: add, claim, note, finish, or run a command as the step.
+    #[command(subcommand)]
+    Item(CoordinatorItemCommand),
     /// Print a job's brief.
     ///
     /// A job's brief, the one text a worker starts from: the task, its acceptance, the
@@ -2283,6 +3302,129 @@ pub enum CoordinatorJobsCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum AsksCommand {
+    /// List the asks waiting for you, live on a terminal.
+    List {
+        /// open (pending and question, the default), all, or one status: pending, question,
+        /// approved, denied, `in_progress`, done, failed, stale.
+        #[arg(long, default_value = "open")]
+        status: String,
+        /// Only this kind: `pull_request`, roll, review, document, decision or run.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Print once and stop, even on a terminal.
+        #[arg(long)]
+        once: bool,
+        /// At most this many.
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=500))]
+        limit: u32,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Print how many asks are waiting for you, for a shell prompt.
+    ///
+    /// Prints "N asks" when some wait, nothing when none do, and `--json` prints `{"count": N}`.
+    /// With `--cache` the number (and nothing else) is kept in `~/.inorbit/term/asks-count`,
+    /// written whole, and the call does nothing while that file is under 30 seconds old; the
+    /// shell hook (`iohr shell hook zsh`) reads that file at the prompt and refreshes it in
+    /// the background.
+    Count {
+        /// Keep the number in `~/.inorbit/term/asks-count`; refresh it at most every 30 seconds.
+        #[arg(long)]
+        cache: bool,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Show one ask with its timeline, live on a terminal.
+    Show {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Print once and stop, even on a terminal.
+        #[arg(long)]
+        once: bool,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Choose what to do with an ask from a menu: approve, deny or question.
+    Decide {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Deny an ask, with a note if you like.
+    Deny {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Why (at most 500 characters); the agent reads it.
+        #[arg(long)]
+        note: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Put a question to the agent that asked; the ask stays open.
+    Question {
+        /// The ask's id (apr_...).
+        id: String,
+        /// The question (at most 500 characters); asked here when left out on a terminal.
+        #[arg(long)]
+        note: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Approve: on a Mac with an enrolled key, after Touch ID; on your phone for a merge, a
+    /// roll, a migration or an auto-approve rule, and on every other machine.
+    ///
+    /// A Mac signs the same decision proof the phone does, with a key in its Secure Enclave
+    /// (`iohr asks key enroll`). The terminal prints what is approved and Touch ID shows the
+    /// same title. Anything that is hard to take back is refused here and waits for the phone.
+    Approve {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Say so and stop, without waiting.
+        #[arg(long)]
+        once: bool,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// The key this Mac approves with: enrol it, look at it, remove it.
+    Key {
+        #[command(subcommand)]
+        command: AsksKeyCommand,
+    },
+}
+
+/// `iohr asks key`: the Secure Enclave key a Mac approves asks with (RFC 0113).
+#[derive(Debug, Subcommand)]
+pub enum AsksKeyCommand {
+    /// Make this Mac's key (in the Secure Enclave, behind Touch ID) and enrol it.
+    ///
+    /// With `--proof` from an enrolled phone key the service activates the key at once;
+    /// without it the key waits 24 hours (your first key is active at once). Only a Mac
+    /// can do this.
+    Enroll {
+        /// A name for the key (1 to 100 characters); default: this Mac's name.
+        #[arg(long)]
+        label: Option<String>,
+        /// A JSON file with the phone's countersignature of this key:
+        /// `{"key_id", "signed_at", "nonce", "signature"}`.
+        #[arg(long, value_name = "FILE")]
+        proof: Option<std::path::PathBuf>,
+    },
+    /// Show this Mac's key and what the service knows of it.
+    Show,
+    /// Revoke this Mac's key at the service and delete it from this Mac.
+    Remove,
+}
+
+#[derive(Debug, Subcommand)]
 pub enum CoordinatorAsksCommand {
     /// List queued asks.
     List {
@@ -2323,6 +3465,152 @@ pub enum CoordinatorAsksCommand {
         /// The id in the system it came from; the same id returns the same ask.
         #[arg(long)]
         external_id: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CoordinatorPlanCommand {
+    /// List the plans you may see.
+    List {
+        /// active, paused or archived (default: all).
+        #[arg(long)]
+        state: Option<String>,
+        /// At most this many.
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
+        limit: u32,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Show a plan with its items and their latest notes.
+    Show {
+        /// The plan id (`plan_...`).
+        plan: String,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Create a plan you own, or find the one with the same external id.
+    Create {
+        /// The plan's title, 1 to 200 characters.
+        title: String,
+        /// The id in the system it comes from; the same id returns the same plan.
+        #[arg(long)]
+        external_id: Option<String>,
+        /// Who sees it: owner (the default) or account (every member).
+        #[arg(long, value_parser = ["owner", "account"])]
+        access: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+}
+
+/// The plan and item every `coordinator item` command names.
+#[derive(Debug, Args)]
+pub struct PlanItemRef {
+    /// The plan id (`plan_...`).
+    pub plan: String,
+    /// The item's slug in the plan: 1 to 80 of A-Z, a-z, 0-9, `_`, `.` and `-`.
+    pub item: String,
+    /// Act on this account: a team you belong to (default: your own).
+    #[arg(long)]
+    pub account: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CoordinatorItemCommand {
+    /// Add an item to a plan (or change its title, kind and text), as proposed.
+    Add {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// What the item is called, 1 to 200 characters.
+        #[arg(long)]
+        title: String,
+        /// What kind of item: feature, bug, docs, ... (default: task).
+        #[arg(long)]
+        kind: Option<String>,
+        /// A longer description, or `-` to read it from standard input.
+        #[arg(long)]
+        body: Option<String>,
+    },
+    /// Claim an item before work on it starts: a lease held by one holder.
+    Claim {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// Who builds it, 1 to 120 characters (default: iohr and your profile).
+        #[arg(long)]
+        holder: Option<String>,
+        /// How long the lease lasts, 1 to 86400 (default 3600).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=86_400))]
+        seconds: Option<u32>,
+        /// Take it over from another holder's live claim.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Give a claim up.
+    Release {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// The holder (default: iohr and your profile).
+        #[arg(long)]
+        holder: Option<String>,
+        /// Release another holder's live claim.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Write a note on an item.
+    Note {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// The note, 1 to 2000 characters, or `-` to read it from standard input.
+        text: String,
+    },
+    /// Finish an item: an optional closing note, then status done (this clears the claim).
+    Done {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// A closing note.
+        #[arg(long)]
+        note: Option<String>,
+        /// Who is writing (default: iohr and your profile).
+        #[arg(long)]
+        holder: Option<String>,
+    },
+    /// Fail an item: a `failed:` note, status back to proposed and the claim released.
+    ///
+    /// The Planner has no failed status, and dropped is final, so a failed step goes back
+    /// to proposed with the reason in its notes, ready to be claimed again.
+    Fail {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// Why it failed.
+        #[arg(long)]
+        reason: String,
+        /// Who is writing (default: iohr and your profile).
+        #[arg(long)]
+        holder: Option<String>,
+    },
+    /// Run a command as a Planner step: claim, building, the command, then done or failed.
+    ///
+    /// Adds the item when the plan lacks it, skips one that is already done, refuses one
+    /// another holder is building, and ends with a note and the status the command's exit
+    /// earned. The command's exit code is this command's (1 when it could not start).
+    Run {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// The title when the item has to be added (default: the item's slug).
+        #[arg(long)]
+        title: Option<String>,
+        /// The kind when the item has to be added (default: task).
+        #[arg(long)]
+        kind: Option<String>,
+        /// Who builds it (default: iohr and your profile).
+        #[arg(long)]
+        holder: Option<String>,
+        /// The command and its arguments, after `--`.
+        #[arg(last = true, required = true, num_args = 1..)]
+        command: Vec<String>,
     },
 }
 
@@ -2378,6 +3666,39 @@ mod grammar_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn read_repeats_and_add_dir_is_the_same_flag() {
+        use clap::Parser as _;
+        let cli = super::Cli::try_parse_from([
+            "iohr",
+            "ask",
+            "--read",
+            "/a",
+            "--add-dir",
+            "/b",
+            "--add-dir=/c",
+            "what is in them",
+        ])
+        .unwrap();
+        let Some(super::Command::Ask(a)) = cli.command else {
+            panic!("not ask")
+        };
+        let got: Vec<_> = a
+            .headless
+            .read
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        assert_eq!(got, ["/a", "/b", "/c"]);
+        assert!(a.headless.has_context());
+        // Not given: no folders and no context of its own.
+        let cli = super::Cli::try_parse_from(["iohr", "ask", "hi"]).unwrap();
+        let Some(super::Command::Ask(a)) = cli.command else {
+            panic!("not ask")
+        };
+        assert_eq!(a.headless.read.len(), 0);
     }
 
     #[test]
