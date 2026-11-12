@@ -772,7 +772,13 @@ impl Workspaces {
         // Untrimmed: the first entry's status may start with a space.
         let status = git(
             dir,
-            &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            &[
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+                "--ignore-submodules=all",
+            ],
         )
         .await?;
         if status.code != 0 {
