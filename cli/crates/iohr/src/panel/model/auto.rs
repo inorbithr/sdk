@@ -15,7 +15,7 @@ use crate::commands::asks::{AUTO_WINDOW_HOURS, PanelAuto};
 use crate::panel::cells::{AMBER, FAINT, GREEN, KEY, Line, MUTE, Span, TXT, bold, one_wide, sp};
 
 /// "18:00 UTC" for an RFC 3339 time; the text itself when it does not parse.
-fn clock(at: &str) -> String {
+pub(super) fn clock(at: &str) -> String {
     OffsetDateTime::parse(at, &Rfc3339).map_or_else(
         |_| one_wide(at),
         |t| {
@@ -165,13 +165,13 @@ impl Model {
 }
 
 /// The text room of the Auto view, inside its box.
-const ROOM: usize = 50;
+pub(super) const ROOM: usize = 50;
 
 fn plural(n: u64) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
-fn enter_footer(what: &str) -> Vec<Span> {
+pub(super) fn enter_footer(what: &str) -> Vec<Span> {
     vec![
         sp("⏎", KEY),
         sp(&format!(" {what}   "), MUTE),

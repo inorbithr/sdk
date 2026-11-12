@@ -1,0 +1,280 @@
+/* SPDX-License-Identifier: Apache-2.0
+   Copyright 2026 InOrbit d.o.o.
+
+   Moved from iohr-mac src/index.css (origin/main d3ac8759) under ADR 0230: the shell frame layer lives
+   here under Apache-2.0, and iohr-mac imports it (RFC 0217 C8 deletes its copy). Only the theme tokens
+   moved (the dark variant, :root, html.dark, .dark-island and @theme inline), unchanged; the app's base
+   layer, fonts and page animations stay with each app. Import it after "tailwindcss". */
+
+/* The console's tokens (core ui/console/src/app/globals.css), light and dark. Themes (PRD 0118,
+   src/lib/theme.ts) set these on <html> with the chosen theme's values, and the dark class
+   follows the chosen mode (System, Light or Dark), as on the console. What is below is the
+   default theme, used before the app's code runs. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --brand-amber: #ff9e1b;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.955 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+  --success: oklch(0.545 0.166 156.743);
+  --warning: oklch(0.666 0.179 58.318);
+  /* The two grounds Tailwind's grey scale runs between (light background to dark background),
+     and the theme's dark set for surfaces that stay dark in a light window (the terminal). */
+  --l-background: oklch(1 0 0);
+  --d-background: oklch(0.145 0 0);
+  --d-foreground: oklch(0.985 0 0);
+  --d-card: oklch(0.205 0 0);
+  --d-card-foreground: oklch(0.985 0 0);
+  --d-popover: oklch(0.205 0 0);
+  --d-popover-foreground: oklch(0.985 0 0);
+  --d-primary: oklch(0.922 0 0);
+  --d-primary-foreground: oklch(0.205 0 0);
+  --d-secondary: oklch(0.269 0 0);
+  --d-secondary-foreground: oklch(0.985 0 0);
+  --d-muted: oklch(0.269 0 0);
+  --d-muted-foreground: oklch(0.708 0 0);
+  --d-accent: oklch(0.269 0 0);
+  --d-accent-foreground: oklch(0.985 0 0);
+  --d-border: oklch(1 0 0 / 10%);
+  --d-input: oklch(1 0 0 / 15%);
+  --d-ring: oklch(0.556 0 0);
+  --d-sidebar: oklch(0.175 0 0);
+  --d-sidebar-foreground: oklch(0.985 0 0);
+  --d-sidebar-primary: oklch(0.922 0 0);
+  --d-sidebar-primary-foreground: oklch(0.205 0 0);
+  --d-sidebar-accent: oklch(0.269 0 0);
+  --d-sidebar-accent-foreground: oklch(0.985 0 0);
+  --d-sidebar-border: oklch(1 0 0 / 8%);
+  --d-sidebar-ring: oklch(0.556 0 0);
+  --brand-dark: #ff9e1b;
+  /* The canvas (PRD 0065): a quiet board a shade off the background, and muted tones for kinds
+     of things. */
+  --canvas-bg: color-mix(in oklab, var(--foreground) 1.75%, var(--background));
+  --canvas-dot: color-mix(in oklab, var(--foreground) 16.4%, var(--background));
+  --link: oklch(0.6 0.02 260);
+  --tone-plain: oklch(0.62 0 0);
+  --tone-blue: oklch(0.58 0.11 250);
+  --tone-green: oklch(0.56 0.11 155);
+  --tone-teal: oklch(0.58 0.09 195);
+  --tone-violet: oklch(0.56 0.13 295);
+  --tone-red: oklch(0.58 0.15 28);
+  color-scheme: light;
+}
+
+html.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --sidebar: oklch(0.175 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.922 0 0);
+  --sidebar-primary-foreground: oklch(0.205 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* Dark, whether the window is light or dark: the status colours and tones for dark ground. */
+html.dark,
+.dark-island {
+  --destructive: oklch(0.704 0.191 22.216);
+  --success: oklch(0.724 0.144 163.278);
+  --warning: oklch(0.795 0.184 86.047);
+  --canvas-bg: color-mix(in oklab, var(--foreground) 2.4%, var(--background));
+  --canvas-dot: color-mix(in oklab, var(--foreground) 18.5%, var(--background));
+  --link: oklch(0.62 0.03 260);
+  --tone-plain: oklch(0.6 0 0);
+  --tone-blue: oklch(0.7 0.11 250);
+  --tone-green: oklch(0.72 0.12 155);
+  --tone-teal: oklch(0.72 0.09 195);
+  --tone-violet: oklch(0.7 0.13 295);
+  --tone-red: oklch(0.7 0.14 28);
+  color-scheme: dark;
+}
+
+/* Surfaces that stay dark in a light window (the terminal): the theme's dark set. Pair it with
+   the dark class so dark: utilities apply inside. */
+.dark-island {
+  --background: var(--d-background);
+  --foreground: var(--d-foreground);
+  --card: var(--d-card);
+  --card-foreground: var(--d-card-foreground);
+  --popover: var(--d-popover);
+  --popover-foreground: var(--d-popover-foreground);
+  --primary: var(--d-primary);
+  --primary-foreground: var(--d-primary-foreground);
+  --secondary: var(--d-secondary);
+  --secondary-foreground: var(--d-secondary-foreground);
+  --muted: var(--d-muted);
+  --muted-foreground: var(--d-muted-foreground);
+  --accent: var(--d-accent);
+  --accent-foreground: var(--d-accent-foreground);
+  --border: var(--d-border);
+  --input: var(--d-input);
+  --ring: var(--d-ring);
+  --sidebar: var(--d-sidebar);
+  --sidebar-foreground: var(--d-sidebar-foreground);
+  --sidebar-primary: var(--d-sidebar-primary);
+  --sidebar-primary-foreground: var(--d-sidebar-primary-foreground);
+  --sidebar-accent: var(--d-sidebar-accent);
+  --sidebar-accent-foreground: var(--d-sidebar-accent-foreground);
+  --sidebar-border: var(--d-sidebar-border);
+  --sidebar-ring: var(--d-sidebar-ring);
+  --brand-amber: var(--brand-dark);
+  color: var(--foreground);
+}
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Geist Mono", Menlo, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-amber: var(--brand-amber);
+  /* The terminal's own surfaces, inside the always-dark island: a little above the background. */
+  --color-term-bar: color-mix(in oklab, var(--foreground) 2%, var(--background));
+  --color-term-panel: color-mix(in oklab, var(--foreground) 4%, var(--background));
+  --color-term-edit: color-mix(in oklab, var(--foreground) 8%, var(--background));
+  /* A warning strip: the accent faintly over the background. */
+  --color-amber-tint: color-mix(in oklab, var(--brand-amber) 9%, var(--background));
+  /* Tailwind's greys run from the theme's light background to its dark background, so every
+     grey in the app follows the theme (for the default theme this is exactly Tailwind's neutral).
+     Amber is the theme's accent; without a theme accent it stays Tailwind's amber. Red, emerald,
+     sky and violet stay status colours, as on the console. */
+  --color-neutral-50: color-mix(in oklab, var(--d-background) 1.75%, var(--l-background));
+  --color-neutral-100: color-mix(in oklab, var(--d-background) 3.5%, var(--l-background));
+  --color-neutral-200: color-mix(in oklab, var(--d-background) 9.1%, var(--l-background));
+  --color-neutral-300: color-mix(in oklab, var(--d-background) 15.2%, var(--l-background));
+  --color-neutral-400: color-mix(in oklab, var(--d-background) 34.2%, var(--l-background));
+  --color-neutral-500: color-mix(in oklab, var(--d-background) 51.9%, var(--l-background));
+  --color-neutral-600: color-mix(in oklab, var(--d-background) 65.6%, var(--l-background));
+  --color-neutral-700: color-mix(in oklab, var(--d-background) 73.6%, var(--l-background));
+  --color-neutral-800: color-mix(in oklab, var(--d-background) 85.5%, var(--l-background));
+  --color-neutral-900: color-mix(in oklab, var(--d-background) 93%, var(--l-background));
+  --color-neutral-950: var(--d-background);
+  --color-zinc-50: color-mix(in oklab, var(--d-background) 1.75%, var(--l-background));
+  --color-zinc-100: color-mix(in oklab, var(--d-background) 3.5%, var(--l-background));
+  --color-zinc-200: color-mix(in oklab, var(--d-background) 9.1%, var(--l-background));
+  --color-zinc-300: color-mix(in oklab, var(--d-background) 15.2%, var(--l-background));
+  --color-zinc-400: color-mix(in oklab, var(--d-background) 34.2%, var(--l-background));
+  --color-zinc-500: color-mix(in oklab, var(--d-background) 51.9%, var(--l-background));
+  --color-zinc-600: color-mix(in oklab, var(--d-background) 65.6%, var(--l-background));
+  --color-zinc-700: color-mix(in oklab, var(--d-background) 73.6%, var(--l-background));
+  --color-zinc-800: color-mix(in oklab, var(--d-background) 85.5%, var(--l-background));
+  --color-zinc-900: color-mix(in oklab, var(--d-background) 93%, var(--l-background));
+  --color-zinc-950: var(--d-background);
+  --color-gray-50: color-mix(in oklab, var(--d-background) 1.75%, var(--l-background));
+  --color-gray-100: color-mix(in oklab, var(--d-background) 3.5%, var(--l-background));
+  --color-gray-200: color-mix(in oklab, var(--d-background) 9.1%, var(--l-background));
+  --color-gray-300: color-mix(in oklab, var(--d-background) 15.2%, var(--l-background));
+  --color-gray-400: color-mix(in oklab, var(--d-background) 34.2%, var(--l-background));
+  --color-gray-500: color-mix(in oklab, var(--d-background) 51.9%, var(--l-background));
+  --color-gray-600: color-mix(in oklab, var(--d-background) 65.6%, var(--l-background));
+  --color-gray-700: color-mix(in oklab, var(--d-background) 73.6%, var(--l-background));
+  --color-gray-800: color-mix(in oklab, var(--d-background) 85.5%, var(--l-background));
+  --color-gray-900: color-mix(in oklab, var(--d-background) 93%, var(--l-background));
+  --color-gray-950: var(--d-background);
+  --color-stone-50: color-mix(in oklab, var(--d-background) 1.75%, var(--l-background));
+  --color-stone-100: color-mix(in oklab, var(--d-background) 3.5%, var(--l-background));
+  --color-stone-200: color-mix(in oklab, var(--d-background) 9.1%, var(--l-background));
+  --color-stone-300: color-mix(in oklab, var(--d-background) 15.2%, var(--l-background));
+  --color-stone-400: color-mix(in oklab, var(--d-background) 34.2%, var(--l-background));
+  --color-stone-500: color-mix(in oklab, var(--d-background) 51.9%, var(--l-background));
+  --color-stone-600: color-mix(in oklab, var(--d-background) 65.6%, var(--l-background));
+  --color-stone-700: color-mix(in oklab, var(--d-background) 73.6%, var(--l-background));
+  --color-stone-800: color-mix(in oklab, var(--d-background) 85.5%, var(--l-background));
+  --color-stone-900: color-mix(in oklab, var(--d-background) 93%, var(--l-background));
+  --color-stone-950: var(--d-background);
+  --color-slate-50: color-mix(in oklab, var(--d-background) 1.75%, var(--l-background));
+  --color-slate-100: color-mix(in oklab, var(--d-background) 3.5%, var(--l-background));
+  --color-slate-200: color-mix(in oklab, var(--d-background) 9.1%, var(--l-background));
+  --color-slate-300: color-mix(in oklab, var(--d-background) 15.2%, var(--l-background));
+  --color-slate-400: color-mix(in oklab, var(--d-background) 34.2%, var(--l-background));
+  --color-slate-500: color-mix(in oklab, var(--d-background) 51.9%, var(--l-background));
+  --color-slate-600: color-mix(in oklab, var(--d-background) 65.6%, var(--l-background));
+  --color-slate-700: color-mix(in oklab, var(--d-background) 73.6%, var(--l-background));
+  --color-slate-800: color-mix(in oklab, var(--d-background) 85.5%, var(--l-background));
+  --color-slate-900: color-mix(in oklab, var(--d-background) 93%, var(--l-background));
+  --color-slate-950: var(--d-background);
+  --color-white: var(--l-background);
+  --color-amber-50: var(--amber-50, oklch(98.7% 0.022 95.277));
+  --color-amber-100: var(--amber-100, oklch(96.2% 0.059 95.617));
+  --color-amber-200: var(--amber-200, oklch(92.4% 0.12 95.746));
+  --color-amber-300: var(--amber-300, oklch(87.9% 0.169 91.605));
+  --color-amber-400: var(--amber-400, oklch(82.8% 0.189 84.429));
+  --color-amber-500: var(--amber-500, oklch(76.9% 0.188 70.08));
+  --color-amber-600: var(--amber-600, oklch(66.6% 0.179 58.318));
+  --color-amber-700: var(--amber-700, oklch(55.5% 0.163 48.998));
+  --color-amber-800: var(--amber-800, oklch(47.3% 0.137 46.201));
+  --color-amber-900: var(--amber-900, oklch(41.4% 0.112 45.904));
+  --color-amber-950: var(--amber-950, oklch(27.9% 0.077 45.635));
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}

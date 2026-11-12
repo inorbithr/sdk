@@ -15,6 +15,7 @@ use crate::ext::install::Fetched;
 use crate::ext::manifest::{check_name, check_version};
 use crate::ext::oci::Digest;
 use crate::output::Out;
+use crate::ui::Listed;
 
 /// The publisher a bare name means (RFC 0073: `agent` is `inorbit/agent`).
 pub(crate) const FIRST_PARTY: &str = "inorbit";
@@ -209,9 +210,10 @@ pub(crate) async fn search(
         Out::note("No extensions match.");
     } else {
         let rows: Vec<Vec<String>> = found.iter().map(search_row).collect();
-        Out::table(
+        Out::list(
             &["NAME", "KIND", "PUBLISHER", "LATEST", "VISIBILITY"],
             &rows,
+            &Listed::new("match", "matches"),
         );
     }
     if more {

@@ -125,6 +125,7 @@ pub const RESERVED: &[&str] = &[
     "context",
     "coordinator",
     "decisions",
+    "doctor",
     "domains",
     "ext",
     "help",
@@ -154,6 +155,7 @@ pub const RESERVED: &[&str] = &[
     "theme",
     "token",
     "tunnel",
+    "ui",
     "upgrade",
     "whoami",
 ];

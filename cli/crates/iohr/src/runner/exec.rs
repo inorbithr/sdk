@@ -587,12 +587,28 @@ pub(crate) async fn process_gone(pid: i32) -> bool {
     false
 }
 
-/// `kill -KILL -<pgid>`. The crate forbids `unsafe`, so the shell's `kill` does it. No `--`:
+/// `kill -KILL -<pgid>`.
+pub(crate) fn kill_group(pgid: u32) {
+    signal_group(pgid, Signal::Kill);
+}
+
+/// The signals a process group is sent: `Term` asks it to stop, `Kill` makes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Signal {
+    Term,
+    Kill,
+}
+
+/// `kill -<signal> -<pgid>`. The crate forbids `unsafe`, so the shell's `kill` does it. No `--`:
 /// dash (Debian and Ubuntu's `/bin/sh`) reads it as a pid and refuses, and the error goes to
 /// /dev/null, so the group would survive without a word.
-pub(crate) fn kill_group(pgid: u32) {
+pub(crate) fn signal_group(pgid: u32, signal: Signal) {
+    let script = match signal {
+        Signal::Term => "kill -TERM \"-$0\" 2>/dev/null",
+        Signal::Kill => "kill -KILL \"-$0\" 2>/dev/null",
+    };
     let _ = std::process::Command::new("/bin/sh")
-        .args(["-c", "kill -KILL \"-$0\" 2>/dev/null", &pgid.to_string()])
+        .args(["-c", script, &pgid.to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

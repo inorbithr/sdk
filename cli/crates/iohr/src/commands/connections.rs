@@ -28,6 +28,7 @@ use crate::context::{Session, account, session};
 use crate::error::Error;
 use crate::output::Out;
 use crate::prompt;
+use crate::ui::Listed;
 
 /// How often a connect session is asked whether the person has finished.
 const POLL: Duration = Duration::from_secs(2);
@@ -235,9 +236,10 @@ async fn list(
             ]
         })
         .collect();
-    Out::table(
+    Out::list(
         &["NAME", "CONNECTOR", "AS", "STATUS", "GRANTS", "LAST TEST"],
         &rows,
+        &Listed::new("connection", "connections").next("new one", "iohr connections add"),
     );
     Ok(())
 }
@@ -1001,9 +1003,10 @@ async fn history(
             ]
         })
         .collect();
-    Out::table(
+    Out::list(
         &["AT", "CONNECTION", "ACTION", "CALLER", "OUTCOME", "TIME"],
         &rows,
+        &Listed::new("event", "events"),
     );
     Ok(())
 }
@@ -1250,7 +1253,11 @@ async fn grants(s: &Session, acc: &str, which: &str, out: Out) -> Result<(), Err
             ]
         })
         .collect();
-    Out::table(&["ID", "CONSUMER", "ACTIONS", "EXPIRES", "STATE"], &rows);
+    Out::list(
+        &["ID", "CONSUMER", "ACTIONS", "EXPIRES", "STATE"],
+        &rows,
+        &Listed::new("grant", "grants"),
+    );
     Ok(())
 }
 

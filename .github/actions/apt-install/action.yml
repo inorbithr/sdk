@@ -1,0 +1,41 @@
+name: Apt install
+description: >-
+  Installs Debian packages from the runner image's archive. Packages already on the
+  image are skipped. When the archive can't be reached (the hosted runners have failed
+  to resolve the Ubuntu archive hosts for long stretches), it refreshes the index,
+  flushes the resolver cache and tries again with a growing pause, four times in all.
+inputs:
+  packages:
+    description: Space-separated package names.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install the packages
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        read -ra want <<<"$PACKAGES"
+        missing=()
+        for p in "${want[@]}"; do
+          dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed" || missing+=("$p")
+        done
+        if [ "${#missing[@]}" -eq 0 ]; then
+          echo "already installed: ${want[*]}"
+          exit 0
+        fi
+        # A dead archive must fail fast, not hang the job: bound each connection.
+        opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+        for attempt in 1 2 3 4; do
+          if sudo apt-get update "${opts[@]}" \
+            && sudo apt-get install -y --no-install-recommends "${opts[@]}" "${missing[@]}"; then
+            exit 0
+          fi
+          [ "$attempt" -eq 4 ] && break
+          echo "::warning::apt-get attempt ${attempt} failed; retrying in $((attempt * 30))s"
+          sudo resolvectl flush-caches 2>/dev/null || true
+          sleep $((attempt * 30))
+        done
+        echo "::error::could not install ${missing[*]} after 4 attempts"
+        exit 1

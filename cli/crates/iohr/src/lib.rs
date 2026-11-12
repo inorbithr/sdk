@@ -21,16 +21,19 @@ mod access;
 mod actions;
 mod args;
 mod ask;
+mod ask_template;
 mod askback;
 mod attach;
 mod browser;
 mod card;
 mod commands;
 mod context;
+mod embedded;
 mod error;
 mod examples;
 mod handoff;
 mod headless;
+mod health;
 mod hints;
 mod io_signin;
 mod iomd;
@@ -43,6 +46,8 @@ mod permissions;
 mod planner;
 mod prompt;
 mod runner;
+#[cfg(unix)]
+mod safe_open;
 #[cfg(unix)]
 mod session;
 mod steps;
@@ -70,7 +75,9 @@ pub fn bare_inside(g: &cli::Global) -> bool {
     })
 }
 pub use error::Error;
-pub use usage::{report_clap as report_usage_clap, report_message as report_usage_message};
+pub use usage::{
+    report_clap as report_usage_clap, report_failure, report_message as report_usage_message,
+};
 
 use iohr_auth::Redacted;
 

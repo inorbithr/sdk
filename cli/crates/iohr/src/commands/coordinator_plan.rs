@@ -11,6 +11,7 @@ use crate::context::Session;
 use crate::error::Error;
 use crate::output::Out;
 use crate::planner::{Outcome, Plans, Step, default_holder, find_item, item_fields, note_text};
+use crate::ui::Listed;
 
 use super::{day, headline, str_of};
 
@@ -43,7 +44,11 @@ pub(super) async fn plan(s: &Session, cmd: CoordinatorPlanCommand, out: Out) -> 
                     ]
                 })
                 .collect();
-            Out::table(&["PLAN", "STATE", "ITEMS", "UPDATED", "TITLE"], &rows);
+            Out::list(
+                &["PLAN", "STATE", "ITEMS", "UPDATED", "TITLE"],
+                &rows,
+                &Listed::new("plan", "plans").next("new one", "iohr coordinator plan create"),
+            );
             Ok(())
         }
         CoordinatorPlanCommand::Show { plan, account } => {

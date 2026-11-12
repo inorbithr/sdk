@@ -27,6 +27,11 @@ pub(crate) struct Session {
     pub child: Child,
     output: mpsc::Receiver<Vec<u8>>,
     pub screen: vt100::Parser,
+    /// Everything the process wrote, as text: for counting how often a line was drawn (the
+    /// screen holds only what is visible now).
+    pub transcript: String,
+    /// The same, as the bytes the terminal got.
+    pub raw: Vec<u8>,
 }
 
 impl Session {
@@ -77,6 +82,8 @@ impl Session {
             child,
             output,
             screen: vt100::Parser::new(ROWS, COLS, 0),
+            transcript: String::new(),
+            raw: Vec::new(),
         }
     }
 
@@ -85,11 +92,11 @@ impl Session {
         let end = Instant::now() + Duration::from_secs(10);
         while Instant::now() < end {
             if let Ok(bytes) = self.output.recv_timeout(Duration::from_millis(100)) {
-                self.screen.process(&bytes);
+                self.take(&bytes);
             }
             // A frame is whole once the synchronized update closes; keep reading what is queued.
             while let Ok(bytes) = self.output.try_recv() {
-                self.screen.process(&bytes);
+                self.take(&bytes);
             }
             if done(self.screen.screen()) {
                 return;
@@ -99,6 +106,12 @@ impl Session {
             "timed out waiting for {what}; the screen is:\n{}",
             self.screen.screen().contents()
         );
+    }
+
+    fn take(&mut self, bytes: &[u8]) {
+        self.screen.process(bytes);
+        self.raw.extend_from_slice(bytes);
+        self.transcript.push_str(&String::from_utf8_lossy(bytes));
     }
 
     pub(crate) fn send(&mut self, bytes: &[u8]) {
@@ -111,7 +124,7 @@ impl Session {
         let end = Instant::now() + Duration::from_secs(10);
         while Instant::now() < end {
             while let Ok(bytes) = self.output.try_recv() {
-                self.screen.process(&bytes);
+                self.take(&bytes);
             }
             if let Ok(Some(status)) = self.child.try_wait() {
                 return Some(status);
@@ -136,4 +149,23 @@ pub(crate) fn row(screen: &vt100::Screen, r: u16) -> String {
 /// Whether any row of the screen holds `text`.
 pub(crate) fn any(screen: &vt100::Screen, text: &str) -> bool {
     (0..ROWS).any(|r| row(screen, r).contains(text))
+}
+
+/// What a terminal of this size that kept `scrollback` lines held when it had been fed `raw`:
+/// the lines that scrolled off (oldest first) and the rows of the screen.
+pub(crate) fn with_history(raw: &[u8], scrollback: usize) -> (Vec<String>, Vec<String>) {
+    let mut term = vt100::Parser::new(ROWS, COLS, scrollback);
+    term.process(raw);
+    term.screen_mut().set_scrollback(usize::MAX);
+    let top = term.screen().scrollback();
+    let mut off = Vec::new();
+    let mut seen = 0;
+    while seen < top {
+        term.screen_mut().set_scrollback(top - seen);
+        let take = usize::from(ROWS).min(top - seen);
+        off.extend(term.screen().rows(0, COLS).take(take));
+        seen += take;
+    }
+    term.screen_mut().set_scrollback(0);
+    (off, term.screen().rows(0, COLS).collect())
 }

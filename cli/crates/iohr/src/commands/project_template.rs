@@ -16,8 +16,8 @@ use crate::template::{self, Answer, Kind, Origin, Row, Spec, StepName, Template}
 use crate::ui::Paint;
 
 /// `list`: the table, or the rows as JSON. `default` is the template `init` uses.
-pub(crate) fn list(default: &str, out: Out) -> Result<(), Error> {
-    let rows = template::list(&template::user_root()?, default);
+pub(crate) fn list(default: &str, all: bool, out: Out) -> Result<(), Error> {
+    let rows = template::list(&template::user_root()?, default, all);
     if out.json {
         Out::print_json(&rows);
     } else {
@@ -177,12 +177,7 @@ pub(crate) fn describe(t: &Template, is_default: bool) -> Shown {
     Shown {
         id: t.meta.id.clone(),
         description: t.meta.description.clone(),
-        status: if t.meta.status == template::Status::Live {
-            "live"
-        } else {
-            "coming"
-        }
-        .to_owned(),
+        status: t.meta.status.word().to_owned(),
         origin: match &t.origin {
             Origin::BuiltIn => ShownOrigin {
                 kind: "built-in",

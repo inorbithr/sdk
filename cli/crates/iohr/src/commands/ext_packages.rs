@@ -20,6 +20,7 @@ use crate::error::Error;
 use crate::ext::install::Store;
 use crate::ext::manifest::check_name;
 use crate::output::Out;
+use crate::ui::Listed;
 
 /// The most listings read, so an answer that never ends cannot hold `iohr` in a loop.
 const MAX_LISTINGS: usize = 10_000;
@@ -156,7 +157,7 @@ fn print(packages: &[Package], out: Out) {
                 ]
             })
             .collect();
-        Out::table(
+        Out::list(
             &[
                 "NAME",
                 "KIND",
@@ -166,6 +167,7 @@ fn print(packages: &[Package], out: Out) {
                 "INSTALLED",
             ],
             &rows,
+            &Listed::new("package", "packages"),
         );
     }
 }
