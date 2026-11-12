@@ -128,7 +128,7 @@ mod tests {
         full.extend_from_slice(argv);
         let cli = Cli::try_parse_from(full).expect("parses");
         match cli.command {
-            Command::Tunnel(t) => plan(&cli.global, &t),
+            Some(Command::Tunnel(t)) => plan(&cli.global, &t),
             _ => panic!("not tunnel"),
         }
     }

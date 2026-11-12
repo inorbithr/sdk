@@ -57,7 +57,7 @@ pub(crate) const POLL: Duration = Duration::from_secs(20);
 const POLL_MAX: Duration = Duration::from_secs(300);
 
 /// The most pages of approved runs read in one poll.
-const MAX_PAGES: usize = 10;
+pub(super) const MAX_PAGES: usize = 10;
 
 /// JSON with object keys sorted at every level and no white space (core
 /// `approval_messages::canonical`).
@@ -192,7 +192,7 @@ fn int(v: Option<&Value>) -> i64 {
     }
 }
 
-fn text(v: &Value, key: &str) -> String {
+pub(super) fn text(v: &Value, key: &str) -> String {
     v.get(key)
         .and_then(Value::as_str)
         .unwrap_or_default()
@@ -653,7 +653,7 @@ pub(crate) trait RunAsks {
 }
 
 /// `apr_` and 26 ULID characters: the only ids put in a path.
-fn is_approval_id(s: &str) -> bool {
+pub(crate) fn is_approval_id(s: &str) -> bool {
     s.strip_prefix("apr_").is_some_and(|r| {
         r.len() == 26
             && r.bytes()
@@ -663,27 +663,7 @@ fn is_approval_id(s: &str) -> bool {
 
 impl RunAsks for HttpService<'_> {
     async fn approved_runs(&self) -> Result<Vec<Value>, ServiceError> {
-        let mut all = Vec::new();
-        let mut token = String::new();
-        for _ in 0..MAX_PAGES {
-            let mut q: Vec<(&str, &str)> = vec![
-                ("account_id", self.account.as_str()),
-                ("status", "approved"),
-                ("kind", "run"),
-            ];
-            if !token.is_empty() {
-                q.push(("page_token", token.as_str()));
-            }
-            let v: Value = self.api.get("/v1/approvals", &q).await?;
-            if let Some(a) = v.get("approvals").and_then(Value::as_array) {
-                all.extend(a.iter().cloned());
-            }
-            token = text(&v, "next_page_token");
-            if token.is_empty() {
-                break;
-            }
-        }
-        Ok(all)
+        self.list_approvals("approved", "run").await
     }
 
     async fn report(&self, approval_id: &str, body: &Value) -> Result<(), ServiceError> {
@@ -1074,6 +1054,7 @@ pub(crate) fn proof_from_json(v: &Value) -> Result<Proof, String> {
     Ok(p)
 }
 
+pub(crate) mod client;
 pub(crate) mod enrol;
 
 #[cfg(test)]

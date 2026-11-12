@@ -311,7 +311,8 @@ The first rule that applies wins:
 1. `config_file` in code (`off` reads no file);
 2. `INORBIT_CONFIG_FILE` (`off` reads no file);
 3. `$IOHR_CONFIG_DIR/config.toml`, the command line's own override;
-4. the command line's default directory (its `etcetera` native strategy, `cli/README.md`):
+4. the command line's default directory (its `etcetera` native strategy,
+   `cli/docs/files-and-dependencies.md`):
 
 | OS | File |
 |---|---|
@@ -356,6 +357,8 @@ max_retries = 4
 [runner]                            # iohr runner, every profile (section 4.3)
 capacity = 4
 kinds = ["coordinate", "build"]
+workspace_keep_days = 14
+workspace_max_gb = 200
 
 [profiles.ci.runner]                # this profile's runner, over [runner]
 capacity = 8
@@ -365,6 +368,28 @@ template = "coordinated"
 
 [ask]                               # iohr ask (section 4.5)
 agent = "claude"
+model = "haiku"
+allow_edits = false
+permissions = "prompt"
+mode = "manual"
+thinking = "show"
+hints = "sometimes"
+menu_key = "down"
+read = []                           # more folders Io may read (below)
+
+[sync]                              # iohr sync (section 4.6)
+background = false
+
+[memory]                            # iohr memory (section 4.7)
+scope = "project"
+sync = false
+
+[panel]                             # the floating panel (section 4.8)
+mouse = "menu"
+chat = "on"
+
+[doctor]                            # `iohr doctor` and the `?` card (section 4.9)
+auto_fix = false
 ```
 
 Rules:
@@ -394,7 +419,8 @@ command-line keys and leaves its SDK keys; the table goes when nothing is left.
 ### 4.3 The runner tables
 
 `iohr runner` reads `[runner]` and the chosen profile's `[profiles.<name>.runner]` (the
-profile's keys win), and its flags win over both. The SDK does not read them.
+profile's keys win), and its flags win over both. `iohr upgrade` reads
+`upgrade_sign_identity` from the same two tables. The SDK does not read them.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
@@ -402,15 +428,58 @@ profile's keys win), and its flags win over both. The SDK does not read them.
 | `kinds` | `coordinate`, `build` | both | `register` and `run`: the turn classes the runner takes |
 | `always_on` | true or false | false | `register` |
 | `name` | text | the host name | `register`, and `run` to find the runner |
+| `id` | a runner id (`rnr_...`) | not set | `run` and `gate-report`: the runner they drive when this machine's key matches more than one; `register` refreshes that one. `--runner` and `IOHR_RUNNER_ID` win over it |
 | `kube_context` | a kubeconfig context name | not set | `run`: the cluster approved host actions reach, passed to every `kubectl` call as `--context` |
 | `kubeconfig` | an absolute path | not set | `run`: the kubeconfig the pinned `kubectl` reads, passed as `--kubeconfig` |
 | `auto_upgrade` | true or false | true | `run`: look for a newer `iohr` release and install it (below); `--no-auto-upgrade` turns it off for one run |
 | `upgrade_interval_minutes` | 5 to 10080 | 60 | `run`: minutes between looks for a newer release |
 | `upgrade_restart` | `exec` or `exit` | `exec` | `run`: how the runner starts the new binary (below) |
+| `upgrade_sign_identity` | `auto`, a code-signing identity, or `-` | not set (off) | `run` and `iohr upgrade`, macOS only: sign each new `iohr` with this identity before it is installed (below); `IOHR_SIGN_IDENTITY` wins over it |
 | `user_units` | user service unit names (`<name>.service`) | not set | `run`: the only units an approved `systemd.user-restart` may restart; unset or empty, every one is refused before it starts |
 | `core_checkout` | an absolute path to a core checkout (it holds `mise.toml`) | not set | `run`: where an approved `build.sweep-targets` runs `mise run target:sweep` or `target:guard`, and where an approved `agent.install-checks` reads core's check files with `git` and `disk.prune` with the target `host` runs `mise run host:prune`; unset, every sweep and install is refused before it starts |
+| `claude_auth` | `api`, `plan` or `any` | `api` | `register` and `run`: how `claude` may sign in for a turn: `api` takes only an Anthropic API key (`iohr runner api-key set`); `plan` takes only your own Claude plan, for personal use only (below), and leaves a stored key unused; `any` allows either. A server policy can narrow it, never widen it |
+| `codex_auth` | `api`, `plan` or `any` | `any` | `run`: the same for Codex turns |
+| `allow_host_git_credentials` | true or false | false | `run`: a job whose lease brings no GitHub token may use this machine's own `gh` sign-in to fetch and push; false, such a job fails before its checkout, saying why |
+| `workspace_keep_days` | 1 to 3650 | 14 | `run` and `prune`: a job checkout, repository mirror or build directory nothing has used for this many days is removed (below) |
+| `workspace_max_gb` | 1 or more (GB, 10^9 bytes) | not set (no cap) | `run` and `prune`: while the checkouts, mirrors and build directories take more than this, the oldest unused go first |
 
 With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved Kubernetes action. An approved action whose tool this runner lacks (no cluster for a Kubernetes action, no `docker`, `gh`, `mise`, `systemctl`, `git`, `df` or `helm` on its `PATH`, no `~/.inorbit/roll/remote-roll.sh` for `roll.task`, no `core_checkout` for `build.sweep-targets`, `agent.install-checks` or `disk.prune` with the target `host`, no cluster for `helm.runner-scale`, a system that is not Linux for `disk.prune`, no `~/.config/iohr-agent/checks.toml` or an agent unit outside `user_units` for `agent.install-checks`) is refused before it is reported started, as `not_allowed_here`, so the ask shows why and nothing ran.
+
+One machine key holds one runner. `register` finds the runner this machine's key already
+holds, whatever name it was registered under, and says "already registered" rather than
+making a second one. When the key matches more than one runner (an older `iohr` could
+register twice), `run` and `gate-report` refuse to guess and list the ids: pin one with `id` in
+the profile's runner table (or `--runner <id>`, or `IOHR_RUNNER_ID`), then
+revoke the others. `register` prints the `id = "rnr_..."` line to add.
+
+#### How `claude` signs in
+
+A runner's `claude` turns run on an Anthropic API key, the path for organisations and
+teams. `iohr runner api-key set` stores the key in the profile's credential store (the
+OS keychain, or the owner-only file with `--insecure-storage`), keyed by account: it
+reads the key from a prompt with no echo, `--stdin` or `--file PATH`, never from an
+argument, and never prints it. `iohr runner api-key remove` deletes it. The runner reads
+the key when it starts (restart it after a change) and hands it only to the `claude`
+process it starts, as `ANTHROPIC_API_KEY` with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`
+beside it, so the tools `claude` runs do not inherit it. The key never reaches a log,
+the coordinator, the config file or another child. `claude` sends its requests to
+Anthropic directly; InOrbit does not proxy them.
+
+Running on your own Claude plan instead is personal use only and off by default. It
+takes both `claude_auth = "any"` or `"plan"` in the runner table (only the local file turns it on;
+the server never does) and the notice accepted on this machine:
+`iohr runner personal-use` shows it, `--accept` accepts it and `--withdraw` takes the
+acceptance back. The acceptance is stored in `runner/personal-use.json` under the
+config directory, with the notice's version and the date only, and holds for 365 days
+or until the notice changes. In this mode the runner takes one turn at a time, only work
+you assigned yourself, and says so when it starts. Under `api`, a turn on your own
+plan is refused with a message that names `iohr runner api-key set`; under `plan`, a turn
+on an API key is refused with one that names `claude`, then `/login`.
+
+The coordinator's lease can carry a policy per provider as well; a turn runs only on a
+sign-in both that and the runner's own setting allow, and a value the runner does not
+know counts as `api`. `claude_auth` and `codex_auth` are read again on SIGHUP; the stored key is
+not.
 
 `iohr runner run` sends `capacity`, its version and `kinds` on every heartbeat, so the
 coordinator offers that many slots within one beat, without registering again. On
@@ -424,6 +493,49 @@ the kinds it declares until the volume has room again (`none` when nothing is le
 the coordinator offers it nothing new). `iohr runner config show [--json]` prints each
 value in effect, where it came from and the build volume's free space, without signing
 in.
+
+A job's GitHub access comes from its lease: the token the coordinator sends for the
+account's GitHub App installation. When a lease brings none, the runner uses this
+machine's own `gh` sign-in only with `allow_host_git_credentials = true`; otherwise the
+job fails before anything is fetched, and the reason names the setting and the GitHub
+App. Turn it on only on a machine whose `gh` account may push to every repository the
+runner's account sends it.
+
+The runner keeps its job checkouts under `runner/coordinate/checkouts/` in the config
+directory, one bare mirror per repository under `runner/mirrors/` and one shared build
+directory per repository under `runner/target/`. While it holds no lease, at most once an
+hour and never in its first 5 minutes, `iohr runner run` removes what nothing has used
+for `workspace_keep_days`, and with `workspace_max_gb` set it removes the oldest unused
+first until the total is under the cap. A checkout a live lease holds is never removed:
+the runner holds an operating-system lock on it from before the checkout is made until
+the lease's work has ended, and the removal takes that lock first. A mirror goes only
+when no checkout is left on it, and nothing used in the last hour goes, even over the
+cap. `iohr runner prune` does the same at once, without signing in; `--dry-run` lists
+what it would remove (kind, path, days idle, size and why) and removes nothing, and
+`--json` prints the same as data.
+
+`iohr runner service install` starts the runner when you sign in to the machine and
+starts it again when it stops, with no `sudo`. On macOS it writes the user agent
+`~/Library/LaunchAgents/hr.inorbit.runner.plist` (label `hr.inorbit.runner`, or
+`hr.inorbit.runner-<profile>` with `--profile`; log in
+`~/Library/Logs/InOrbit/runner.log`) and loads it with `launchctl bootstrap gui/<uid>`.
+On Linux it writes `~/.config/systemd/user/iohr-runner.service` (or
+`iohr-runner-<profile>.service`; `$XDG_CONFIG_HOME` is used when set), then runs
+`systemctl --user daemon-reload`, `enable` and `restart`; `loginctl enable-linger` keeps
+it running after you sign out. The service runs this `iohr` by its full path, with
+`HOME`, the current `PATH` and `IOHR_CONFIG_DIR` when set, `KeepAlive` or
+`Restart=always`, and 10 seconds between restarts. An existing file that differs is
+replaced only with `--force`. Each step is printed as it runs; `--dry-run` prints the
+steps and the file and changes nothing. Other systems are refused with exit code 1.
+
+`iohr runner service uninstall` stops and removes that service. With `--purge` it also
+removes this machine's runner key and approvals run key for the account from the
+credential store, the account's approvals state, and, when no other runner service is
+installed for this user and no lease holds a checkout, the shared checkouts, mirrors,
+build directories and `runner/last-upgrade`; otherwise nothing shared is removed and it
+says why. `--purge` needs a sign-in to know the account (`--account` picks one). The
+runner stays registered with the coordinator under the same name, and this machine no
+longer holds its key.
 
 `iohr runner run` keeps itself on the latest released `iohr`. About a minute after it
 starts, and then every `upgrade_interval_minutes` plus up to 10 percent of jitter, it asks
@@ -455,27 +567,294 @@ the interval (and never over 6 hours) before it tries again. `runner/last-upgrad
 config directory holds the version and the time of the last install, and the same version
 is not installed twice within 24 hours, so a binary that cannot start cannot loop. A copy
 installed by apt is reported once per version and skipped (use `apt upgrade`). A SIGHUP
-reads `auto_upgrade`, `upgrade_interval_minutes` and `upgrade_restart` again.
+reads `auto_upgrade`, `upgrade_interval_minutes`, `upgrade_restart` and
+`upgrade_sign_identity` again.
+
+On macOS the keychain ties an "Always Allow" grant to the signature of the program it
+was given to. A released `iohr` is signed ad hoc, so that signature is the binary's own
+hash, and every upgrade makes macOS ask for the keychain password again. With
+`upgrade_sign_identity` set, `iohr upgrade` and the runner sign the new binary with that
+identity and the fixed identifier `hr.inorbit.iohr` before its `--version` check and
+before it replaces the old file. The signature then names the identifier and the
+certificate, which stay the same from one release to the next, so the grant holds: the
+first signed install asks once more, the next ones do not. `auto` takes the first valid
+`Developer ID Application` identity that `security find-identity -v -p codesigning`
+lists, else the first `Apple Development` one; any other value names an identity as
+`codesign --sign` takes it; not set, empty or `-` signs nothing. `IOHR_SIGN_IDENTITY`
+takes the same values and wins over both tables. Only a binary signed ad hoc or not at
+all is signed; one already signed with a certificate is installed as released. A
+signature that fails, takes more than 30 seconds, or leaves a binary that does not run
+keeps the release as downloaded and prints one note; the upgrade never fails because of
+it. `codesign` may ask once for access to the signing key. A Homebrew install is
+upgraded by `brew` and keeps the signature it ships with. Other systems ignore the key.
 
 ### 4.4 The project table
 
 `iohr project init` (alias `create`) reads `[project]`; its `--template` flag wins over it.
+The coordinated template, the default, also makes the project's Planner plan; `--plan-id PLAN`
+uses one you have and `--no-plan` skips the step (signed out it is skipped on its own, with
+exit code 0; `cli/docs/projects.md`, "The Planner plan").
 The SDK does not read it, and `iohr` never writes it: a person edits it.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
-| `template` | a name from `iohr project templates` that is live | `demo` | `iohr project init`, `create` and the default `templates` marks |
+| `template` | a name from `iohr project template list` that is live | `coordinated` | `iohr project init`, `create` and the default `template list` marks |
 
 ### 4.5 The ask table
 
-`iohr ask "..."` starts your own agent in the current folder with the question. It reads
-`[ask]`; `--via` and `--agent` win over it for one call. `iohr` never writes it, and never
-stores the question or the answer.
+`iohr ask "..."` runs your own agent once, in the current folder, in print mode: no session
+opens and nothing is kept. It draws the run in the terminal as it happens: what the agent
+thinks (dim, italic, in a quiet block under a `thinking` header), each tool it uses as one row
+(`⏺ Read src/x.rs`), the answer as it streams, and a short dim footer with the model, time,
+turns, cost and the AI label. A spinner shows until the first event. It reads `[ask]`; the
+flags win over it for one call. `iohr` never writes it, and never stores or logs the question
+or the answer.
+The `?` prompt of `iohr shell hook zsh` (and `--headless`, `--card` or a context flag such as
+`--cwd` or `--last-command`) uses one capped, read-only `claude -p` run instead, answered once
+and drawn as a card.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
 | `via` | `local` (your own agent); `io` is reserved and says "not built yet" | `local` | `iohr ask` |
-| `agent` | `claude` (Claude Code); `codex` is reserved and says "not built yet" | `claude` | `iohr ask` |
+| `agent` | `claude` (Claude Code, `claude -p --output-format stream-json --verbose --include-partial-messages --no-session-persistence`) or `codex` (`codex exec --json --ephemeral --skip-git-repo-check --sandbox read-only`) | `claude` | `iohr ask` |
+| `model` | any model name the agent knows; may not start with `-` | `haiku` for `claude`, the agent's own for `codex` | `iohr ask` |
+| `allow_edits` | `true` lets the agent edit files: `--permission-mode acceptEdits` for `claude`, `--sandbox workspace-write` for `codex` | `false` | `iohr ask` |
+| `permissions` | What the `?` card may run: `prompt` (the person's rules decide, then Io asks in the terminal), `rules` (the rules only; the rest is refused and listed after the answer) or `deny` (no commands at all, the earlier behaviour); `IOHR_ASK_PERMISSIONS` and `--permissions` win over it | `prompt` at a terminal, `rules` without one (and under `--json`) | `iohr ask --headless`, `--card` |
+| `thinking` | `show` or `collapse` (a one-line `▸ thinking` marker) | `show` | `iohr ask` |
+| `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
+| `mode` | The mode of every answer (PRD 0197): `manual` (rules first, then Io asks before each command), `plan` (read only: Io answers with a plan, changes nothing and runs nothing) or `auto` (a command no rule decides runs without asking; a deny rule, the secret list and a command `iohr` cannot read to check them still refuse it); `IOHR_ASK_MODE` and `--mode` win over it, and it beats `permissions` | `manual` at a terminal, `rules` without one | `iohr ask`, `iohr shell hook zsh` |
+| `menu_key` | The key that opens the action menu under a `?` card, on an empty line: `down` (the Down arrow), `ctrl-g`, `alt-enter` or `off`; read when `iohr shell hook zsh` prints the hook, so open a new shell after a change | `down` | `iohr shell hook zsh` |
+| `read` | More folders Io may read besides the working folder, a list such as `["~/notes", "/srv/docs"]` (a leading `~/` is your home folder); at most 8 in all. `IOHR_ASK_READ` (a path list, `:` apart on Unix and `;` on Windows) and `--read FOLDER` (also `--add-dir FOLDER`, repeatable) add to it; the three sources add up and a folder named twice counts once. Each folder goes through the same check as a yes at the card: it must exist, be listable and not be a secret place (such as `~/.ssh`), else `iohr ask` stops with a usage error and starts nothing; the secret-file deny rules stay on beside every added folder. A folder that is too broad is refused too: the filesystem root, your home folder (only an explicit `--read ~` names it), every folder above your home folder and above `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube` or `~/Library/Keychains` (the check ignores case on macOS). `IOHR_ASK_READ` and `[ask] read` select the file-tool run the way `--read` does; `--interactive` streams without folder grants and says so on stderr. Each folder given is written to `permissions.log` (source `flag`, `env`, `config`, `trust` or `card`, and the path, never contents) and listed in `--json` `context.folders` | none | `iohr ask --headless`, `--card` |
+
+Flags: `--agent`, `--via`, `--model`, `--mode`, `--allow-edits`, `--permissions`, `--thinking`, `--read` (repeatable, alias `--add-dir`), `--dry-run`. In the streamed
+run a shell command is never allowed, with or without `--allow-edits`; the agent's default
+permissions stay in force. The headless run (the `?` card) can run a command only through the
+permission rules below. `--dry-run` prints the exact command line and starts nothing (with
+`--json` it is one object with `dry_run`, `via`, `agent`, `found`, `program` and `args`).
+
+#### Modes: manual, plan, auto
+
+`--mode manual|plan|auto` (or `IOHR_ASK_MODE`, or `[ask] mode`) picks how Io treats a call no rule
+decides. The flag and the environment beat the file; inside one layer `mode` beats the older
+`permissions`. `--permissions` takes the same three words (and still `prompt` for manual, `rules`
+and `deny`), and `--allow-edits` keeps its meaning, so nothing that worked stops working.
+
+| Mode | On the `?` card (headless) | In the streamed run | Codex |
+|---|---|---|---|
+| `manual` | Rules first, then Io asks before each command at a terminal (without one it is `rules`). The default. | The agent's own permissions | default sandbox |
+| `plan` | Read-only tools, `--permission-mode plan` and a brief that asks for a plan: no shell, no broker, no edits, also beside `--allow-edits` | `--permission-mode plan`, the shell and the secret reads closed | `--sandbox read-only` (Codex has no plan mode) |
+| `auto` | A command no rule decides runs without asking. A deny rule and the secret list still win and are never weakened; a command that cannot be read to check them (a `$(...)`, a backtick, a redirect) is refused, and the audit log says `allowed, auto mode` or `command cannot be checked` | The same as `--allow-edits` (files only): the streamed run has no broker, so a shell command stays refused | as `--allow-edits` |
+
+The card says the mode in its header (`manual mode`, `plan mode`, `auto mode`) and under `plan` or
+`auto` the line that says what was read says what was and was not run. `--dry-run` prints the
+streamed command line only: the broker's flags are added when a card run starts.
+
+In a shell with the hook (`iohr shell hook zsh`), Shift+Tab on a line that starts with `?` (or a
+bare `?`) goes to the next mode, manual to plan to auto and back to manual, and says which under
+the prompt; on any other line the key does what it did before. The shell starts in the mode
+`IOHR_ASK_MODE` or `[ask] mode` name (`manual` when they say nothing) and keeps the one you
+chose until it ends; every question carries it as `--mode`. Read when the hook is printed, so
+open a new shell after a change to the config.
+
+#### Asking before Io runs a command
+
+The `?` card (and `--headless`, `--card`) gives Io a Bash tool, and the person decides what it
+runs. Claude Code is started with `--permission-prompt-tool` pointing at a small MCP server that
+`iohr` itself serves (`iohr permission-server`, hidden), which talks to the card over a private
+unix socket in a folder only you can open (removed when the card ends)
+(<https://code.claude.com/docs/en/cli-reference>, <https://code.claude.com/docs/en/agent-sdk/permissions>).
+Your rules decide first; a command they do not cover is asked as a small Io card on stderr,
+with the AI badge in its header, the command, the folder and the same numbered action bar as the
+`?` menu:
+
+```text
+╭─ ◆ Io  AI request  ─────────────────────────────────────────────── permission
+│  Io (AI) wants to run
+│    ls -la
+│  in my-project
+│
+│    [1] Allow once              y  this time only
+│    [2] Always in this project  a  saves a rule here
+│  › [3] No                      n  Io carries on without it
+╰─ ↑↓ move · 1-9 or letter pick · enter · esc
+```
+
+The arrows and Enter pick the highlighted row, `1`-`9` pick a row, `y` runs it once, `a` runs it
+and saves the narrowest rule (`Bash(ls:*)`, never `Bash(*)`) to `.inorbit/permissions.toml`
+(the second row is there only when such a rule can be saved), `n`, `q`, Esc, Ctrl-C or no
+answer refuses it. The bar starts on No, so a stray Enter never allows anything. Once you have
+answered, the question is erased and its result goes inside the answer card it led to, as one
+quiet row above the footer in plain words (`✓ ls allowed in this project from now on`,
+`✓ ls allowed this time`, `✗ rm not allowed`); after an always, the rule and the file it went
+to sit dimmed under it (`Bash(ls:*) · .inorbit/permissions.toml`). An always is also an Undo in
+the card's action row (below): it takes the rule back through the code `iohr permissions remove`
+uses, and says so under the card. With no action row (no colour, no hook) the result is a plain
+line on stderr instead, and for an always it ends with the command that undoes it
+(`iohr permissions remove 'Bash(ls:*)'`). `--json` carries the results in `permissions`, an array
+(empty when nobody was asked, which is always so under `--json`) of `{grant, subject, rules,
+file, saved, not_saved}`, with `grant` one of `once`, `always` or `no`. A long command is wrapped to three lines and the card says how many characters
+it left out. With `NO_COLOR`, `TERM=dumb`, a terminal under 40 columns, or no terminal, the ask
+is one plain line, as it was:
+
+```text
+Io (AI) wants to run `ls -la` in my-project · y once · a always in this project · n no
+```
+
+Rules use Claude Code's
+grammar (<https://code.claude.com/docs/en/permissions>) in two TOML files, the project's
+`.inorbit/permissions.toml` and the user's `permissions.toml` in the iohr config folder:
+
+```toml
+allow = ["Bash(ls:*)", "Bash(git status:*)", "Read(src/**)"]
+deny  = ["Bash(rm:*)"]
+```
+
+Deny beats allow, and the secret-file rules (keys, `.env`, credentials, `.ssh`, `.aws`,
+`.kube`, token files, Terraform state) beat everything: no rule and no answer can allow them. A shell line with `$(...)`,
+backticks or a write redirect is never allowed by a rule, and a compound line (`a && b`) is
+allowed only when every part is. Every decision is appended to `.inorbit/permissions.log`
+(time, tool, the rule, the outcome, who); command output and file contents are never written.
+`iohr permissions list|allow|deny|remove|check [--project|--user]` edits and tests the rules
+(`allow` refuses a rule that could open a secret file and a blanket `Bash(*)`; exit 2).
+In `rules` mode, and where there is no terminal, a command no rule allows is refused and the
+answer is followed by the rule that would allow it (`iohr permissions allow '<rule>'`).
+A repository can ship its own `.inorbit/permissions.toml`: read it before you trust a clone,
+because an allow rule in it runs without asking.
+
+With no colour (stderr is not a terminal, `NO_COLOR` is set, `TERM` is unset or `dumb`) only
+the answer is printed, on stdout; the thinking, tool rows, footer and spinner are not drawn.
+With `--json` the agent's own event lines are passed through untouched, one per line, followed
+by one `{"type":"iohr_summary",...}` line (agent, via, exit code, duration). Either way the
+command exits with the agent's code, and with 1 when the agent reports a failed run.
+
+The card asks back instead of stopping at "not known". Inside a project (a folder with `.git` or
+`.inorbit` above it) iohr reads, itself and with the git command line, the branch, the last five
+commits (one line each) and the `git status --porcelain` counts, and puts them in the prompt as
+facts; the model has no tools and is told never to say it cannot run git while they are there.
+When an answer needs something only you can tell (what the project is for), the model may add
+up to two questions, each with two to four short choices; iohr validates them (a broken block is
+dropped and never shown) and draws them under the answer: keys `1` to `4` pick a choice, `o` types
+your own, `s` skips that question, Esc or `q` skips all, and a skip saves nothing. An answer is
+kept by iohr, never the model: a note in `.inorbit/memory/` (refused when it looks like a
+secret) and, for the purpose, `[project] description` in `inorbit.toml`; the answer is then
+refreshed once, with the note in hand, and never asks again. With no terminal, or under `--json`,
+the questions are plain lines on stderr (`Question for you: ... [1] ... [2] ...`; nothing is
+saved, `iohr memory remember` keeps one) and `--json` carries them in `questions`. When the
+account has open asks, one dim line under the card says how many wait and that Down then `a` opens
+them (the menu's Asks entry puts `iohr asks list` on the prompt); offline or signed out it says
+nothing.
+
+The menu stays open until a letter picks an action, or Esc, `q` or Ctrl-C closes it: a terminal
+resize, a stray signal or an arrow key's tail bytes (an application-mode Down sends `ESC O B`)
+do not close it or pick an action. Only a real terminal error closes it, with one line on stderr.
+
+The card's header is `Io`, with the agent, the model, the mode and the time on the right, so the AI is named on every card; a failed answer also says "no answer". Its footer is the full disclosure (what was
+read, that nothing was run, that an AI model under your own subscription got the folder, and
+to check the answer) on the first card ever, whenever that text changes, and about once a
+day; every other card closes with one short hint, taken in turn from "`??` follows up" and
+"`iohr ask --help` for flags" (the header already names the agent and the model). `INORBIT_ASK=0` in the
+environment turns `?` off; the card does not say so. `hints = "always"` shows the full disclosure every time; `"never"` shows it
+on the first card and when the text changes, and nothing otherwise. The one small file it
+keeps for this, `ask-card.json` in the config directory (`--config-dir`, `IOHR_CONFIG_DIR`),
+holds a fingerprint of the disclosure text, when it was last shown and a counter, never a
+question or an answer; delete it and the next card is the first again. A pipe, `--json`,
+`NO_COLOR` or a terminal that cannot draw the card print the one-line label instead, which
+carries the disclosure itself.
+
+### 4.6 The sync table
+
+`iohr sync` sends the project's `atlas/` documents (PRDs, RFCs, ADRs and studies) to its
+Decisions space. Nothing leaves the machine unless you run it, or turn the background trigger
+on here. `iohr` never writes this table.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `background` | `true` lets a background process send the documents; `false` or absent means only `iohr sync` does | `false` | `iohr sync` |
+
+Today the key is read and nothing else: `iohr` has no background process to hang the trigger
+on, so with `background = true` `iohr sync` says so and still runs only when you run it. The
+background loop is the next slice (RFC 0205).
+
+Under a card the zsh hook draws one more line, "Run · Copy · Follow up · Explain · Open · Undo · Add folder",
+with only what the answer has: Run and Copy when it suggested one command, Open when it named
+an https link or a file in the folder, Undo when the run saved a permission rule that the project
+file still holds; Add folder is always there: it asks for a folder (a leading `~/` is home), checks it like a yes
+(it must exist, be listable, hold no secrets and not be too broad: `/`, your home folder and every folder above it are
+refused with a message), keeps it under `standing` in `trusted.toml` and puts the question on the prompt again.
+Only Add folder writes `standing`; those folders are read on every later ask in a folder Io may read, each checked
+again and each written to `permissions.log`. Allow and Always on a card keep a yes under `folders` for the question
+that names that folder only. Take either back by removing it from `trusted.toml`. The key in `menu_key` opens the menu (`iohr ask
+--menu`, letters `r c f e o u d`, Esc leaves it; the hook passes the rules to `--undo`). Run executes the command at once, with no second Enter: `iohr`
+prints it with a `run` marker (after a 0x1e character) and the hook hands it to the shell's accept-line, so it runs as a line
+you typed (`iohr` itself never runs it). First the permission rules judge it: a command a deny rule matches is never run
+(it says which rule), nothing runs while the rule file cannot be read, and a command that names a risk (`sudo`, `rm -rf`, a
+download piped to a shell, a forced git change) or that iohr cannot read against the rules (a substitution, a redirect) and no
+allow rule covers asks "Run it?" first (it starts on No). A plain command just runs. A command that still holds a
+placeholder (`path/to/...`, `<...>`, `your-...`, `YOUR_...`, or a folder that does not exist for `cd`, `ls`, `cat`
+and the like) gets Copy only, with no Run. Follow up puts a bare `?? ` on the line to finish; the other choices
+(a step, Explain, Allow) are asked at once. Copy sends it to the clipboard
+through OSC 52 (which no terminal confirms, so it says "sent"), `tmux load-buffer -w` inside
+tmux, and `pbcopy` or `wl-copy` where they exist. Open uses the system opener and refuses an
+executable, a file that runs when opened, and a path outside the folder. Undo removes the rule
+and says `ls is no longer allowed in this project` under the card (it is drawn by then, so it is
+not redrawn). The hook's record has four fields (answer, command, link, the saved rules) cut
+by a 0x1e character. The suggested
+command is the last single-line fence of the answer in a shell language; `iohr --json ask`
+carries it as `command` (null when there is none). A pipe or `NO_COLOR` gets no row.
+
+`iohr atlas init` and `iohr project init` also add a `[personalities]` table to the project's
+`inorbit.toml` (`names`, the built-ins the project uses). `iohr` writes it once and never reads
+anything else back from the pack files; the import is made from the catalogue in the binary.
+
+### 4.7 The memory table
+
+`iohr memory` keeps memories as files, so it works with no sign-in and no network. This table
+chooses where it keeps them and whether it may use your InOrbit account. `iohr` never writes it.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `scope` | `project` (`<repo root>/.inorbit/memory/`, committed with the code), `user` (`~/.inorbit/memory/notes/`) or `account` (InOrbit's service; needs `sync = true`) | `project` | every `iohr memory` command; `--scope` overrides it per command |
+| `sync` | `true` lets `iohr sync` also sync memories, `drift` ask the service, and the `account` scope work; `false` or absent keeps everything on this machine | `false` | `iohr memory`, `iohr sync` |
+
+Outside a project the `project` default falls back to `user` with a note on stderr. With
+`sync = false`, `iohr memory sync` and `iohr memory drift --remote` still run when you type them:
+running the command is the explicit choice.
+
+### 4.8 The panel table
+
+The floating panel (`iohr`, `iohr panel`) has two settings.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `mouse` | `menu`: the panel takes mouse reports only while a view is open (a click on a row opens it, a click outside closes it, the wheel moves the selection) and the shell keeps normal drag-to-select the rest of the time; `always`: also at rest, where a click on the pill opens the menu and every other click goes through to the program; `off`: no mouse reports at all | `menu` | `iohr`, `iohr panel`; `IOHR_PANEL_MOUSE` overrides it |
+| `chat` | `on`: the framed chat box (RFC 0212) at the bottom of the terminal, four rows reserved with a scroll region, where `?` and `??` take one Enter and the answer shows a progress row and a Stop button; `hidden`: the box starts folded to a corner chip; `off`: no box and no chip, the panel as it was | `on` | `iohr`, `iohr panel` around zsh (other shells have no box); `IOHR_PANEL_CHAT` overrides it |
+
+The key that opens the menu is not a setting: the pill shows the one that works in your terminal
+(`^G` in Terminal.app, iTerm2, VS Code, Ghostty, WezTerm and Hyper, whose default makes Option+i a
+dead key; `⌥i` elsewhere), and both always work, unless `[ask] menu_key = "ctrl-g"` takes Ctrl-G
+for the `?` menu.
+
+The chat box has its own keys. `Ctrl-]` hides and shows it (also `^G` then `c` in the menu, a click on
+`hide`, and a click on the corner chip while it is hidden). It is never stuck hidden: `Ctrl-]`, the
+chip, the menu entry, `[panel] chat = "off"` or a new shell each bring the rows back. `Ctrl-]` is
+zsh's find-character key, so the panel rebinds it only inside itself and only while the box is on.
+While the box or its chip shows, the panel takes mouse reports for them (the box's buttons need
+them), so drag-to-select needs Option (Terminal.app, iTerm2) or Shift; with `chat = "off"` the
+`mouse` setting alone decides, as before.
+
+### 4.9 The doctor table
+
+`iohr doctor` checks this machine for the known problems and says how to fix each. It has one
+setting.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `auto_fix` | `true`: the safe fixes run on their own whenever `iohr doctor` runs, and the `?` card tells you what it found and what it did; `false`: a fix is shown, never run | `false` | `iohr doctor`, `iohr ask` (`?`, `??`) |
+
+A safe fix only restarts something that is already down (today: the MCP bridge's launchd job).
+Every other fix (signing in again, freeing disk, repairing `config.toml`) is shown and never
+run. `iohr doctor --fix` runs the safe fixes once without the setting. The file is read, never
+written by `iohr`: you edit it.
 
 ## 5. Credentials
 

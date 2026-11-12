@@ -15,7 +15,7 @@ use crate::browser;
 use crate::cli::{Global, Login};
 use crate::commands::accounts::{Me, Why, choose};
 use crate::commands::profile::point_at;
-use crate::context::{Ctx, blocking, session_for};
+use crate::context::{Ctx, Prompts, blocking, session_for};
 use crate::error::Error;
 use crate::output::Out;
 
@@ -47,7 +47,10 @@ async fn with_token(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
     let mut ctx = Ctx::load(g)?;
     let (name, storage) = target(&ctx, g, args)?;
     let key = replace_secret(&ctx, &name, &account, storage).await?;
-    blocking(ctx.store(storage)?, move |s| s.set(&key, &token)).await?;
+    blocking(ctx.store(storage, Prompts::Allowed)?, move |s| {
+        s.set(&key, &token)
+    })
+    .await?;
     remember(
         &mut ctx,
         &name,
@@ -77,6 +80,7 @@ async fn with_token(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
 async fn person(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
     let mut ctx = Ctx::load(g)?;
     let (name, storage) = target(&ctx, g, args)?;
+    check_store(&ctx, &name, storage).await?;
     // An account the person chose for this profile, before this sign-in replaces it.
     let chosen_before = ctx
         .config
@@ -122,7 +126,7 @@ async fn person(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
     })?;
     let subject = granted.subject().to_owned();
     let key = replace_secret(&ctx, &name, &account, storage).await?;
-    Session::create(granted, ctx.store(storage)?, key).await?;
+    Session::create(granted, ctx.store(storage, Prompts::Allowed)?, key).await?;
     remember(
         &mut ctx,
         &name,
@@ -285,6 +289,18 @@ async fn settle_account(
 }
 
 /// The profile to write and where its secret goes.
+/// Writes and removes a throwaway entry before the sign-in starts, so a store that
+/// cannot keep a secret (a Linux host with no unlocked Secret Service) fails here, with
+/// the `--insecure-storage` hint, instead of after the person approved the code.
+async fn check_store(ctx: &Ctx, name: &ProfileName, storage: Storage) -> Result<(), Error> {
+    let probe = EntryKey::new(name.clone(), "iohr-store-check")?;
+    blocking(ctx.store(storage, Prompts::Allowed)?, move |s| {
+        s.set(&probe, &Redacted::new("check".to_owned()))?;
+        s.delete(&probe).map(drop)
+    })
+    .await
+}
+
 fn target(ctx: &Ctx, g: &Global, args: &Login) -> Result<(ProfileName, Storage), Error> {
     let name = match (&g.profile, &ctx.config.default) {
         (Some(n), _) | (None, Some(n)) => n.clone(),
@@ -314,7 +330,10 @@ async fn replace_secret(
         && (old.account != account || old.storage != storage)
     {
         let old_key = EntryKey::new(name.clone(), &old.account)?;
-        blocking(ctx.store(old.storage)?, move |s| s.delete(&old_key)).await?;
+        blocking(ctx.store(old.storage, Prompts::Allowed)?, move |s| {
+            s.delete(&old_key)
+        })
+        .await?;
     }
     Ok(EntryKey::new(name.clone(), account)?)
 }
@@ -336,7 +355,7 @@ pub(crate) async fn logout(g: &Global, out: Out) -> Result<(), Error> {
         .cloned()
         .ok_or_else(|| Error::Usage(format!("there is no profile {name}")))?;
     let key = EntryKey::new(name.clone(), &profile.account)?;
-    let store = ctx.store(profile.storage)?;
+    let store = ctx.store(profile.storage, Prompts::Allowed)?;
     // A person's session is ended at the sign-in service first; if that fails,
     // nothing is removed, so the next try can still revoke.
     let mut revoked = false;

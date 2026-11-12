@@ -1,7 +1,7 @@
 //! `iohr coordinator`: the coordinator's jobs and queued asks over the public API
 //! (RFC 0120, RFC 0138). The coordinator serves signed-in people, so these need a
 //! person's profile (`iohr login`), not an API key, or Io with `--sign-in io` (RFC 0065.2),
-//! so jobs an agent files are Io's, attributed to a personality by `--via-personality`.
+//! so jobs an agent files are Io's, attributed to a role by `--via-role`.
 
 use std::io::Read as _;
 
@@ -12,9 +12,13 @@ use crate::Env;
 use crate::cli::{
     CoordinatorAsksCommand, CoordinatorCommand, CoordinatorJobsCommand, Global, SignIn,
 };
+#[cfg(unix)]
+use crate::context::quiet_session;
 use crate::context::{Ctx, Session, io_session, session};
 use crate::error::Error;
 use crate::output::Out;
+use crate::planner::scoped;
+use crate::ui::Listed;
 
 use super::{day, str_of};
 
@@ -75,6 +79,8 @@ pub(crate) async fn run(
             account,
         }) => list_asks(&s, state, source, limit, account, out).await,
         CoordinatorCommand::Brief { job } => brief(&s, &job, out).await,
+        CoordinatorCommand::Plan(cmd) => super::coordinator_plan::plan(&s, cmd, out).await,
+        CoordinatorCommand::Item(cmd) => super::coordinator_plan::item(&s, cmd, out).await,
         CoordinatorCommand::Asks(CoordinatorAsksCommand::Create {
             kind,
             body,
@@ -98,17 +104,6 @@ pub(crate) async fn run(
             })?;
             create_ask(&s, &req, out).await
         }
-    }
-}
-
-fn scoped(e: inorbithr::Error) -> Error {
-    if matches!(e.status(), Some(401 | 403)) {
-        Error::with_hint(
-            e,
-            "The coordinator serves signed-in people: run `iohr login`; an API key cannot use it.",
-        )
-    } else {
-        e.into()
     }
 }
 
@@ -184,17 +179,7 @@ fn job_body(a: &JobArgs<'_>) -> Result<Value, Error> {
 /// The first line, without control characters (a brief is other people's text and must
 /// not move the cursor or recolour the terminal), cut to 70 characters.
 fn headline(brief: &str) -> String {
-    let clean: String = brief
-        .chars()
-        .filter(|c| !c.is_control() || *c == '\n')
-        .collect();
-    let line = clean.lines().next().unwrap_or_default();
-    if line.chars().count() > 70 {
-        let cut: String = line.chars().take(69).collect();
-        format!("{cut}...")
-    } else {
-        line.to_owned()
-    }
+    super::headline(brief, 70)
 }
 
 /// The list under `key`; an answer without it is an error, not an empty list. (An empty
@@ -207,6 +192,17 @@ fn items(v: &Value, key: &str) -> Result<Vec<Value>, Error> {
             "the API answered with no `{key}` list"
         ))),
     }
+}
+
+/// The coordinator's picture (`GET /v1/coordinator/picture`, the snapshot the Mac app reads),
+/// quietly: no prompt and no output, for the terminal panel's Workloads.
+#[cfg(unix)]
+pub(crate) async fn picture(g: &Global, env: &Env) -> Result<Value, Error> {
+    let s = quiet_session(g, env).await?;
+    s.api
+        .get("/v1/coordinator/picture", &[])
+        .await
+        .map_err(scoped)
 }
 
 async fn list_jobs(
@@ -251,9 +247,10 @@ async fn list_jobs(
             ]
         })
         .collect();
-    Out::table(
+    Out::list(
         &["JOB", "STATE", "KIND", "MODEL", "CREATED", "BRIEF"],
         &rows,
+        &Listed::new("job", "jobs"),
     );
     Ok(())
 }
@@ -399,15 +396,16 @@ async fn list_asks(
             ]
         })
         .collect();
-    Out::table(
+    Out::list(
         &["ASK", "STATE", "SOURCE", "KIND", "CREATED", "TITLE"],
         &rows,
+        &Listed::new("ask", "asks"),
     );
     Ok(())
 }
 
 /// A job id, safe as one path segment.
-fn job_segment(v: &str) -> Result<&str, Error> {
+pub(crate) fn job_segment(v: &str) -> Result<&str, Error> {
     if !v.is_empty()
         && v.len() <= 128
         && v.bytes()
@@ -425,6 +423,12 @@ fn job_segment(v: &str) -> Result<&str, Error> {
 /// other than newlines and tabs, ending in one newline.
 fn brief_text(v: &Value) -> Result<String, Error> {
     let text = v.get("text").and_then(Value::as_str).unwrap_or_default();
+    clean_text(text).ok_or_else(|| Error::Usage("the API answered without a brief".into()))
+}
+
+/// `text` without control characters other than newlines and tabs, ending in one newline;
+/// `None` when nothing is left of it. Shared with the Roles' brief (`roles::runtime`).
+pub(crate) fn clean_text(text: &str) -> Option<String> {
     let mut clean: String = text
         .chars()
         .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
@@ -432,10 +436,10 @@ fn brief_text(v: &Value) -> Result<String, Error> {
     let end = clean.trim_end().len();
     clean.truncate(end);
     if clean.trim().is_empty() {
-        return Err(Error::Usage("the API answered without a brief".into()));
+        return None;
     }
     clean.push('\n');
-    Ok(clean)
+    Some(clean)
 }
 
 /// The size line for the person, on stderr: estimate, budget, what was cut.

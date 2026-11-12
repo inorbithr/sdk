@@ -15,6 +15,10 @@ use std::time::Duration;
 
 use iohr_auth::RunnerConfig;
 
+use super::provider::AuthPolicy;
+
+use crate::commands::upgrade::{SignWith, sign};
+
 /// The most turns one runner holds at once; the service clamps to the same.
 pub(crate) const MAX_CAPACITY: u32 = 32;
 /// The turn classes a runner may declare (the service's `coordinate` and `build`).
@@ -34,6 +38,8 @@ pub(crate) const BUILD_FLOOR_BYTES: u64 = 100 * 1_000_000_000;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Source {
     Flag,
+    /// An environment variable, by name.
+    Env(&'static str),
     /// `[profiles.<name>.runner]`.
     Profile(String),
     /// `[runner]`.
@@ -45,6 +51,7 @@ impl fmt::Display for Source {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Flag => f.write_str("flag"),
+            Self::Env(name) => f.write_str(name),
             Self::Profile(p) => write!(f, "[profiles.{p}.runner]"),
             Self::File => f.write_str("[runner]"),
             Self::Default => f.write_str("default"),
@@ -69,6 +76,8 @@ pub(crate) struct Flags {
     pub(crate) name: Option<String>,
     /// `--no-auto-upgrade` given (it can only say no).
     pub(crate) no_auto_upgrade: bool,
+    /// `IOHR_SIGN_IDENTITY`, over `upgrade_sign_identity`.
+    pub(crate) sign_identity: Option<String>,
 }
 
 /// How an upgraded runner restarts (`upgrade_restart`).
@@ -104,6 +113,8 @@ pub(crate) struct Effective {
     pub(crate) always_on: Setting<bool>,
     /// `None` when set nowhere: register uses the host name, run the key this machine holds.
     pub(crate) name: Option<Setting<String>>,
+    /// `None` when set nowhere: `run` and `gate-report` pick by key. The runner id they drive.
+    pub(crate) id: Option<Setting<String>>,
     /// `None` when set nowhere: with no kube context either, approved host actions are
     /// refused (every `kubectl` call is pinned to the configured cluster).
     pub(crate) kube_context: Option<Setting<String>>,
@@ -115,10 +126,36 @@ pub(crate) struct Effective {
     /// How long between looks for a newer release.
     pub(crate) upgrade_interval: Setting<Duration>,
     pub(crate) upgrade_restart: Setting<RestartMode>,
+    /// How an upgrade signs the new binary on macOS (`upgrade_sign_identity`; default off).
+    pub(crate) upgrade_sign: Setting<SignWith>,
     /// The user service units `systemd.user-restart` may restart; `None` or empty, none.
     pub(crate) user_units: Option<Setting<Vec<String>>>,
     /// The core checkout `build.sweep-targets` runs in (absolute path); `None`, no sweep.
     pub(crate) core_checkout: Option<Setting<String>>,
+    /// Which sign-in Claude turns may run on (`claude_auth`; default `api`).
+    pub(crate) claude_auth: Setting<AuthPolicy>,
+    /// Which sign-in Codex turns may run on (`codex_auth`; default `any`).
+    pub(crate) codex_auth: Setting<AuthPolicy>,
+    /// Whether git may use the host's own `gh` sign-in where the platform has no GitHub
+    /// App installation for the account (default no: such a job is refused).
+    pub(crate) allow_host_git_credentials: Setting<bool>,
+    /// Days an unused checkout, mirror or build directory is kept (default
+    /// [`super::hygiene::KEEP_DAYS`]).
+    pub(crate) workspace_keep_days: Setting<u32>,
+    /// The most they may take together, in GB; `None`, no cap.
+    pub(crate) workspace_max_gb: Option<Setting<u64>>,
+}
+
+impl Effective {
+    /// The local policy for a provider: its key, or the strictest for one the runner
+    /// has no key for.
+    pub(crate) fn auth_policy(&self, provider: &str) -> AuthPolicy {
+        match provider {
+            "claude" => self.claude_auth.value,
+            "codex" => self.codex_auth.value,
+            other => AuthPolicy::default_for(other),
+        }
+    }
 }
 
 /// The first of the flag, the profile's table and the file's table that sets a value.
@@ -193,6 +230,15 @@ pub(crate) fn resolve(
     {
         return Err(format!("runner name ({}) is empty", n.source));
     }
+    let id = pick(None, profile, file, |c| c.id.clone());
+    if let Some(i) = &id
+        && !i.value.starts_with("rnr_")
+    {
+        return Err(format!(
+            "runner id ({}) is not a runner id (rnr_...)",
+            i.source
+        ));
+    }
     let kube_context = pick(None, profile, file, |c| c.kube_context.clone());
     let kubeconfig = pick(None, profile, file, |c| c.kubeconfig.clone());
     let auto_upgrade = pick(flags.no_auto_upgrade.then_some(false), profile, file, |c| {
@@ -204,6 +250,7 @@ pub(crate) fn resolve(
     });
     let upgrade_interval = upgrade_interval_of(profile, file)?;
     let upgrade_restart = restart_mode_of(profile, file)?;
+    let upgrade_sign = upgrade_sign_of(flags.sign_identity.as_deref(), profile, file);
     let user_units = pick(None, profile, file, |c| c.user_units.clone());
     if let Some(u) = &user_units
         && let Some(bad) = u
@@ -225,19 +272,121 @@ pub(crate) fn resolve(
             c.source
         ));
     }
+    let claude_auth = auth_policy_of("claude", profile, file, |c| c.claude_auth.clone())?;
+    let codex_auth = auth_policy_of("codex", profile, file, |c| c.codex_auth.clone())?;
     Ok(Effective {
         capacity,
         kinds,
         always_on,
         name,
+        id,
         kube_context,
         kubeconfig,
         auto_upgrade,
         upgrade_interval,
         upgrade_restart,
+        upgrade_sign,
         user_units,
         core_checkout,
+        claude_auth,
+        codex_auth,
+        allow_host_git_credentials: pick(None, profile, file, |c| c.allow_host_git_credentials)
+            .unwrap_or(Setting {
+                value: false,
+                source: Source::Default,
+            }),
+        workspace_keep_days: keep_days_of(profile, file)?,
+        workspace_max_gb: max_gb_of(profile, file)?,
     })
+}
+
+/// `<provider>_auth`: the profile's table, then `[runner]`, then the provider's default.
+/// Never a flag and never the server: only this machine's config turns a looser
+/// sign-in on.
+fn auth_policy_of(
+    provider: &str,
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+    get: impl Fn(&RunnerConfig) -> Option<String>,
+) -> Result<Setting<AuthPolicy>, String> {
+    match pick(None, profile, file, get) {
+        Some(m) => Ok(Setting {
+            value: AuthPolicy::parse(&m.value).ok_or_else(|| {
+                format!(
+                    "runner {provider}_auth {:?} ({}) is not any, plan or api",
+                    m.value, m.source
+                )
+            })?,
+            source: m.source,
+        }),
+        None => Ok(Setting {
+            value: AuthPolicy::default_for(provider),
+            source: Source::Default,
+        }),
+    }
+}
+
+/// `workspace_keep_days`: 1 to [`super::hygiene::MAX_KEEP_DAYS`], else
+/// [`super::hygiene::KEEP_DAYS`].
+fn keep_days_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Setting<u32>, String> {
+    use super::hygiene::{KEEP_DAYS, MAX_KEEP_DAYS};
+    let days = pick(None, profile, file, |c| c.workspace_keep_days).unwrap_or(Setting {
+        value: KEEP_DAYS,
+        source: Source::Default,
+    });
+    if !(1..=MAX_KEEP_DAYS).contains(&days.value) {
+        return Err(format!(
+            "runner workspace_keep_days ({}) is {}: it must be 1 to {MAX_KEEP_DAYS}",
+            days.source, days.value
+        ));
+    }
+    Ok(days)
+}
+
+/// `workspace_max_gb`: at least 1 when set.
+fn max_gb_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Option<Setting<u64>>, String> {
+    let cap = pick(None, profile, file, |c| c.workspace_max_gb);
+    if let Some(c) = &cap
+        && c.value == 0
+    {
+        return Err(format!(
+            "runner workspace_max_gb ({}) is 0: leave it unset for no cap",
+            c.source
+        ));
+    }
+    Ok(cap)
+}
+
+/// `upgrade_sign_identity`: `IOHR_SIGN_IDENTITY`, then the profile's table, then
+/// `[runner]`, then off. Every value is taken (`-` is off, `auto` picks, the rest is a
+/// name `codesign` is asked for), so it never stops a runner or an upgrade.
+pub(crate) fn upgrade_sign_of(
+    env: Option<&str>,
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Setting<SignWith> {
+    if let Some(v) = env.filter(|v| !v.trim().is_empty()) {
+        return Setting {
+            value: SignWith::parse(v),
+            source: Source::Env(sign::ENV),
+        };
+    }
+    pick(None, profile, file, |c| c.upgrade_sign_identity.clone()).map_or(
+        Setting {
+            value: SignWith::Off,
+            source: Source::Default,
+        },
+        |s| Setting {
+            value: SignWith::parse(&s.value),
+            source: s.source,
+        },
+    )
 }
 
 /// The upgrade interval, checked, from the profile, the file or the default.
@@ -536,6 +685,49 @@ mod tests {
     }
 
     #[test]
+    fn signing_is_off_unless_set_and_the_variable_beats_the_tables() {
+        let e = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(
+            e.upgrade_sign,
+            Setting {
+                value: SignWith::Off,
+                source: Source::Default
+            }
+        );
+        let mut file = RunnerConfig::default();
+        file.upgrade_sign_identity = Some("auto".into());
+        let mut work = RunnerConfig::default();
+        work.upgrade_sign_identity = Some("Apple Development: Someone (ABC123)".into());
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            (e.upgrade_sign.value, e.upgrade_sign.source),
+            (SignWith::Auto, Source::File)
+        );
+        let e = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap();
+        assert_eq!(
+            e.upgrade_sign,
+            Setting {
+                value: SignWith::Named("Apple Development: Someone (ABC123)".into()),
+                source: Source::Profile("work".into())
+            }
+        );
+        // `-` from the environment turns it off over both tables; an empty one is unset.
+        let flags = Flags {
+            sign_identity: Some("-".into()),
+            ..Flags::default()
+        };
+        let e = resolve(&file, Some(("work", &work)), &flags).unwrap();
+        assert_eq!(
+            (e.upgrade_sign.value, e.upgrade_sign.source.to_string()),
+            (SignWith::Off, "IOHR_SIGN_IDENTITY".to_owned())
+        );
+        assert_eq!(upgrade_sign_of(Some(" "), None, &file).source, Source::File);
+        // Any value is taken: it never stops a runner.
+        file.upgrade_sign_identity = Some("no such identity".into());
+        assert!(resolve(&file, None, &Flags::default()).is_ok());
+    }
+
+    #[test]
     fn a_bad_upgrade_interval_or_restart_mode_is_refused_naming_its_source() {
         for bad in [0, 4, 10_081] {
             let mut c = RunnerConfig::default();
@@ -671,6 +863,28 @@ mod tests {
     }
 
     #[test]
+    fn claude_is_api_and_codex_any_by_default_and_a_bad_value_names_its_source() {
+        let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(none.claude_auth.value, AuthPolicy::Api);
+        assert_eq!(none.claude_auth.source, Source::Default);
+        assert_eq!(none.codex_auth.value, AuthPolicy::Any);
+        assert_eq!(none.auth_policy("gemini"), AuthPolicy::Api);
+        let mut file = RunnerConfig::default();
+        file.claude_auth = Some("any".into());
+        file.codex_auth = Some("plan".into());
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            (e.claude_auth.value, e.claude_auth.source.clone()),
+            (AuthPolicy::Any, Source::File)
+        );
+        assert_eq!(e.auth_policy("codex"), AuthPolicy::Plan);
+        let mut work = RunnerConfig::default();
+        work.claude_auth = Some("subscription".into());
+        let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
+        assert!(err.contains("claude_auth") && err.contains("work"), "{err}");
+    }
+
+    #[test]
     fn core_checkout_is_unset_by_default_and_a_relative_path_names_its_source() {
         let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
         assert_eq!(none.core_checkout, None);
@@ -692,5 +906,56 @@ mod tests {
             err.contains("core_checkout") && err.contains("work"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn host_git_credentials_are_off_unless_a_table_turns_them_on() {
+        let file = RunnerConfig::default();
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            e.allow_host_git_credentials,
+            Setting {
+                value: false,
+                source: Source::Default
+            }
+        );
+        let mut work = RunnerConfig::default();
+        work.allow_host_git_credentials = Some(true);
+        let e = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap();
+        assert_eq!(
+            e.allow_host_git_credentials,
+            Setting {
+                value: true,
+                source: Source::Profile("work".into())
+            }
+        );
+    }
+
+    #[test]
+    fn workspace_retention_has_a_default_and_refuses_values_out_of_range() {
+        let mut file = RunnerConfig::default();
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            e.workspace_keep_days.value,
+            super::super::hygiene::KEEP_DAYS
+        );
+        assert_eq!(e.workspace_keep_days.source, Source::Default);
+        assert_eq!(e.workspace_max_gb, None);
+        file.workspace_keep_days = Some(3);
+        file.workspace_max_gb = Some(200);
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(e.workspace_keep_days.value, 3);
+        assert_eq!(e.workspace_max_gb.map(|c| c.value), Some(200));
+        for (days, cap, word) in [
+            (Some(0), None, "workspace_keep_days"),
+            (Some(100_000), None, "workspace_keep_days"),
+            (None, Some(0), "workspace_max_gb"),
+        ] {
+            let mut bad = RunnerConfig::default();
+            bad.workspace_keep_days = days;
+            bad.workspace_max_gb = cap;
+            let err = resolve(&bad, None, &Flags::default()).unwrap_err();
+            assert!(err.contains(word), "{err}");
+        }
     }
 }

@@ -80,6 +80,8 @@ const OUTBOX_MAX: usize = 8;
 const FETCH_TRIES: u32 = 10;
 /// The longest a job's checkout may take to make (a first fetch of a large repository).
 const PREPARE_TIMEOUT: Duration = Duration::from_secs(600);
+/// How long after the start the first retention sweep waits.
+const SWEEP_FIRST: Duration = Duration::from_mins(5);
 /// The most turns one runner holds at once; the service clamps to the same.
 pub(crate) const MAX_CAPACITY: usize = settings::MAX_CAPACITY as usize;
 
@@ -117,6 +119,12 @@ pub(crate) struct LoopConfig {
     pub(crate) workspaces: Option<Arc<Workspaces>>,
     /// Lets the self-upgrade drain the loop; `None`: never drained.
     pub(crate) drain: Option<Arc<Drain>>,
+    /// `allow_host_git_credentials`: a lease with no token of its own may use this host's
+    /// `gh` sign-in ([`Access::allowed`]); off by default.
+    pub(crate) allow_host_git: bool,
+    /// The workspace retention sweep, run while the loop holds no lease, at most every
+    /// [`hygiene::SWEEP_EVERY`]; `None` turns it off.
+    pub(crate) sweep: Option<hygiene::Sweep>,
 }
 
 /// What the run loop runs for the Checked gate (RFC 0120); the same check and the same
@@ -159,6 +167,8 @@ impl Default for LoopConfig {
             gate: None,
             workspaces: None,
             drain: None,
+            allow_host_git: false,
+            sweep: None,
         }
     }
 }
@@ -197,7 +207,14 @@ pub(crate) enum End {
     MaxBeats,
     /// The service says this runner was revoked.
     Revoked,
+    /// The API kept refusing the sign-in (HTTP 401) after fresh tokens: the runner stops so
+    /// its supervisor starts it again, which reads the credential from the store anew.
+    SignInRefused,
 }
+
+/// Heartbeats in a row the API refused with a 401 even after the client minted a fresh
+/// token and asked again, before the runner gives up and exits.
+pub(crate) const REFUSED_BEFORE_EXIT: u32 = 5;
 
 /// What the loop did, for tests and the exit note.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -239,8 +256,12 @@ struct Owned {
     checkout: Prepared,
     document_id: String,
     /// How git and gh reach GitHub for this lease (RFC 0120): its own installation token,
-    /// or this host's sign-in where the platform says the App is not installed.
+    /// or this host's sign-in where the platform says the App is not installed and
+    /// `allow_host_git_credentials` lets it.
     access: Access,
+    /// The checkout's lock, held from before it was made until the lease's work has
+    /// ended, so no prune removes it ([`hygiene::try_hold`]).
+    hold: Arc<hygiene::Hold>,
 }
 
 /// The sending of one gate report, with the lease it was for.
@@ -280,12 +301,15 @@ type LeaseAnswers = Vec<(Lease, Result<LeaseBeat, OpErr>)>;
 struct OpErr {
     msg: String,
     permanent: bool,
+    /// HTTP 401: the sign-in was refused.
+    unauthenticated: bool,
 }
 
 impl From<ServiceError> for OpErr {
     fn from(e: ServiceError) -> Self {
         Self {
             permanent: e.is_permanent(),
+            unauthenticated: e.is_unauthenticated(),
             msg: e.to_string(),
         }
     }
@@ -296,6 +320,7 @@ impl OpErr {
         Self {
             msg: msg.into(),
             permanent: false,
+            unauthenticated: false,
         }
     }
 }
@@ -567,12 +592,18 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     // Delivery attempts since the last success.
     let mut tries: u32 = 0;
     let mut failures: u32 = 0;
+    // Beats in a row the API answered with a 401 after a fresh token.
+    let mut refused: u32 = 0;
     let start = Instant::now();
     let (mut next_beat, mut next_report, mut next_lease_beat) = (start, start, start);
     let mut beat_started = start;
     let mut lease_beat_started = start;
     let interval = |service: Option<Duration>| cfg.interval.or(service).unwrap_or(DEFAULT_INTERVAL);
     let mut drain_watch = cfg.drain.as_ref().map(|d| d.watch());
+    // The retention sweep in flight, and when the next may start: never at once, so a
+    // runner that starts and stops (scripts, tests) never sweeps.
+    let mut sweeping: Option<JoinHandle<Option<String>>> = None;
+    let mut next_sweep = start + SWEEP_FIRST;
 
     loop {
         let held = held_leases(&busy, &fetching, &gating, &outbox);
@@ -583,6 +614,28 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
             );
         }
         let now = Instant::now();
+        if sweeping.as_ref().is_some_and(JoinHandle::is_finished)
+            && let Some(done) = sweeping.take()
+        {
+            match done.await {
+                Ok(Some(line)) => log(&line),
+                Ok(None) => {}
+                Err(e) => log(&format!("workspace prune: stopped: {e}")),
+            }
+        }
+        // Only while nothing is held: a lease's checkout is locked anyway, and the sweep
+        // keeps its disk work out of a turn's way.
+        if let Some(sw) = &cfg.sweep
+            && sweeping.is_none()
+            && now >= next_sweep
+            && !has_held
+            && accepting.is_empty()
+            && fetch_ops.is_empty()
+        {
+            let sw = sw.clone();
+            sweeping = Some(tokio::task::spawn_blocking(move || hygiene::sweep(&sw)));
+            next_sweep = now + hygiene::SWEEP_EVERY;
+        }
         if lease_beating.is_none() && now >= next_lease_beat && has_held {
             lease_beat_started = now;
             let limit = cfg.op_timeout;
@@ -733,11 +786,19 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         failures = failures.saturating_add(1);
                         stats.failures += 1;
                         log(&format!("heartbeat failed ({failures} in a row): {}", e.msg));
+                        if e.unauthenticated {
+                            refused = refused.saturating_add(1);
+                            if refused >= REFUSED_BEFORE_EXIT {
+                                stop(std::mem::take(&mut busy), refresher.take()).await;
+                                return (End::SignInRefused, stats);
+                            }
+                        }
                         next_beat = Instant::now()
                             + backoff(failures, cfg.backoff_min, cfg.backoff_max, jitter());
                     }
                     Ok(beat) => {
                         failures = 0;
+                        refused = 0;
                         stats.beats += 1;
                         if beat.heartbeat_interval_seconds > 0 {
                             service_interval =
@@ -795,7 +856,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                 ));
                             } else {
                                 accepting_ids.push(lease.lease_id.clone());
-                                accepting.push(Box::pin(accept_lease(svc, exec, cfg.workspaces.as_deref(), lease, cfg.op_timeout, log)));
+                                accepting.push(Box::pin(accept_lease(svc, exec, cfg.workspaces.as_deref(), lease, (cfg.op_timeout, cfg.allow_host_git), log)));
                             }
                         }
                     }
@@ -914,7 +975,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         let access = if o.access.fresh(time::OffsetDateTime::now_utc()) {
                             Ok(o.access.clone())
                         } else {
-                            github_access(svc, &b.lease, &o.checkout.repository, cfg.op_timeout).await
+                            github_access(svc, &b.lease, &o.checkout.repository, cfg.op_timeout, cfg.allow_host_git).await
                         };
                         Some((Arc::clone(w), o.checkout.clone(), access))
                     }
@@ -931,11 +992,14 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         (repo, g.command.clone(), g.timeout, env)
                     });
                     let job_id = if b.pack.job_id.is_empty() { b.lease.job_id.clone() } else { b.pack.job_id.clone() };
+                    // The checkout stays held until its push and check have ended.
+                    let checkout_hold = b.owned.as_ref().map(|o| Arc::clone(&o.hold));
                     gating.push(Gating {
                         lease: b.lease,
                         job_id,
                         report,
                         check: Some(tokio::spawn(async move {
+                            let _hold = checkout_hold;
                             let shipped = match (ship, &owned) {
                                 (Some(m), Some((w, p, Ok(access)))) => Some(w.ship(p, &m, access).await),
                                 (Some(_), Some((_, _, Err(e)))) => Some(Err(format!("nothing pushed: {e}"))),
@@ -1169,6 +1233,7 @@ fn check_pack(p: &Pack, lease: &Lease, owned: Option<&str>) -> Result<(), OpErr>
         return Err(OpErr {
             msg: "the pack has no valid hash and attempt, or is another turn's".into(),
             permanent: true,
+            unauthenticated: false,
         });
     }
     // The turn is told where its checkout is; it must be the one the runner made.
@@ -1181,6 +1246,7 @@ fn check_pack(p: &Pack, lease: &Lease, owned: Option<&str>) -> Result<(), OpErr>
                 p.checkout
             ),
             permanent: true,
+            unauthenticated: false,
         });
     }
     Ok(())
@@ -1189,20 +1255,24 @@ fn check_pack(p: &Pack, lease: &Lease, owned: Option<&str>) -> Result<(), OpErr>
 /// How git and gh reach GitHub for `lease` on `repository` (RFC 0120): the installation
 /// token connections mints for that one repository, or this host's sign-in only where
 /// the platform says our App is not installed there, or the platform is older than the
-/// call. Any other refusal (a permission the App lacks, a lease the coordinator did not
-/// confirm, a token for another repository) is an error: never a silent fallback. The
-/// token never reaches a log line or an error.
+/// call, and then only with `allow_host` (`allow_host_git_credentials`); without it, a
+/// refusal that says why. Any other refusal (a permission the App lacks, a lease the
+/// coordinator did not confirm, a token for another repository) is an error: never a
+/// silent fallback. The token never reaches a log line or an error.
 async fn github_access<S: Service>(
     svc: &S,
     lease: &Lease,
     repository: &str,
     op_timeout: Duration,
+    allow_host: bool,
 ) -> Result<Access, String> {
     match tokio::time::timeout(op_timeout, svc.runner_github_token(lease)).await {
-        Ok(Ok(m)) => m.access(repository, time::OffsetDateTime::now_utc()),
-        Ok(Err(e)) if e.is_missing() => Ok(Access::host(
-            "this platform does not mint runner tokens yet",
-        )),
+        Ok(Ok(m)) => m
+            .access(repository, time::OffsetDateTime::now_utc())
+            .and_then(|a| a.allowed(allow_host)),
+        Ok(Err(e)) if e.is_missing() => {
+            Access::host("this platform does not mint runner tokens yet").allowed(allow_host)
+        }
         Ok(Err(e)) => Err(format!("no GitHub token for the lease: {e}")),
         Err(_) => Err("no GitHub token for the lease: timed out".into()),
     }
@@ -1220,7 +1290,7 @@ async fn accept_lease<S: Service, X: Exec>(
     exec: &Arc<X>,
     workspaces: Option<&Workspaces>,
     lease: Lease,
-    op_timeout: Duration,
+    (op_timeout, allow_host): (Duration, bool),
     log: Log<'_>,
 ) -> Result<(Lease, Option<Owned>), String> {
     let refuse = |why: &str| {
@@ -1239,8 +1309,14 @@ async fn accept_lease<S: Service, X: Exec>(
             Err(_) => return Err(refuse("its job could not be read: timed out")),
         };
         if let Some(job) = job.filter(|j| !j.repository.is_empty()) {
-            let access = match github_access(svc, &lease, &job.repository, op_timeout).await {
-                Ok(a) => a,
+            let access =
+                match github_access(svc, &lease, &job.repository, op_timeout, allow_host).await {
+                    Ok(a) => a,
+                    Err(e) => return Err(refuse(&e)),
+                };
+            // Held before it is made, so a prune never sees it half made.
+            let hold = match w.hold(&lease.job_id).await {
+                Ok(h) => Arc::new(h),
                 Err(e) => return Err(refuse(&e)),
             };
             log(&format!(
@@ -1269,6 +1345,7 @@ async fn accept_lease<S: Service, X: Exec>(
                         checkout: p,
                         document_id: job.document_id,
                         access,
+                        hold,
                     });
                 }
                 Err(e) => return Err(refuse(&format!("its checkout could not be made: {e}"))),
@@ -1316,7 +1393,7 @@ fn report_of(lease: &Lease, pack: &Pack, runner: &RunnerInfo, f: &Finished) -> T
         outcome: f.outcome.clone(),
         say,
         state,
-        actions: actions_of(&actions, pack, f, &today()),
+        actions: actions_of(&actions, pack, f, &crate::front::today()),
         evidence: evidence.iter().map(text_of).collect(),
         left: left.iter().map(text_of).collect(),
         provider: super::claude::PROVIDER.into(),
@@ -1385,12 +1462,6 @@ fn actions_of(actions: &[serde_json::Value], pack: &Pack, f: &Finished, date: &s
 fn prompt_digest(system: &str, prompt: &str) -> String {
     use sha2::{Digest as _, Sha256};
     super::claude::hex(&Sha256::digest(format!("{system}\n\n{prompt}").as_bytes()))
-}
-
-/// Today in UTC, `YYYY-MM-DD`.
-fn today() -> String {
-    let d = time::OffsetDateTime::now_utc().date();
-    format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
 }
 
 /// A list element as text: a string as is, anything else as its JSON.
@@ -1478,6 +1549,8 @@ mod tests {
         refuse_first_report: Mutex<bool>,
         /// Report deliveries that fail before one succeeds.
         report_failures: Mutex<u32>,
+        /// Heartbeats are refused with HTTP 401, every time.
+        unauthenticated: bool,
         /// Heartbeats answer `revoked` once this file exists.
         revoke_when: Option<std::path::PathBuf>,
         /// Met by the first heartbeat after an accept, and by the turn.
@@ -1596,6 +1669,17 @@ mod tests {
                         .await
                         .map_err(|_| ServiceError::Refused("no turn beside the heartbeat"))?;
                 }
+            }
+            if self.unauthenticated {
+                let body = r#"{"code":"unauthenticated","error":"a valid bearer token is required","details":[]}"#;
+                let raw = inorbithr::RawResponse::for_tests(
+                    401,
+                    inorbithr::Headers::new([]),
+                    body.as_bytes().to_vec(),
+                );
+                return Err(ServiceError::Api(inorbithr::Error::Api(Box::new(
+                    inorbithr::ApiError::parse(raw),
+                ))));
             }
             match self.beats.lock().unwrap().pop_front() {
                 Some(Err(())) => Err(down()),
@@ -1956,6 +2040,10 @@ mod tests {
             workspaces: None,
             drain: None,
             report_host: false,
+            // Most tests offer leases with no token of their own on a platform that mints
+            // none: the old fallback; the test of the setting turns it off.
+            allow_host_git: true,
+            sweep: None,
         }
     }
 
@@ -2001,6 +2089,22 @@ mod tests {
         let calls = fake.calls.lock().unwrap();
         assert_eq!(calls.len(), 4);
         assert!(calls.iter().all(|c| c == "heartbeat run_1 providers=1"));
+    }
+
+    /// A 401 that stays after the client's fresh-token retry ends the loop after
+    /// `REFUSED_BEFORE_EXIT` beats, so the supervisor restarts the runner.
+    #[tokio::test]
+    async fn the_loop_ends_when_the_sign_in_stays_refused() {
+        let fake = Fake {
+            unauthenticated: true,
+            ..Fake::default()
+        };
+        let (end, stats) = tokio::time::timeout(Duration::from_secs(5), go(&fake, cfg(1000)))
+            .await
+            .unwrap();
+        assert_eq!(end, End::SignInRefused);
+        assert_eq!(stats.failures, u64::from(REFUSED_BEFORE_EXIT));
+        assert_eq!(stats.beats, 0);
     }
 
     #[tokio::test]
@@ -2551,7 +2655,7 @@ mod tests {
         std::fs::write(
             &claude,
             format!(
-                "#!/bin/sh\ncase \"$1\" in\n  auth) echo '{{\"loggedIn\":true,\"authMethod\":\"claude.ai\",\"apiProvider\":\"firstParty\"}}'; exit 0;;\n  --version) echo 1; exit 0;;\nesac\nsleep 60 &\necho $! > {}\necho $$ > {}\nwait\n",
+                "#!/bin/sh\ncase \"$1\" in\n  auth) echo '{{\"loggedIn\":true,\"authMethod\":\"api_key\",\"apiProvider\":\"firstParty\"}}'; exit 0;;\n  --version) echo 1; exit 0;;\nesac\nsleep 60 &\necho $! > {}\necho $$ > {}\nwait\n",
                 kid.display(),
                 pid.display()
             ),
@@ -3297,7 +3401,8 @@ mod tests {
         assert!(!p.workdir.join("checkouts").exists());
     }
     #[tokio::test]
-    async fn a_lease_without_its_own_token_uses_the_host_only_where_the_app_is_not_installed() {
+    async fn a_lease_without_its_own_token_uses_the_host_only_where_the_app_is_not_installed_and_allowed()
+     {
         use crate::runner::access::Minted;
         use crate::runner::access::tests::FAKE;
         use crate::runner::workspace::tests::{FakeForge, place, spaces};
@@ -3337,36 +3442,110 @@ mod tests {
             );
             assert!(lines.iter().all(|l| !l.contains(FAKE)), "{lines:?}");
         }
-        // Not installed (or a platform older than the call): the host's sign-in, said.
-        for (minted, why) in [
-            (
-                Some(Minted::refused(
-                    "not_installed",
-                    "this account has not installed our GitHub App",
-                )),
-                "no GitHub App installation",
-            ),
-            (None, "does not mint runner tokens yet"),
-        ] {
-            let p = place();
-            let fake = Fake {
-                job: job(),
-                minted,
-                ..Fake::default()
-            };
-            offer(&fake, &[job_lease("lease_1", 7)]);
-            let c = LoopConfig {
-                workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
-                ..cfg(4)
-            };
-            let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
-            assert_eq!(stats.accepted, 1, "{lines:?}");
-            assert!(
-                lines
-                    .iter()
-                    .any(|l| l.contains("this host's gh sign-in") && l.contains(why)),
-                "{lines:?}"
-            );
+        // Not installed (or a platform older than the call): the host's sign-in, said,
+        // only where `allow_host_git_credentials` is on; off (the default), refused with
+        // the reason and the setting, nothing made.
+        let cases = || {
+            [
+                (
+                    Some(Minted::refused(
+                        "not_installed",
+                        "this account has not installed our GitHub App",
+                    )),
+                    "no GitHub App installation",
+                ),
+                (None, "does not mint runner tokens yet"),
+            ]
+        };
+        for allow in [false, true] {
+            for (minted, why) in cases() {
+                let p = place();
+                let fake = Fake {
+                    job: job(),
+                    minted,
+                    ..Fake::default()
+                };
+                offer(&fake, &[job_lease("lease_1", 7)]);
+                let c = LoopConfig {
+                    workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+                    allow_host_git: allow,
+                    ..cfg(4)
+                };
+                let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+                if allow {
+                    assert_eq!(stats.accepted, 1, "{lines:?}");
+                    assert!(
+                        lines
+                            .iter()
+                            .any(|l| l.contains("this host's gh sign-in") && l.contains(why)),
+                        "{lines:?}"
+                    );
+                } else {
+                    assert_eq!((stats.accepted, stats.turns), (0, 0), "{lines:?}");
+                    assert_eq!(calls_of(&fake, "accept "), 0);
+                    assert!(!p.workdir.join("checkouts/job_1").exists());
+                    assert!(
+                        lines
+                            .iter()
+                            .any(|l| l.contains("lease lease_1 not accepted")
+                                && l.contains(why)
+                                && l.contains("allow_host_git_credentials")),
+                        "{lines:?}"
+                    );
+                    assert!(
+                        lines.iter().all(|l| !l.contains("this host's gh sign-in")),
+                        "{lines:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_job_checkout_is_held_while_its_lease_runs_and_let_go_after() {
+        use crate::runner::workspace::tests::{FakeForge, place, spaces};
+        let p = place();
+        let fake = Fake {
+            job: Some(JobInfo {
+                repository: "acme/app".into(),
+                document_id: String::new(),
+            }),
+            ..Fake::default()
+        };
+        offer(&fake, &[job_lease("lease_1", 7)]);
+        let checkouts = p.workdir.join("checkouts");
+        // Another holder (a prune, another runner process) has it: this one waits, then
+        // refuses the lease and makes nothing.
+        let other = hygiene::try_hold(&checkouts, "job_1").unwrap().unwrap();
+        let c = LoopConfig {
+            workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+            ..cfg(4)
+        };
+        let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+        assert_eq!(stats.accepted, 0, "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("lease lease_1 not accepted")
+                    && l.contains("held by another runner process")),
+            "{lines:?}"
+        );
+        assert!(!checkouts.join("job_1").exists());
+        drop(other);
+        offer(&fake, &[job_lease("lease_1", 7)]);
+        let c = LoopConfig {
+            workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+            ..cfg(4)
+        };
+        let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+        assert_eq!(stats.accepted, 1, "{lines:?}");
+        assert!(checkouts.join("job_1").is_dir());
+        // The lease's work (its ship included, which may outlive the loop here) has
+        // ended: the lock is free again.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while hygiene::try_hold(&checkouts, "job_1").unwrap().is_none() {
+            assert!(Instant::now() < deadline, "the checkout is still held");
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
 

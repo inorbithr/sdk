@@ -1,0 +1,6 @@
+# The old name of the `extension` template, kept so `--template demo` and projects that name it
+# keep working. Hidden from the menu; `iohr project template list --all` shows it.
+id = "demo"
+description = "The extension template under its old name: a private macOS service that heartbeats and serves a tiny local panel"
+status = "hidden"
+extends = "extension"

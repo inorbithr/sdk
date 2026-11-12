@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use super::layer;
 use super::lock::{Entry, FILE, Lock};
-use super::manifest::{CONFIG_MEDIA_TYPE, LAYER_MEDIA_TYPE, MAX_MANIFEST, Manifest};
+use super::manifest::{CONFIG_MEDIA_TYPE, LAYER_MEDIA_TYPE, MAX_MANIFEST, Manifest, check_panel};
 use super::oci::{Descriptor, Digest, INDEX, ImageManifest, Index, MANIFEST, Platform, Registry};
 use super::trust::{self, Policy, Verified};
 
@@ -167,6 +167,13 @@ pub async fn fetch(
             super::manifest::printable(&manifest.name)
         ))));
     }
+    if !verified.signer.publishes(name) {
+        return Err(ExtError::Trust(trust::TrustError(format!(
+            "not installed: {name} is signed by {}, which does not publish {name} \
+             (a release workflow publishes the extension its repository is named after)",
+            super::manifest::printable(&verified.signer.to_string())
+        ))));
+    }
     if let Want::Version(v) = want
         && &manifest.version != v
     {
@@ -233,6 +240,20 @@ pub struct Record {
     pub bundles: Vec<(String, String)>,
 }
 
+/// An installed extension's panel, as a host lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct InstalledPanel {
+    /// The extension's name, as the lock records it.
+    pub name: String,
+    /// Its installed version.
+    pub version: String,
+    /// The name in the host's Extensions menu.
+    pub title: String,
+    /// The path the panel opens at on its own loopback server.
+    pub entry: String,
+}
+
 /// The extensions on this machine.
 #[derive(Debug, Clone)]
 pub struct Store {
@@ -246,12 +267,12 @@ impl Store {
         Self { root }
     }
 
-    /// The platform's data directory for `iohr`, plus `extensions`.
+    /// The platform's data directory for iohr: what `IOHR_DATA_DIR` overrides. Extensions and
+    /// the session host's queue (RFC 0213) live below it.
     ///
     /// # Errors
-    ///
-    /// [`ExtError::Io`] when the home directory cannot be found.
-    pub fn default_root() -> Result<PathBuf, ExtError> {
+    /// When the home directory cannot be found.
+    pub fn data_root() -> Result<PathBuf, ExtError> {
         use etcetera::app_strategy::{AppStrategy as _, AppStrategyArgs, choose_native_strategy};
         let args = AppStrategyArgs {
             top_level_domain: "hr".into(),
@@ -259,13 +280,29 @@ impl Store {
             app_name: "iohr".into(),
         };
         choose_native_strategy(args)
-            .map(|s| s.data_dir().join("extensions"))
+            .map(|s| s.data_dir())
             .map_err(|_| {
                 ExtError::Io(
-                    "cannot find the home directory to keep extensions in; set IOHR_DATA_DIR"
+                    "cannot find the home directory to keep iohr's data in; set IOHR_DATA_DIR"
                         .into(),
                 )
             })
+    }
+
+    /// The store below an iohr data folder (`data_root`, or `IOHR_DATA_DIR`): its
+    /// `extensions` folder.
+    #[must_use]
+    pub fn in_data_dir(data: &Path) -> Self {
+        Self::new(data.join("extensions"))
+    }
+
+    /// The platform's data directory for `iohr`, plus `extensions`.
+    ///
+    /// # Errors
+    ///
+    /// [`ExtError::Io`] when the home directory cannot be found.
+    pub fn default_root() -> Result<PathBuf, ExtError> {
+        Self::data_root().map(|d| Self::in_data_dir(&d).root)
     }
 
     /// This machine's lock.
@@ -300,12 +337,45 @@ impl Store {
         let Some(entry) = self.lock()?.entries.remove(name) else {
             return Ok(None);
         };
-        let dir = self.version_dir(&entry)?;
+        let (record, dir) = self.record(&entry)?;
+        Ok(Some((entry, record, dir)))
+    }
+
+    /// The record and directory of the version `entry` names.
+    fn record(&self, entry: &Entry) -> Result<(Record, PathBuf), ExtError> {
+        let dir = self.version_dir(entry)?;
         let path = dir.join("record.json");
         let text = std::fs::read(&path).map_err(|e| io("read", &path, &e))?;
         let record: Record = serde_json::from_slice(&text)
             .map_err(|e| ExtError::Io(format!("{} is not readable: {e}", path.display())))?;
-        Ok(Some((entry, record, dir)))
+        Ok((record, dir))
+    }
+
+    /// The installed extensions that serve a panel (RFC 0143), by name: what a host
+    /// such as `iohr ui` lists. The record is read as installed and its `[panel]`
+    /// checked again; an entry whose record cannot be read, or whose panel breaks the
+    /// rule, is left out, so a host never offers what it cannot open. Nothing is run.
+    ///
+    /// # Errors
+    ///
+    /// [`ExtError::Lock`] when the machine's lock cannot be read.
+    pub fn panels(&self) -> Result<Vec<InstalledPanel>, ExtError> {
+        Ok(self
+            .lock()?
+            .entries
+            .into_values()
+            .filter_map(|entry| {
+                let (record, _) = self.record(&entry).ok()?;
+                let panel = record.manifest.panel?;
+                check_panel(&panel).ok()?;
+                Some(InstalledPanel {
+                    name: entry.name,
+                    version: entry.version,
+                    title: panel.title,
+                    entry: panel.entry,
+                })
+            })
+            .collect())
     }
 
     /// Writes a fetched extension and records it in the lock. Returns its entry.

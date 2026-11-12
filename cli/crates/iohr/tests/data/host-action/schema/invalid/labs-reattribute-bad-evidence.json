@@ -1,0 +1,6 @@
+{
+  "action": "labs.reattribute-document",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {"document": "ldoc_01M4P30371W9A3V5S3YCAHRTAN", "from": "2561c570-bde2-4998-82b7-f4cde4ece7c6", "evidence_ts": "yesterday", "expected_documents": 1, "expected_versions": 2, "expected_comments": 3},
+  "effect": "Does what the person approved."
+}

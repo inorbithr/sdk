@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue waits for every required check, so zizmor must report there too;
+  # dependency review skips in the queue (it reviewed the pull request already).
+  merge_group:
   schedule:
     - cron: "17 4 * * 1"
 
@@ -77,12 +80,15 @@ jobs:
           config: |
             paths-ignore:
               - cli/crates/iohr-codegen/tests/golden
+              # The project templates are files with @@PLACEHOLDERS@@ that init fills in, not
+              # modules (a go.mod there says `module @@MODULE@@`); the shipped code is scanned.
+              - cli/crates/iohr/templates
       # `go test -c` compiles every package with its tests and runs none, so CodeQL extracts
       # the test files too. The extractor replays this command line as `go list` and passes
       # on every flag but -c, -i and -o, so test-only flags such as -run or -count break it.
       - if: steps.present.outputs.yes == 'true' && matrix.language == 'go'
         run: |
-          for mod in $(git ls-files '*go.mod'); do
+          for mod in $(git ls-files '*go.mod' ':!:cli/crates/iohr/templates/**'); do
             dir="$(dirname "$mod")"
             out="$RUNNER_TEMP/go-tests/$dir"
             mkdir -p "$out"

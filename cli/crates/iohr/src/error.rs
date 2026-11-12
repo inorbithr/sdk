@@ -30,6 +30,9 @@ pub enum Error {
     Findings(String),
     /// Anything else that failed.
     Failed(String),
+    /// The credential store would have asked the person (a Keychain prompt) on a path that
+    /// must not (`iohr asks count`, the shell prompt): nothing was read. Exit code 1.
+    StoreWouldAsk(String),
     /// An extension ran and exited with this code; `iohr` exits with it too.
     Child(u8),
     /// `iohr runner run` installed a newer `iohr` and stopped for its supervisor (launchd or
@@ -58,7 +61,11 @@ impl Error {
                 error: inorbithr::Error::Api(e),
                 ..
             } if e.code == Code::Forbidden || e.status == 403 => 4,
-            Self::Api { .. } | Self::Failed(_) | Self::Drift(_) | Self::Findings(_) => 1,
+            Self::Api { .. }
+            | Self::Failed(_)
+            | Self::StoreWouldAsk(_)
+            | Self::Drift(_)
+            | Self::Findings(_) => 1,
             Self::Child(code) => *code,
             Self::Restart => crate::runner::supervisor::EXIT_RESTART,
         })
@@ -78,6 +85,7 @@ impl fmt::Display for Error {
             Self::Usage(m)
             | Self::NotSignedIn(m)
             | Self::Failed(m)
+            | Self::StoreWouldAsk(m)
             | Self::Drift(m)
             | Self::Findings(m) => f.write_str(m),
             Self::Child(_) | Self::Restart => Ok(()),
@@ -104,6 +112,7 @@ impl From<AuthError> for Error {
             AuthError::NotSignedIn { .. }
             | AuthError::SessionEnded { .. }
             | AuthError::Claims(_) => Self::NotSignedIn(e.to_string()),
+            AuthError::Store(StoreError::WouldAsk) => Self::StoreWouldAsk(e.to_string()),
             other => Self::Failed(other.to_string()),
         }
     }
@@ -117,7 +126,10 @@ impl From<ClaimsError> for Error {
 
 impl From<StoreError> for Error {
     fn from(e: StoreError) -> Self {
-        Self::Failed(e.to_string())
+        match e {
+            StoreError::WouldAsk => Self::StoreWouldAsk(e.to_string()),
+            other => Self::Failed(other.to_string()),
+        }
     }
 }
 

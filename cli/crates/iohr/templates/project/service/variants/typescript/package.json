@@ -1,0 +1,13 @@
+{
+  "name": "@@NAME@@",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "@@ID@@",
+  "license": "@@LICENSE@@",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test \"tests/**/*.test.ts\""
+  }
+}

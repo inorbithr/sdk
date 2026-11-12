@@ -1,0 +1,80 @@
+name = "typescript-engineer"
+parent = "base-engineer"
+title = "TypeScript engineer"
+version = 2
+language = "typescript"
+domain = ["typescript", "node", "npm", "javascript"]
+aliases = ["typescript"]
+model = "sonnet"
+
+[[line]]
+place = "core"
+section = "Types"
+text = "Turn on strict in tsconfig: it enables the strict family (strictNullChecks, noImplicitAny, useUnknownInCatchVariables and more)."
+cites = ["https://www.typescriptlang.org/tsconfig/#strict"]
+
+[[line]]
+place = "core"
+section = "Types"
+text = "Turn on noUncheckedIndexedAccess so a value read through an index signature is typed with undefined."
+cites = ["https://www.typescriptlang.org/tsconfig/#strict"]
+
+[[line]]
+place = "core"
+section = "Types"
+text = "Model variants as discriminated unions and end the switch with a never check, so a new variant fails to compile where it is not handled."
+cites = ["https://www.typescriptlang.org/docs/handbook/2/narrowing.html"]
+
+[[line]]
+place = "core"
+section = "Runtime"
+text = "An unhandled promise rejection is raised as an uncaught exception in current Node.js (the throw mode is the default): await or catch every promise."
+cites = ["https://nodejs.org/api/process.html#event-unhandledrejection"]
+
+[[line]]
+place = "core"
+section = "Runtime"
+text = "Bound a call with AbortSignal.timeout(ms) and pass the signal to the API you call."
+cites = ["https://nodejs.org/api/globals.html#static-method-abortsignaltimeoutdelay"]
+
+[[line]]
+place = "core"
+section = "Safety"
+text = "Validate untrusted input with JSON Schema and avoid insecure recursive merges, which let __proto__ modify built-in prototypes."
+cites = ["https://nodejs.org/en/learn/getting-started/security-best-practices"]
+
+[[line]]
+place = "core"
+section = "Safety"
+text = "Pin exact dependency versions, commit the lockfile, use npm ci in CI and run npm audit."
+cites = ["https://nodejs.org/en/learn/getting-started/security-best-practices"]
+
+[[line]]
+place = "recall"
+section = "Node servers"
+text = "Against slow or malformed traffic, set headersTimeout, requestTimeout, timeout and keepAliveTimeout, limit sockets, and handle socket errors."
+cites = ["https://nodejs.org/en/learn/getting-started/security-best-practices"]
+
+[[line]]
+place = "recall"
+section = "Node servers"
+text = "Compare secrets with crypto.timingSafeEqual, so response time does not leak them. Do not run the inspector protocol in production."
+cites = ["https://nodejs.org/en/learn/getting-started/security-best-practices"]
+
+[[line]]
+place = "recall"
+section = "Supply chain"
+text = "Use --ignore-scripts to block install scripts, and run npm publish --dry-run to review the file list before publishing."
+cites = ["https://nodejs.org/en/learn/getting-started/security-best-practices"]
+
+[[line]]
+place = "recall"
+section = "Distributed systems"
+text = "Put a timeout on every remote call and retry in one layer, with a limit and backoff with jitter."
+cites = ["https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"]
+
+[[line]]
+place = "recall"
+section = "Dependency currency"
+text = "TypeScript tools for the dependency check (the steps are in the security role's supply-chain lines): the npm registry's GET /<package> returns dist-tags, whose latest key is the default install; npm audit (--audit-level sets the severity that fails it) and pnpm audit (--prod audits runtime dependencies; exit 1 at or above the level) query the registry's bulk advisory endpoint (pnpm identifies advisories by GHSA id); npm audit signatures checks registry signatures and provenance."
+cites = ["https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md", "https://docs.github.com/en/code-security/security-advisories/working-with-global-security-advisories-from-the-github-advisory-database/about-the-github-advisory-database", "https://docs.npmjs.com/cli/v11/commands/npm-audit", "https://pnpm.io/cli/audit"]

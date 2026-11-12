@@ -7,7 +7,8 @@ use inorbithr::{
 };
 use iohr_auth::{
     AuthError, Bearer, Claims, Config, Credential, EntryKey, FileStore, KeyringStore, Kind,
-    ProfileName, Redacted, Session as PersonSession, StaticToken, Storage, Store, StoreError,
+    ProfileName, QuietStore, Redacted, Session as PersonSession, StaticToken, Storage, Store,
+    StoreError,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -18,18 +19,40 @@ use crate::cli::Global;
 use crate::env_name;
 use crate::error::Error;
 
+/// Whether a credential-store call may wait on, or show, a prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Prompts {
+    /// The Keychain may ask the person; the call waits for the answer.
+    Allowed,
+    /// The call never waits and never shows a prompt: where one would show, it fails with
+    /// [`Error::StoreWouldAsk`].
+    Never,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread opened a credential store (the tests count them).
+    static OPENED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The config directory and the config read from it.
 pub(crate) struct Ctx {
     pub(crate) dir: PathBuf,
     pub(crate) config: Config,
 }
 
+/// The config directory: `--config-dir`/`IOHR_CONFIG_DIR`, else the platform's. The one place
+/// that decides it (profiles, the user-level `IO.md`).
+pub(crate) fn config_dir(global: &Global) -> Result<PathBuf, Error> {
+    match &global.config_dir {
+        Some(d) => Ok(d.clone()),
+        None => Ok(Config::default_dir()?),
+    }
+}
+
 impl Ctx {
     pub(crate) fn load(global: &Global) -> Result<Self, Error> {
-        let dir = match &global.config_dir {
-            Some(d) => d.clone(),
-            None => Config::default_dir()?,
-        };
+        let dir = config_dir(global)?;
         let config = Config::load(&dir)?;
         Ok(Self { dir, config })
     }
@@ -38,11 +61,20 @@ impl Ctx {
         Ok(self.config.save(&self.dir)?)
     }
 
-    /// The store a profile's secret lives in.
-    pub(crate) fn store(&self, storage: Storage) -> Result<Arc<dyn Store>, Error> {
-        Ok(match storage {
-            Storage::File => Arc::new(FileStore::new(self.dir.join("secrets"))),
-            _ => Arc::new(KeyringStore::open()?),
+    /// The store a profile's secret lives in. `prompts` says whether a call may wait on, or
+    /// show, a credential prompt: [`Prompts::Never`] wraps the OS store in a [`QuietStore`]
+    /// (the shell prompt's paths); the file store never prompts and is never wrapped.
+    pub(crate) fn store(
+        &self,
+        storage: Storage,
+        prompts: Prompts,
+    ) -> Result<Arc<dyn Store>, Error> {
+        #[cfg(test)]
+        OPENED.with(|n| n.set(n.get() + 1));
+        Ok(match (storage, prompts) {
+            (Storage::File, _) => Arc::new(FileStore::new(self.dir.join("secrets"))),
+            (_, Prompts::Allowed) => Arc::new(KeyringStore::open()?),
+            (_, Prompts::Never) => Arc::new(QuietStore::new(Arc::new(KeyringStore::open()?))),
         })
     }
 
@@ -68,9 +100,8 @@ where
     T: Send + 'static,
     F: FnOnce(&dyn Store) -> Result<T, StoreError> + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || f(store.as_ref()))
+    iohr_auth::off_thread(move || f(store.as_ref()))
         .await
-        .map_err(|e| Error::Failed(format!("the credential store call stopped: {e}")))?
         .map_err(Error::from)
 }
 
@@ -126,6 +157,12 @@ impl TokenProvider for AnyCredential {
 pub(crate) struct Shared(pub(crate) Arc<AnyCredential>);
 
 impl TokenProvider for Shared {
+    /// The client calls this once after a 401, so the retry carries a fresh token
+    /// (without it Io's cached token, stale after a sleep, was sent again for ever).
+    async fn invalidate(&self) {
+        self.0.invalidate().await;
+    }
+
     async fn token(&self) -> Result<Token, inorbithr::AuthError> {
         self.0.token().await
     }
@@ -218,7 +255,7 @@ impl inorbithr::middleware::Middleware for ViaMw {
 pub(crate) fn via_header(global: &Global) -> Result<Option<String>, Error> {
     let mut parts = Vec::new();
     for (key, flag, v) in [
-        ("personality", "--via-personality", &global.via_personality),
+        ("personality", "--via-role", &global.via_role().cloned()),
         ("session", "--via-session", &global.via_session),
         ("job", "--via-job", &global.via_job),
     ] {
@@ -269,7 +306,27 @@ impl Api {
         verbose: bool,
         via: Option<String>,
     ) -> Result<Self, Error> {
+        Self::with_streams(
+            base,
+            credential,
+            verbose,
+            via,
+            inorbithr::Streams::default(),
+        )
+    }
+
+    /// [`with_via`](Self::with_via) that also chooses how streams open: `Streams::Socket`
+    /// carries all of this client's streams over one `/v1/ws` connection (the page's live
+    /// socket, `iohr ui serve`).
+    pub(crate) fn with_streams(
+        base: &str,
+        credential: Arc<AnyCredential>,
+        verbose: bool,
+        via: Option<String>,
+        streams: inorbithr::Streams,
+    ) -> Result<Self, Error> {
         let mut b = Client::builder()
+            .streams(streams)
             .base_url(base)
             .token_provider(Shared(credential))
             .user_agent_suffix(concat!("iohr/", env!("CARGO_PKG_VERSION")));
@@ -379,6 +436,67 @@ pub(crate) async fn session(global: &Global, env: &Env) -> Result<Session, Error
     session_for(global, env, &ctx, chosen.as_ref()).await
 }
 
+/// [`session`] for the shell prompt's paths: the credential store never shows a prompt and
+/// never makes the call wait; where it would, the error is [`Error::StoreWouldAsk`].
+pub(crate) async fn quiet_session(global: &Global, env: &Env) -> Result<Session, Error> {
+    let ctx = Ctx::load(global)?;
+    let chosen = run_profile(global, env, &ctx);
+    session_in(global, env, &ctx, chosen.as_ref(), true).await
+}
+
+type Slot = Arc<tokio::sync::OnceCell<Arc<Session>>>;
+
+/// The sessions of this process, by what makes one: the config directory, the profile, the
+/// API address and the tokens in the environment (as a hash, never the token).
+static SHARED: std::sync::Mutex<std::collections::BTreeMap<String, Slot>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// [`session`] for a run that asks for it more than once (`iohr project init` checks the
+/// sign-in, the space and the plan, one after the other): the first ask loads the
+/// credential and every later one in this process gets the same session, so the credential
+/// store is read once. On a Mac, where each read can be a Keychain dialog, that is the
+/// difference between one prompt and six. Only a session is kept, never a refusal: a
+/// refused ask (a Keychain dialog answered No, a sign-in made since) can succeed on the
+/// next one. Never for a process that outlives its sign-in (a runner, the panel): they
+/// call [`session`] and see a sign-out as it happens.
+///
+/// # Errors
+///
+/// What [`session`] returns.
+pub(crate) async fn shared_session(global: &Global, env: &Env) -> Result<Arc<Session>, Error> {
+    use std::hash::{Hash as _, Hasher as _};
+    let ctx = Ctx::load(global)?;
+    let chosen = run_profile(global, env, &ctx);
+    let secret = |t: Option<&Redacted<String>>| {
+        t.map(|t| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            t.expose().hash(&mut h);
+            h.finish()
+        })
+    };
+    let key = format!(
+        "{}|{}|{}|{:?}|{:?}",
+        ctx.dir.display(),
+        chosen.as_ref().map_or("", ProfileName::as_str),
+        global.base_url(),
+        secret(env.token.as_ref()),
+        secret(chosen.as_ref().and_then(|n| env.profile_token(n.as_str()))),
+    );
+    let slot = SHARED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(key)
+        .or_default()
+        .clone();
+    slot.get_or_try_init(|| async {
+        session_for(global, env, &ctx, chosen.as_ref())
+            .await
+            .map(Arc::new)
+    })
+    .await
+    .cloned()
+}
+
 /// The profile a run uses: `--profile` or `IOHR_PROFILE`; none when `IOHR_TOKEN` is set
 /// without one; otherwise the default profile, if any.
 pub(crate) fn run_profile(global: &Global, env: &Env, ctx: &Ctx) -> Option<ProfileName> {
@@ -397,6 +515,17 @@ pub(crate) async fn session_for(
     env: &Env,
     ctx: &Ctx,
     name: Option<&ProfileName>,
+) -> Result<Session, Error> {
+    session_in(global, env, ctx, name, false).await
+}
+
+/// `quiet`: the OS store is read through a [`QuietStore`] ([`Prompts::Never`]).
+async fn session_in(
+    global: &Global,
+    env: &Env,
+    ctx: &Ctx,
+    name: Option<&ProfileName>,
+    quiet: bool,
 ) -> Result<Session, Error> {
     let base = global.base_url();
     // A named profile takes `IOHR_TOKEN_<PROFILE>` and nothing else from the environment;
@@ -439,7 +568,14 @@ pub(crate) async fn session_for(
         ))
     })?;
     let key = EntryKey::new(name.clone(), &profile.account)?;
-    let store = ctx.store(profile.storage)?;
+    let store = ctx.store(
+        profile.storage,
+        if quiet {
+            Prompts::Never
+        } else {
+            Prompts::Allowed
+        },
+    )?;
     let (credential, claims) = match profile.kind {
         Kind::Token => {
             let secret: Option<Redacted<String>> = blocking(store, move |s| s.get(&key)).await?;
@@ -538,4 +674,97 @@ pub(crate) fn account(session: &Session, flag: Option<String>) -> Result<String,
         ));
     }
     Ok(a)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, reason = "tests")]
+
+    use base64::Engine as _;
+    use clap::Parser as _;
+    use iohr_auth::{Config, EntryKey, FileStore, Kind, Profile, Redacted, Storage, Store as _};
+
+    use super::{OPENED, shared_session};
+    use crate::Env;
+    use crate::cli::Cli;
+    use crate::error::Error;
+
+    /// Puts the profile `work`'s API token in the file store under `dir`.
+    fn sign_in(dir: &std::path::Path) {
+        let b64 = |v: serde_json::Value| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v.to_string())
+        };
+        let jwt = format!(
+            "{}.{}.sig",
+            b64(serde_json::json!({"alg": "none"})),
+            b64(serde_json::json!({"sub": "ak_x", "aud": ["iohr-api"], "org": "acc_1"}))
+        );
+        let key = EntryKey::new("work".parse().unwrap(), "acc_1").unwrap();
+        FileStore::new(dir.join("secrets"))
+            .set(&key, &Redacted::new(jwt))
+            .unwrap();
+    }
+
+    /// A config directory with the profile `work` holding an API token in the file store,
+    /// when `token` is true; the global flags that point at it.
+    fn machine(token: bool) -> (tempfile::TempDir, crate::cli::Global) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        let name: iohr_auth::ProfileName = "work".parse().unwrap();
+        config.profiles.insert(
+            name.clone(),
+            Profile::new(Kind::Token, "acc_1", Storage::File),
+        );
+        config.default = Some(name.clone());
+        config.save(dir.path()).unwrap();
+        if token {
+            sign_in(dir.path());
+        }
+        let cli = Cli::try_parse_from([
+            "iohr",
+            "--config-dir",
+            dir.path().to_str().unwrap(),
+            "whoami",
+        ])
+        .unwrap();
+        (dir, cli.global)
+    }
+
+    fn opened() -> usize {
+        OPENED.with(std::cell::Cell::get)
+    }
+
+    /// Project init asks for the session six times; the credential store must be opened
+    /// (on a Mac: the Keychain read) once, whatever the number of asks.
+    #[tokio::test]
+    async fn one_credential_session_serves_every_ask_in_a_run() {
+        let (_dir, g) = machine(true);
+        let env = Env::default();
+        let before = opened();
+        for _ in 0..3 {
+            let s = shared_session(&g, &env).await.unwrap();
+            assert_eq!(s.label, "work");
+        }
+        assert_eq!(opened() - before, 1, "the store was opened again");
+    }
+
+    /// A refusal is not remembered: the ask that failed (no sign-in yet) does not decide the
+    /// next one, which finds the credential once it is there.
+    #[tokio::test]
+    async fn a_refused_session_is_not_cached_so_a_later_ask_can_succeed() {
+        let (dir, g) = machine(false);
+        let env = Env::default();
+        let before = opened();
+        let e = shared_session(&g, &env).await.err().unwrap();
+        assert!(matches!(e, Error::NotSignedIn(_)), "{e:?}");
+        // The person signs in between the two asks.
+        sign_in(dir.path());
+        let s = shared_session(&g, &env).await.unwrap();
+        assert_eq!(s.label, "work");
+        assert_eq!(
+            opened() - before,
+            2,
+            "the second ask must read the store again"
+        );
+    }
 }

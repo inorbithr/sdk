@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.inorbit.hr/runner/host-action/v0.json",
   "title": "Runner host action",
-  "description": "One action a person approves for one enrolled runner to carry out on its host: the action's dotted id from the catalog, the runner that runs it, its parameters (typed per action) and what it does in one plain sentence. It travels inside a signed approval for a pinned run: the approval names this schema, carries the action as its canonical JSON (keys sorted, no whitespace), pins the SHA-256 of that JSON, and the action's runner_id is the run's own. Integers and strings only, so the canonical JSON is the same in every language. The object and every params object are closed: an action can do only what its params say. Catalog: k8s.delete-failed-pods (params.namespace; absent means every namespace); k8s.rollout-restart (params.namespace and params.deployment: restart one deployment and wait for its rollout; the cluster's own namespaces are refused); systemd.user-restart (params.unit: reload the user's systemd manager and restart one user service; Linux only); docker.prune-images (params.until_hours: remove the images unused and older than that many hours; never volumes); gh.cancel-run (params.repo and params.run_id: cancel one GitHub Actions run of an inorbithr repository); iohr.upgrade (no params: the runner upgrades its own iohr the way it was installed); preview.take (params.branch: take one preview-int/, feat/ or fix/ branch into the owner's Preview checkout, then check the Preview app); roll.task (params.rev, params.task and params.services: run one roll task at one commit of main on the deploy server); build.sweep-targets (params.mode: cap or guard the Rust build output of the core checkout and its worktrees); gh.release-rerun (params.run_id: re-run the failed jobs of one failed sdk release run whose commit passed its examples). agent.install-checks (params.block, params.commit and params.service: install one block of monitor checks from core at one commit of main into the agent's checks file and restart the agent; Linux only). disk.prune (params.target and, for docker-builder, params.until_hours: free disk on the host from one named target; host runs the host prune, docker-builder removes the Docker build cache older than that many hours, k3d-images removes the images no pod uses from each k3d node; it reports the free space before and after and fails when nothing was freed; Linux only). helm.runner-scale (params.release, params.max_runners and optionally params.min_runners: set one ARC runner scale set's maximum and minimum runners on the deploy server's cluster and read the values back). Draft line: it may still be corrected.",
+  "description": "One action a person approves for one enrolled runner to carry out on its host: the action's dotted id from the catalog, the runner that runs it, its parameters (typed per action) and what it does in one plain sentence. It travels inside a signed approval for a pinned run: the approval names this schema, carries the action as its canonical JSON (keys sorted, no whitespace), pins the SHA-256 of that JSON, and the action's runner_id is the run's own. Integers and strings only, so the canonical JSON is the same in every language. The object and every params object are closed: an action can do only what its params say. Catalog: k8s.delete-failed-pods (params.namespace; absent means every namespace); k8s.rollout-restart (params.namespace and params.deployment: restart one deployment and wait for its rollout; the cluster's own namespaces are refused); systemd.user-restart (params.unit: reload the user's systemd manager and restart one user service; Linux only); docker.prune-images (params.until_hours: remove the images unused and older than that many hours; never volumes); gh.cancel-run (params.repo and params.run_id: cancel one GitHub Actions run of an inorbithr repository); iohr.upgrade (no params: the runner upgrades its own iohr the way it was installed); preview.take (params.branch: take one preview-int/, feat/ or fix/ branch into the owner's Preview checkout, then check the Preview app); roll.task (params.rev, params.task and params.services: run one roll task at one commit of main on the deploy server); build.sweep-targets (params.mode: cap or guard the Rust build output of the core checkout and its worktrees); gh.release-rerun (params.run_id: re-run the failed jobs of one failed sdk release run whose commit passed its examples). agent.install-checks (params.block, params.commit and params.service: install one block of monitor checks from core at one commit of main into the agent's checks file and restart the agent; Linux only). disk.prune (params.target and, for docker-builder, params.until_hours: free disk on the host from one named target; host runs the host prune, docker-builder removes the Docker build cache older than that many hours, k3d-images removes the images no pod uses from each k3d node; it reports the free space before and after and fails when nothing was freed; Linux only). helm.runner-scale (params.release, params.max_runners and optionally params.min_runners: set one ARC runner scale set's maximum and minimum runners on the deploy server's cluster and read the values back). labs.reattribute-document (params.document, params.from, params.evidence_ts and the proven row counts params.expected_documents, params.expected_versions and params.expected_comments: on the deploy server, move one Decisions document's proven rows from one subject to Io with labs:reattribute, only while a dry run counts exactly those rows; the run can be reverted). edge.caddy-site-call (no params: add the call site to the runner host's edge Caddy config, validate and reload Caddy, then check the site answers 401; Linux only). Draft line: it may still be corrected.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -204,9 +204,41 @@
       "required": [
         "action"
       ]
+    },
+    {
+      "properties": {
+        "action": {
+          "const": "labs.reattribute-document"
+        },
+        "params": {
+          "$ref": "#/$defs/labs-reattribute-document"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "properties": {
+        "action": {
+          "const": "edge.caddy-site-call"
+        },
+        "params": {
+          "$ref": "#/$defs/edge-caddy-site-call"
+        }
+      },
+      "required": [
+        "action"
+      ]
     }
   ],
   "$defs": {
+    "edge-caddy-site-call": {
+      "description": "edge.caddy-site-call: on the runner's host, append the runner's fixed call-site block (the call host with `import api`) to the edge checkout's devops/edge/sites.d/inorbit.hr.caddy when it is absent (after a timestamped backup of the file), run caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile in the running edge Caddy container (a failure restores the backup and stops), then caddy reload. It refuses unless the container is running and its /etc/caddy Caddyfile defines the (api) snippet. It then checks the call host's /rtc/validate answers 401 within 60 seconds. No params: the site and the file are fixed by the runner, never a param. Linux only; a runner on any other system refuses it. Effect, as a person reads it: Adds the call site to the edge Caddy config on the runner's host, validates it and reloads Caddy.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
     "k8s-delete-failed-pods": {
       "description": "k8s.delete-failed-pods: delete the pods in phase Failed. namespace names one namespace; absent, every namespace.",
       "type": "object",
@@ -505,6 +537,54 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 32
+        }
+      }
+    },
+    "labs-reattribute-document": {
+      "description": "labs.reattribute-document: move the proven rows of ONE Decisions document from one subject to the Io agent, and nothing else. On the deploy server the runner checks the evidence snapshot named by evidence_ts against SHA256SUMS in ~/.inorbit/state/reattribute-evidence, takes a fresh detached worktree of core at origin/main (refused when mise run labs:reattribute has no --document flag), dry-runs mise run labs:reattribute --account <the host action's account> --from <from> --unproven keep --document <document> --dry-run and refuses, printing the counts, unless the proven rows it counts per kind are exactly the expected ones; then runs the same with --apply, requires its run lrat_ line, and re-runs the dry run to see no proven row left for that document. Only the run line and the counts are printed, never a title or a URL. The run can be reverted with mise run labs:reattribute --revert <run>. Effect, as a person reads it: Moves the proven rows of document ldoc_01M4P30371W9A3V5S3YCAHRTAN (documents 1, versions 2, comments 3) to Io; it can be reverted with labs:reattribute --revert <run>.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "document",
+        "from",
+        "evidence_ts",
+        "expected_documents",
+        "expected_versions",
+        "expected_comments"
+      ],
+      "properties": {
+        "document": {
+          "description": "The Decisions document to move: ldoc_ and a ULID.",
+          "type": "string",
+          "pattern": "^ldoc_[0-9A-Z]{26}$"
+        },
+        "from": {
+          "description": "The subject the rows are filed under now: a lower-case UUID.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "evidence_ts": {
+          "description": "The evidence snapshot's stamp, as in labs-writes-<stamp>.jsonl: yyyymmddThhmmZ.",
+          "type": "string",
+          "pattern": "^[0-9]{8}T[0-9]{4}Z$"
+        },
+        "expected_documents": {
+          "description": "The proven documents a dry run counted for this document: 0 to 1000000.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "expected_versions": {
+          "description": "The proven versions a dry run counted for this document: 0 to 1000000.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "expected_comments": {
+          "description": "The proven comments a dry run counted for this document: 0 to 1000000.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
         }
       }
     }

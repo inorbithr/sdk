@@ -1,0 +1,31 @@
+name: Rust cache
+description: >-
+  Restores the Cargo cache for one workspace, and saves it only from main, so pull
+  requests read main's cache and never evict it.
+inputs:
+  workspaces:
+    description: The Cargo workspace directory (cli or rust).
+    required: true
+  key:
+    description: An extra cache key, such as the toolchain of a matrix leg.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        workspaces: ${{ inputs.workspaces }}
+        key: ${{ inputs.key }}
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    # rust-cache deletes every file in target/ outside a profile directory, which
+    # leaves libduckdb-sys's target/duckdb-sources/<key>/ as an empty directory
+    # skeleton without its .complete marker. When the lockfile moves a build
+    # dependency the build script reruns, finds the skeleton and its rename onto it
+    # fails with ENOTEMPTY (os error 39). Removing the unusable tree lets the
+    # build script unpack it again; a missing directory is not an error.
+    - name: Drop the stale duckdb source tree
+      shell: bash
+      env:
+        WORKSPACE: ${{ inputs.workspaces }}
+      run: rm -rf -- "${WORKSPACE}/target/duckdb-sources"
