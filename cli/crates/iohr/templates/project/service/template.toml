@@ -134,7 +134,6 @@ RELEASE_STEPS = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac3178
           javac -d out src/app/*.java
           git rev-parse --short=12 HEAD > out/commit.txt
           jar --create --file "dist/@@NAME@@.jar" --main-class app.Main -C out .'''
-DEPENDABOT_ECOSYSTEM = "maven"
 SOURCE = "src/app/, tests in tests/"
 IGNORE = '''out/
 *.class'''
@@ -172,7 +171,6 @@ RELEASE_STEPS = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853db
           global-json-file: global.json
       - name: Publish
         run: dotnet publish src --configuration Release --output dist'''
-DEPENDABOT_ECOSYSTEM = "nuget"
 SOURCE = "src/, tests in tests/"
 IGNORE = '''bin/
 obj/
@@ -200,9 +198,6 @@ test = ["dart", "run", "test/service_test.dart"]
 [variants.env]
 DART_SUPPRESS_ANALYTICS = "true"
 [variants.vars]
-CI_SETUP = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
-        with:
-          sdk: stable'''
 CI_TEST = '''dart analyze && dart run test/service_test.dart'''
 RELEASE_STEPS = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
         with:
@@ -211,7 +206,6 @@ RELEASE_STEPS = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd
         run: |
           mkdir -p dist
           dart compile exe bin/main.dart -DCOMMIT="$(git rev-parse --short=12 HEAD)" -o "dist/@@NAME@@-linux-amd64"'''
-DEPENDABOT_ECOSYSTEM = "pub"
 SOURCE = "bin/, lib/, tests in test/"
 IGNORE = '''.dart_tool/
 *.exe'''
@@ -238,7 +232,6 @@ test = ["swift", "test", "--scratch-path", "$CACHE/build"]
 CI_SETUP = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "6.0"'''
-CI_TEST = '''swift test'''
 RELEASE_STEPS = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "6.0"
@@ -250,7 +243,6 @@ RELEASE_STEPS = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b8
           swift build --configuration release
           mkdir -p dist
           install -m 0755 ".build/release/@@NAME@@" "dist/@@NAME@@-linux-amd64"'''
-DEPENDABOT_ECOSYSTEM = "swift"
 SOURCE = "Sources/, tests in Tests/"
 IGNORE = '''.build/
 .swiftpm/'''

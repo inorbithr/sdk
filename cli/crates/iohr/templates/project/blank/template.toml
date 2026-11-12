@@ -174,9 +174,6 @@ test = ["dart", "run", "test/main_test.dart"]
 [variants.env]
 DART_SUPPRESS_ANALYTICS = "true"
 [variants.vars]
-CI_SETUP = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
-        with:
-          sdk: stable'''
 CI_TEST = '''dart analyze && dart run test/main_test.dart'''
 SOURCE = "bin/main.dart, tests in test/"
 IGNORE = '''.dart_tool/
@@ -201,7 +198,6 @@ test = ["swift", "test", "--scratch-path", "$CACHE/build"]
 CI_SETUP = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "6.0"'''
-CI_TEST = '''swift test'''
 SOURCE = "Sources/, tests in Tests/"
 IGNORE = '''.build/
 .swiftpm/'''
