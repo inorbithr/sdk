@@ -2190,8 +2190,17 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 .find(|l| !l.trim().is_empty())
                 .map(|l| format!(" ({})", l.trim()))
                 .unwrap_or_default();
+            // The last lines of what it printed, so a failed build shows its compiler or
+            // restore error and not only the closing line.
+            let lines: Vec<&str> = s.output.lines().filter(|l| !l.trim().is_empty()).collect();
+            let tail = lines[lines.len().saturating_sub(40)..].join("\n");
+            let tail = if tail.is_empty() {
+                tail
+            } else {
+                format!("\n{tail}")
+            };
             Err(Error::Failed(format!(
-                "the smoke test failed: {}{last}",
+                "the smoke test failed: {}{last}{tail}",
                 s.said
             )))
         }
