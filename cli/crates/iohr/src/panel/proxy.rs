@@ -291,6 +291,9 @@ struct Proxy {
     chip_on: Option<Rect>,
     /// The start of a report from the shell a chunk ended in the middle of.
     osc_held: Vec<u8>,
+    /// The start of a `CSI` the shell's output ended in the middle of, held back from the
+    /// terminal until the rest comes (so a scroll-region reset is never seen half).
+    csi_held: Vec<u8>,
     /// Bytes the proxy owes the shell's input (a `?` the box could not take).
     to_shell: Vec<u8>,
     /// The size the shell's pty has now: the rows are the screen's less the box's.
@@ -317,6 +320,7 @@ impl Proxy {
             reserved: false,
             chip_on: None,
             osc_held: Vec::new(),
+            csi_held: Vec::new(),
             to_shell: Vec::new(),
             pty_size: (rows, cols),
             chat_file: None,
@@ -1450,6 +1454,105 @@ mod tests {
         );
         let new_at = rows[badge].find("iohr").unwrap();
         assert!(new_at > old_at, "at the new corner, not the old one");
+    }
+
+    /// A proxy with the chat box open (the hook has spoken), on a terminal of `rows` x `cols`.
+    fn boxed_proxy(rows: usize, cols: usize) -> Proxy {
+        let look = Look {
+            fancy: true,
+            truecolor: true,
+        };
+        let mut p = Proxy::new(Model::new(true), rows, cols, look, MouseMode::Menu).with_chat(
+            boxed::Setting::On,
+            Some(std::path::PathBuf::from("/nonexistent/q")),
+        );
+        p.chat.message(
+            chat::Msg::Idle {
+                mode: "manual".into(),
+                ring: vec!["manual".into()],
+            },
+            std::time::Instant::now(),
+        );
+        p
+    }
+
+    /// Every line the terminal holds, scrolled-off ones first, then the screen's rows.
+    fn history_and_screen(term: &mut vt100::Parser) -> (Vec<String>, Vec<String>) {
+        let (rows, cols) = term.screen().size();
+        let mut off = Vec::new();
+        let mut at = usize::MAX;
+        term.screen_mut().set_scrollback(usize::MAX);
+        let top = term.screen().scrollback();
+        // Read the scrolled-off lines a screen's height at a time from the oldest.
+        let mut seen = 0;
+        while seen < top {
+            at = top - seen;
+            term.screen_mut().set_scrollback(at);
+            let page: Vec<String> = term.screen().rows(0, cols).collect();
+            let take = usize::from(rows).min(top - seen);
+            off.extend(page.into_iter().take(take));
+            seen += take;
+        }
+        let _ = at;
+        term.screen_mut().set_scrollback(0);
+        (off, term.screen().rows(0, cols).collect())
+    }
+
+    fn count(rows: &[String], needle: &str) -> usize {
+        rows.iter().filter(|r| r.contains(needle)).count()
+    }
+
+    #[test]
+    fn card_output_scrolling_past_the_box_never_stacks_it() {
+        let mut p = boxed_proxy(24, 100);
+        let mut term = vt100::Parser::new(24, 100, 1000);
+        let feed = |term: &mut vt100::Parser, bytes: Vec<u8>| term.process(&bytes);
+        // The hook's first report opens the box and reserves its rows.
+        feed(&mut term, p.shell_output(b"$ "));
+        assert!(p.reserved, "the box's rows are reserved");
+        // A question was sent: the box shows it and the command that runs.
+        p.chat.message(chat::Msg::Busy, std::time::Instant::now());
+        feed(&mut term, p.redraw());
+        // Cards print line by line, a few times the screen's height, in small chunks.
+        for round in 0..5 {
+            for i in 0..30 {
+                let line = format!("\x1b[1mcard {round}.{i}\x1b[0m\r\n");
+                feed(&mut term, p.shell_output(line.as_bytes()));
+            }
+            // The tick repaints the box between chunks.
+            feed(&mut term, p.redraw());
+        }
+        let (off, screen) = history_and_screen(&mut term);
+        assert_eq!(count(&screen, "ask · manual"), 1, "one header: {screen:?}");
+        assert_eq!(count(&screen, "a command is running"), 1, "{screen:?}");
+        assert_eq!(count(&off, "ask · manual"), 0, "none scrolled off: {off:?}");
+        assert_eq!(count(&off, "a command is running"), 0, "{off:?}");
+    }
+
+    #[test]
+    fn a_scroll_region_reset_never_frees_the_box_s_rows() {
+        let mut p = boxed_proxy(24, 100);
+        let mut term = vt100::Parser::new(24, 100, 1000);
+        term.process(&p.shell_output(b"$ "));
+        assert!(p.reserved);
+        p.chat.message(chat::Msg::Busy, std::time::Instant::now());
+        term.process(&p.redraw());
+        // A reset in one piece, split across two reads, with the full height named, and with
+        // a top row: none may reach the terminal as the whole screen.
+        let chunks: [&[u8]; 6] = [b"\x1b[r", b"\x1b[", b"r", b"\x1b[1;24r", b"\x1b[2;", b"30r"];
+        for (n, c) in chunks.iter().enumerate() {
+            term.process(&p.shell_output(c));
+            for i in 0..40 {
+                let line = format!("line {n}.{i}\r\n");
+                term.process(&p.shell_output(line.as_bytes()));
+            }
+        }
+        term.process(&p.redraw());
+        let (off, screen) = history_and_screen(&mut term);
+        assert_eq!(count(&screen, "ask · manual"), 1, "{screen:?}");
+        assert_eq!(count(&off, "ask · manual"), 0, "{off:?}");
+        assert_eq!(count(&screen, "a command is running"), 1, "{screen:?}");
+        assert_eq!(count(&off, "a command is running"), 0, "{off:?}");
     }
 
     fn has(bytes: &[u8], needle: &[u8]) -> bool {
