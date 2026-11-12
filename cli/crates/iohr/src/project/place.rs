@@ -569,9 +569,12 @@ mod tests {
             custom_dir(r.path(), "./data/../kept", home),
             r.path().join("kept")
         );
+        // An absolute path is kept as typed (built from the temp folder: "/srv/x" is not
+        // absolute on Windows, it has no drive).
+        let absolute = h.path().join("abs").join("x");
         assert_eq!(
-            custom_dir(r.path(), "/srv/x", home),
-            PathBuf::from("/srv/x")
+            custom_dir(r.path(), &absolute.to_string_lossy(), home),
+            absolute
         );
         let elsewhere = Place::parse("~/notes/shop").unwrap();
         assert_eq!(elsewhere, Place::Elsewhere("~/notes/shop".into()));
