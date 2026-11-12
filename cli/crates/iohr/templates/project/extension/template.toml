@@ -35,13 +35,14 @@ PYTHONPATH = "$DIR/src"
 PYTHONDONTWRITEBYTECODE = "1"
 [variants.vars]
 MATRIX = '''          - { os: ubuntu-24.04, dir: any }'''
-BUILD = '''      - name: Build (one zipapp, for every platform it targets)
+BUILD = '''      - name: Build (one zipapp, for every platform it targets, the panel page beside it)
         run: |
           module="${NAME//-/_}"
           python3 -m zipapp src -m "$module.__main__:main" -p "/usr/bin/env python3" -o "$RUNNER_TEMP/$NAME"
           for p in $(python3 -c 'import tomllib; print(" ".join(tomllib.load(open("extension.toml", "rb"))["targets"]["platforms"]))'); do
-            mkdir -p "dist/bin/${p/\//-}"
+            mkdir -p "dist/bin/${p/\//-}/panel"
             install -m 0755 "$RUNNER_TEMP/$NAME" "dist/bin/${p/\//-}/$NAME"
+            cp panel/index.html "dist/bin/${p/\//-}/panel/index.html"
           done'''
 CI_TEST = '''mkdir -p "$RUNNER_TEMP/state" "$RUNNER_TEMP/cache" && STATE="$RUNNER_TEMP/state" CACHE="$RUNNER_TEMP/cache" PYTHONPATH=src python3 -m unittest discover -s tests'''
 SOURCE = "src/@@MODULE@@/"
@@ -72,12 +73,13 @@ MATRIX = '''          - { os: ubuntu-24.04, dir: any }'''
 BUILD = '''      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
-      - name: Build (the TypeScript as it is, with a launcher, Node runs it)
+      - name: Build (the TypeScript as it is and the panel page, with a launcher, Node runs it)
         run: |
           for p in $(python3 -c 'import tomllib; print(" ".join(tomllib.load(open("extension.toml", "rb"))["targets"]["platforms"]))'); do
             d="dist/bin/${p/\//-}"
-            mkdir -p "$d"
+            mkdir -p "$d/panel"
             cp src/*.ts "$d/"
+            cp panel/index.html "$d/panel/index.html"
             # shellcheck disable=SC2016  # the launcher keeps its $ for run time
             printf '#!/bin/sh\nexec node "$(dirname "$0")/main.ts" "$@"\n' > "$d/$NAME"
             chmod 0755 "$d/$NAME"
@@ -119,7 +121,6 @@ BUILD = '''      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef45430
             mkdir -p "dist/bin/${p/\//-}"
             CGO_ENABLED=0 GOOS="${p%/*}" GOARCH="${p#*/}" go build -trimpath -o "dist/bin/${p/\//-}/$NAME" .
           done'''
-CI_TEST = "go vet ./... && go test ./..."
 SOURCE = "main.go and channel.go"
 NEEDS = ''
 IGNORE = "/@@NAME@@"
@@ -159,7 +160,6 @@ BUILD = '''      - name: Build
           cargo build --release --locked --target "$TARGET"
           mkdir -p "dist/bin/$DIR"
           install -m 0755 "target/$TARGET/release/$NAME" "dist/bin/$DIR/$NAME"'''
-CI_TEST = "cargo test --locked"
 SOURCE = "src/"
 NEEDS = ''
 IGNORE = "target/"
@@ -216,7 +216,6 @@ RELEASE_STEPS = '''      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd
           dart pub get --enforce-lockfile
           mkdir -p dist
           dart compile exe bin/@@MODULE@@.dart -o "dist/@@NAME@@-linux-amd64"'''
-DEPENDABOT_ECOSYSTEM = "pub"
 SOURCE = "bin/ and lib/"
 NEEDS = ''
 IGNORE = ".dart_tool/"
@@ -278,7 +277,6 @@ RELEASE_STEPS = '''      - uses: actions/setup-java@77dd5b2ce225ea11469928ac3178
           mkdir -p classes dist
           javac --release 17 -Xlint:all -d classes -sourcepath src src/@@MODULE@@/Main.java
           jar --create --file "dist/@@NAME@@.jar" --main-class @@MODULE@@.Main -C classes .'''
-DEPENDABOT_ECOSYSTEM = "maven"
 SOURCE = "src/@@MODULE@@/"
 NEEDS = '"java"'
 IGNORE = "*.class"
@@ -312,9 +310,6 @@ test = ["dotnet", "run", "--project", "tests/@@MODULE@@.SelfTest"]
 DOTNET_NOLOGO = "1"
 DOTNET_CLI_TELEMETRY_OPTOUT = "1"
 [variants.vars]
-CI_SETUP = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          dotnet-version: "10.0.x"'''
 MATRIX = '''          - { os: macos-15, dir: darwin-arm64 }'''
 BUILD = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -329,7 +324,6 @@ RELEASE_STEPS = '''      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853db
           dotnet-version: "10.0.x"
       - name: Publish
         run: dotnet publish src/@@MODULE@@ --configuration Release --output dist'''
-DEPENDABOT_ECOSYSTEM = "nuget"
 SOURCE = "src/@@MODULE@@/"
 NEEDS = '"dotnet"'
 IGNORE = "bin/\nobj/"
@@ -361,9 +355,6 @@ build = ["swift", "build", "--build-tests", "--scratch-path", "$CACHE/swift"]
 run = ["swift", "run", "--scratch-path", "$CACHE/swift", "@@NAME@@"]
 test = ["swift", "test", "--scratch-path", "$CACHE/swift"]
 [variants.vars]
-CI_SETUP = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
-        with:
-          swift-version: "6.1"'''
 MATRIX = '''          - { os: macos-15, dir: darwin-arm64 }'''
 BUILD = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
@@ -376,7 +367,6 @@ BUILD = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48fee
           mkdir -p "dist/bin/$DIR/panel"
           install -m 0755 ".build/release/$NAME" "dist/bin/$DIR/$NAME"
           cp panel/index.html "dist/bin/$DIR/panel/index.html"'''
-CI_TEST = "swift test"
 RELEASE_STEPS = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "6.1"
@@ -385,7 +375,6 @@ RELEASE_STEPS = '''      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b8
           swift build --configuration release
           mkdir -p dist
           install -m 0755 ".build/release/@@NAME@@" "dist/@@NAME@@-linux-amd64"'''
-DEPENDABOT_ECOSYSTEM = "swift"
 SOURCE = "Sources/"
 NEEDS = ''
 IGNORE = ".build/\n.swiftpm/"

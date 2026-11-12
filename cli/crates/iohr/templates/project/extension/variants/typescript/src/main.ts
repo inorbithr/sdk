@@ -18,7 +18,9 @@ import { Refused, token } from "./channel.ts";
 export const ID = "@@ID@@";
 export const VERSION = "0.1.0";
 const SCOPES = ["identity:read"];
-const PANEL = path.join(import.meta.dirname, "..", "panel", "index.html");
+// The panel page: beside the program once built (dist/bin/<platform>/panel), else in the project.
+const BESIDE = path.join(import.meta.dirname, "panel", "index.html");
+const PANEL = fs.existsSync(BESIDE) ? BESIDE : path.join(import.meta.dirname, "..", "panel", "index.html");
 
 type Heartbeat = Record<string, string | number | boolean>;
 
