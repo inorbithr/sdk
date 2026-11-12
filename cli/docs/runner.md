@@ -11,6 +11,7 @@ iohr runner api-key set                 # once: your Anthropic API key, no echo
 iohr runner register --name laptop      # this machine; the default name is its host name
 iohr runner run                         # until Ctrl-C
 iohr runner status                      # your runners as the service sees them
+iohr runner revoke rnr_...              # a runner you no longer want
 ```
 
 The runner signs in to InOrbit as your `iohr` profile does, which needs the scopes
@@ -30,6 +31,7 @@ iohr login --scope coordinator:runner,coordinator:read
 | `iohr runner register [--name N] [--capacity 1-32] [--always-on] [--refresh]` | Register this machine. Run again, it says the runner exists; `--refresh` sends the registration again with the key this machine holds, after signing in to another account or to update it, and the runner keeps its id |
 | `iohr runner run [--name N \| --runner ID] [--interval S] [--capacity N] [--kinds K] [--no-auto-upgrade] [--max-beats N]` | The loop, until Ctrl-C. `--runner` is also `IOHR_RUNNER_ID`; `--max-beats` stops after that many answered heartbeats, for scripts |
 | `iohr runner status` | Your runners as the service sees them, and what this machine can run |
+| `iohr runner revoke RUNNER_ID [--force-online]` | Stop a runner for good: it claims and reports nothing after. Checks the id is one of the account's and not already revoked, and refuses a runner that is online unless `--force-online` |
 | `iohr runner config show [--capacity N] [--kinds K] [--no-auto-upgrade]` | The values `run` would use now, each with where it came from; needs no sign-in |
 | `iohr runner gate-report --job J --lease L --token N` | Run a job's check and send a signed report ([below](#gate-report)) |
 | `iohr runner run-key [--label L] [--wait M] [--proof FILE] [--show]` | This machine's run key for approved run asks ([below](#approved-run-asks)) |

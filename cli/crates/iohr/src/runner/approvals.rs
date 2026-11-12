@@ -699,6 +699,22 @@ impl HttpService<'_> {
             .unwrap_or_default())
     }
 
+    /// Revokes a runner (`RevokeRunner`): it claims and reports nothing from then on.
+    /// The caller has checked `runner_id` is a runner id; it goes into the path.
+    pub(crate) async fn revoke_runner(&self, runner_id: &str) -> Result<Value, ServiceError> {
+        let path = format!("/v1/approvals/runners/{runner_id}");
+        let raw = self
+            .api
+            .send(
+                Method::Delete,
+                &path,
+                &[("account_id", self.account.as_str())],
+                None,
+            )
+            .await?;
+        Ok(raw.json().unwrap_or_else(|_| json!({})))
+    }
+
     /// Enrols a run key (`EnrollRunner`) with a device key's `proof` over
     /// [`super::signing::run_enroll_message`] and the run key's own `possession`.
     pub(crate) async fn enroll_run_key(

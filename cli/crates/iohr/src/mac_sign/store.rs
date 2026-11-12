@@ -26,8 +26,11 @@ pub(crate) fn blob(dir: &Path) -> PathBuf {
     dir.join("key.blob")
 }
 
+/// The record's file name in the key's folder.
+const RECORD: &str = "key.json";
+
 fn record(dir: &Path) -> PathBuf {
-    dir.join("key.json")
+    dir.join(RECORD)
 }
 
 /// The enrolled key, if this machine has one.
@@ -53,19 +56,10 @@ pub(crate) fn load(dir: &Path) -> Result<Option<Enrolled>, String> {
 /// # Errors
 /// The folder or the file cannot be written.
 pub(crate) fn save(dir: &Path, key: &Enrolled) -> Result<(), String> {
-    use std::io::Write as _;
-    iohr_auth::create_private_dir(dir)
-        .map_err(|e| format!("cannot make {}: {}", dir.display(), e.kind()))?;
     let path = record(dir);
     let text = serde_json::to_string_pretty(key).map_err(|_| "cannot write the key record")?;
-    let mut o = std::fs::OpenOptions::new();
-    o.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
-    let mut f = o
-        .open(&path)
-        .map_err(|e| format!("cannot write {}: {}", path.display(), e.kind()))?;
-    f.write_all(text.as_bytes())
+    // Written whole beside it and renamed over it, so a reader sees one record or the other.
+    iohr_auth::write_private(dir, RECORD, text.as_bytes())
         .map_err(|e| format!("cannot write {}: {}", path.display(), e.kind()))
 }
 

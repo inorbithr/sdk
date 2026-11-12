@@ -151,7 +151,9 @@ a private channel without a transparency log is checked by the signature alone. 
 lock then records the signer as `key:sha256:<fingerprint>`.
 
 For a mirror that needs a login, `IOHR_EXT_REGISTRY_AUTH=user:password` is sent to that
-registry and the token service it names, and nowhere else. It is never a flag.
+registry, and to the token service it names only when that service is on the registry's
+own origin (scheme, host and port), and nowhere else; a token service elsewhere is asked
+anonymously. It is never a flag.
 
 ## What is not checked
 

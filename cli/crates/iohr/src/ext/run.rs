@@ -1,8 +1,8 @@
 //! `iohr <extension> ...`: run an installed extension as its own process, with the
 //! token channel open for as long as it runs (ADR 0012).
 
-use std::ffi::OsString;
-use std::path::Path;
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 
@@ -155,7 +155,7 @@ pub(crate) async fn run_quiet(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    strip_credentials(&mut c);
+    strip_credentials(&mut c, &child_path_here().0);
     let kept = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
     let sink = Arc::clone(&kept);
     let code = serve(
@@ -324,7 +324,7 @@ pub(crate) async fn start_panel(
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .process_group(0);
-    strip_credentials(&mut c);
+    strip_credentials(&mut c, &child_path_here().0);
     let (pid_tx, pid_rx) = tokio::sync::oneshot::channel::<Option<u32>>();
     let (line_tx, line_rx) = tokio::sync::oneshot::channel::<Result<u16, String>>();
     let (done_tx, done) = tokio::sync::watch::channel(false);
@@ -420,22 +420,62 @@ fn command(program: &Path, args: &[OsString]) -> tokio::process::Command {
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    strip_credentials(&mut c);
+    strip_credentials(&mut c, &child_path_here().0);
     c
 }
 
-/// Whether the environment variable `k` holds an iohr credential.
-pub(crate) fn is_credential(k: &str) -> bool {
-    k == "IOHR_TOKEN" || k.starts_with("IOHR_TOKEN_")
+/// The environment variables an extension never sees, installed or being built: iohr's
+/// credentials, the SDK's credential variables, and the development secrets (given
+/// only as each one's `env`).
+pub(crate) fn hidden(key: &str) -> bool {
+    key == "IOHR_TOKEN"
+        || key.starts_with("IOHR_TOKEN_")
+        || key.starts_with("IOHR_EXT_SECRET_")
+        || key.starts_with("INORBIT_TOKEN")
+        || key.starts_with("INORBIT_KEY_")
 }
 
-/// Credentials stay with iohr: the extension asks the channel instead.
-pub(crate) fn strip_credentials(c: &mut tokio::process::Command) {
+/// `PATH` without the folder this `iohr` is in and without any folder that holds an
+/// `iohr` program: an extension gets tokens from the channel only, with its scopes.
+/// Returns the new `PATH` and the folders left out.
+pub(crate) fn child_path(path: &OsStr, me: Option<&Path>) -> (OsString, Vec<PathBuf>) {
+    let me = me
+        .and_then(|p| p.parent())
+        .and_then(|p| p.canonicalize().ok());
+    let mut kept = Vec::new();
+    let mut dropped = Vec::new();
+    for dir in std::env::split_paths(path) {
+        let canon = dir.canonicalize().ok();
+        let holds_iohr = ["iohr", "iohr.exe"].iter().any(|n| dir.join(n).is_file());
+        if holds_iohr || (canon.is_some() && canon == me) {
+            if !dropped.contains(&dir) {
+                dropped.push(dir);
+            }
+        } else {
+            kept.push(dir);
+        }
+    }
+    (std::env::join_paths(kept).unwrap_or_default(), dropped)
+}
+
+/// [`child_path`] of this process's `PATH` and program.
+pub(crate) fn child_path_here() -> (OsString, Vec<PathBuf>) {
+    child_path(
+        &std::env::var_os("PATH").unwrap_or_default(),
+        std::env::current_exe().ok().as_deref(),
+    )
+}
+
+/// The one place an extension's environment is narrowed, for `iohr <extension>`, init
+/// and `iohr ext dev` alike: every [`hidden`] variable is removed and `PATH` is `path`
+/// (from [`child_path`]). Credentials stay with iohr: the extension asks the channel.
+pub(crate) fn strip_credentials(c: &mut tokio::process::Command, path: &OsStr) {
     for (k, _) in std::env::vars_os() {
-        if k.to_str().is_some_and(is_credential) {
+        if k.to_str().is_some_and(hidden) {
             c.env_remove(k);
         }
     }
+    c.env("PATH", path);
 }
 
 async fn finish(
@@ -588,7 +628,49 @@ pub(crate) async fn serve<M: Minter>(
 
 #[cfg(test)]
 mod tests {
-    use super::panel_port;
+    use std::ffi::OsString;
+
+    use super::{child_path, hidden, panel_port};
+
+    #[test]
+    fn iohr_and_its_folder_leave_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let with = dir.path().join("with");
+        let without = dir.path().join("without");
+        let mine = dir.path().join("mine");
+        for d in [&with, &without, &mine] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(with.join("iohr"), "").unwrap();
+        std::fs::write(mine.join("iohr-dev"), "").unwrap();
+        let path = std::env::join_paths([&with, &without, &mine]).unwrap();
+        let (p, dropped) = child_path(&path, Some(&mine.join("iohr-dev")));
+        assert_eq!(std::env::split_paths(&p).collect::<Vec<_>>(), [without]);
+        assert_eq!(dropped, [with, mine]);
+        assert_eq!(child_path(&OsString::new(), None).1.len(), 0);
+    }
+
+    #[test]
+    fn credentials_and_dev_secrets_are_hidden() {
+        for k in [
+            "IOHR_TOKEN",
+            "IOHR_TOKEN_CI",
+            "IOHR_EXT_SECRET_GITHUB_TOKEN",
+            "INORBIT_TOKEN",
+            "INORBIT_KEY_SECRET",
+        ] {
+            assert!(hidden(k), "{k}");
+        }
+        for k in [
+            "IOHR_TOKENS",
+            "PATH",
+            "HOME",
+            "IOHR_EXT_API",
+            "GITHUB_TOKEN",
+        ] {
+            assert!(!hidden(k), "{k}");
+        }
+    }
 
     #[test]
     fn a_panel_port_is_exactly_one_line_in_range() {

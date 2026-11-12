@@ -9,7 +9,7 @@
 # checks that the log holds the trace id and none of the environment's values. A variant is
 # `live` only when that test passes.
 id = "service"
-description = "An HTTP service with health probes, structured logs, traces and metrics (Go, Python, Rust or TypeScript)"
+description = "An HTTP service with health probes, structured logs, traces and metrics"
 status = "live"
 extends = "floor"
 kind = "service"

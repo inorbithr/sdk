@@ -1639,7 +1639,7 @@ impl ArgvRunner for HostRunner {
             self.env
                 .iter()
                 .filter(|(k, _)| {
-                    k != "KUBECONFIG" && !k.to_str().is_some_and(crate::ext::run::is_credential)
+                    k != "KUBECONFIG" && !k.to_str().is_some_and(crate::ext::run::hidden)
                 })
                 .map(|(k, v)| (k.clone(), v.clone())),
         );
