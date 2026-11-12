@@ -255,6 +255,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "runner",
             "session",
             "stop",
+            "handoff",
             "coordinator",
             "memory",
         ],
