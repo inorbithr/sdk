@@ -1,6 +1,6 @@
 //! The panel's framed chat box (RFC 0212) on the real binary, around a real zsh with the hook
 //! sourced and a fake `claude` on PATH: one Enter sends a `?` or `??` question, the progress row
-//! shows while the answer runs, Esc and a click on Stop end it, Ctrl-] hides and shows the box,
+//! shows while the answer runs, Esc and a click on Stop end it, Option+h hides and shows the box,
 //! a full-screen program has the screen to itself, and `chat = off` leaves the panel as it was.
 //!
 //! `IOHR_TEST_BIN` runs the same steps against another build of the binary (the build before the
@@ -19,7 +19,7 @@ use std::time::Duration;
 
 mod pty;
 
-use pty::{ROWS, Session as Pty, any, row};
+use pty::{ROWS, Session as Pty, any, row, with_history};
 
 fn bin() -> PathBuf {
     std::env::var_os("IOHR_TEST_BIN")
@@ -132,8 +132,22 @@ fn settle(s: &mut Pty, ms: u64) {
 
 const CTRL_RB: &[u8] = &[0x1d];
 
+/// The box's hide button, named `⌥h` on macOS and `Alt+h` elsewhere, in every terminal.
+const HIDE: &str = if cfg!(target_os = "macos") {
+    "⌄ hide ⌥h"
+} else {
+    "⌄ hide Alt+h"
+};
+
+/// The folded chip's text.
+const SHOWS: &str = if cfg!(target_os = "macos") {
+    "⌥h shows the box"
+} else {
+    "Alt+h shows the box"
+};
+
 fn boxed(sc: &vt100::Screen) -> bool {
-    any(sc, "⌄ hide ^]")
+    any(sc, HIDE)
 }
 
 fn folded(sc: &vt100::Screen) -> bool {
@@ -327,7 +341,7 @@ fn a_click_on_hide_and_on_the_chip_folds_and_shows_the_box() {
     let rig = Rig::new("clicks", QUICK);
     let mut s = rig.panel("");
     s.until("the box", |sc| boxed(sc) && ready(sc));
-    let at = find(s.screen.screen(), "⌄ hide ^]").unwrap();
+    let at = find(s.screen.screen(), HIDE).unwrap();
     click(&mut s, (at.0, at.1 + 2));
     s.until("the box folded", |sc| folded(sc) && !boxed(sc));
     let chip = find(s.screen.screen(), "shows the box").unwrap();
@@ -545,30 +559,28 @@ const OPT_H: [&[u8]; 3] = [b"\x1bh", "\u{2d9}".as_bytes(), b"\x1b[104;3u"];
 fn option_h_hides_the_box_and_brings_it_back_in_each_of_its_forms() {
     let rig = Rig::new("opth", QUICK);
     let mut s = rig.panel_in("", "xterm");
-    s.until("the box, naming option h", |sc| {
-        any(sc, "⌄ hide ⌥h") && ready(sc)
-    });
+    s.until("the box, naming option h", |sc| any(sc, HIDE) && ready(sc));
     for form in OPT_H {
         s.send(form);
         s.until("the box folded to its chip", |sc| {
             folded(sc) && !any(sc, "⌄ hide")
         });
-        assert!(any(s.screen.screen(), "⌥h shows the box"));
+        assert!(any(s.screen.screen(), SHOWS));
         s.send(form);
-        s.until("the box back", |sc| any(sc, "⌄ hide ⌥h") && !folded(sc));
+        s.until("the box back", |sc| any(sc, HIDE) && !folded(sc));
     }
     // Ctrl-] stays an alias.
     s.send(CTRL_RB);
     s.until("the box folded by the alias", folded);
     s.send(CTRL_RB);
-    s.until("the box back by the alias", |sc| any(sc, "⌄ hide ⌥h"));
+    s.until("the box back by the alias", |sc| any(sc, HIDE));
 }
 
 #[test]
 fn escape_and_h_in_two_reads_is_option_h_and_not_the_shells() {
     let rig = Rig::new("opthsplit", QUICK);
     let mut s = rig.panel_in("", "xterm");
-    s.until("the box", |sc| any(sc, "⌄ hide ⌥h") && ready(sc));
+    s.until("the box", |sc| any(sc, HIDE) && ready(sc));
     fresh(&mut s);
     s.send(b"\x1b");
     std::thread::sleep(Duration::from_millis(5));
@@ -582,7 +594,7 @@ fn escape_and_h_in_two_reads_is_option_h_and_not_the_shells() {
 fn a_plain_h_is_typing_at_the_prompt_and_in_the_box() {
     let rig = Rig::new("opthplain", QUICK);
     let mut s = rig.panel_in("", "xterm");
-    s.until("the box", |sc| any(sc, "⌄ hide ⌥h") && ready(sc));
+    s.until("the box", |sc| any(sc, HIDE) && ready(sc));
     fresh(&mut s);
     s.send(b"echo h");
     settle(&mut s, 200);
@@ -602,7 +614,7 @@ fn a_plain_h_is_typing_at_the_prompt_and_in_the_box() {
 fn a_lone_escape_is_still_the_shells_after_the_hold() {
     let rig = Rig::new("opthesc", QUICK);
     let mut s = rig.panel_in("", "xterm");
-    s.until("the box", |sc| any(sc, "⌄ hide ⌥h") && ready(sc));
+    s.until("the box", |sc| any(sc, HIDE) && ready(sc));
     fresh(&mut s);
     // Esc, then (after the hold) h: the shell's meta-h (run-help), not the box's key.
     s.send(b"echo x");
@@ -611,4 +623,48 @@ fn a_lone_escape_is_still_the_shells_after_the_hold() {
     s.send(b"h");
     settle(&mut s, 300);
     assert!(!folded(s.screen.screen()), "a late h is not Option+h");
+}
+
+/// The box's header, its sent row and its waiting row, each held once on the screen and never
+/// in the lines that scrolled off, while a command prints far more than a screenful.
+fn assert_box_once(raw: &[u8], what: &str) {
+    let (off, screen) = with_history(raw, 5000);
+    for mark in [HIDE, "a command is running"] {
+        let on = screen.iter().filter(|r| r.contains(mark)).count();
+        let gone = off.iter().filter(|r| r.contains(mark)).count();
+        assert!(
+            on <= 1,
+            "{what}: {mark:?} {on} times on the screen: {screen:#?}"
+        );
+        assert_eq!(
+            gone, 0,
+            "{what}: {mark:?} scrolled into the history: {off:#?}"
+        );
+    }
+}
+
+#[test]
+fn output_scrolling_past_the_box_never_stacks_it() {
+    let rig = Rig::new("stack", QUICK);
+    let mut s = rig.panel("");
+    s.until("the box at the prompt", |sc| boxed(sc) && ready(sc));
+    // A command that prints in bursts, a few screens' worth, with the box up.
+    line(
+        &mut s,
+        "for i in $(seq 1 150); do echo card-$i; [ $((i % 10)) = 0 ] && sleep 0.05; done; echo FIN\"\"ISHED",
+    );
+    s.until("the output", |sc| any(sc, "FINISHED"));
+    settle(&mut s, 300);
+    assert_box_once(&s.raw, "a command's output");
+    // And a question answered while the box shows it.
+    s.until("the box back", |sc| boxed(sc) && ready(sc));
+    s.send(b"?");
+    s.until("the box taking the keys", |sc| {
+        any(sc, "ask anything about this shell")
+    });
+    s.send(b"what is this project about");
+    s.send(b"\r");
+    s.until("the answer", |sc| any(sc, "ANSWER-ONE"));
+    settle(&mut s, 300);
+    assert_box_once(&s.raw, "an answered question");
 }

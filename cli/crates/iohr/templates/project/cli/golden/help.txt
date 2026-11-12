@@ -1,0 +1,11 @@
+Usage: @@NAME@@ [--json] <command>
+
+Commands:
+  greet [NAME]   Say hello to NAME (default: world)
+  version        Print the version and the commit it was built from
+
+Options:
+      --json     Machine-readable output
+  -h, --help     Show this help
+
+Exit codes: 0 success, 1 failure, 2 usage error.

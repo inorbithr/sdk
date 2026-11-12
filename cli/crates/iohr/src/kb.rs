@@ -27,12 +27,21 @@ use std::time::Duration;
 use url::Url;
 
 pub mod chunk;
+#[cfg(unix)]
+pub mod claims;
 pub mod clean;
 pub mod embed;
 pub mod entities;
 pub mod fetch;
+#[cfg(not(unix))]
+mod claims {
+    /// Evidence needs the index, which is unix-only; the shape exists so callers compile.
+    pub struct PageEvidence;
+}
 #[cfg(unix)]
 pub mod index;
+#[cfg(unix)]
+pub mod migrate;
 pub mod model;
 pub mod robots;
 
@@ -95,6 +104,20 @@ mod index_types {
 
 /// Where a project keeps its crawls.
 pub const DIR: &str = ".inorbit/crawl";
+
+/// The folder a crawl keeps its pages and index in: [`DIR`] unless the project keeps its
+/// knowledge in the home folder (`[project] data`, see [`crate::project::place`]).
+#[must_use]
+pub fn crawl_dir(root: &Path) -> PathBuf {
+    crate::project::place::Layout::of(root).crawl()
+}
+
+/// [`crawl_dir`] as a person reads it: `.inorbit/crawl`, or the full path when it is in home.
+#[must_use]
+pub fn crawl_shown(root: &Path) -> String {
+    let l = crate::project::place::Layout::of(root);
+    l.shown(&l.crawl())
+}
 
 /// The message on a build without the `DuckDB` index.
 #[cfg(not(unix))]
@@ -167,6 +190,8 @@ pub struct Report {
     pub embeddings: String,
     /// Why the index was not written, when it was not.
     pub index_error: Option<String>,
+    /// The crawl folder as a person reads it (empty reads as [`DIR`]).
+    pub kept_in: String,
 }
 
 impl Report {
@@ -206,7 +231,12 @@ impl Report {
             None => {
                 let _ = write!(
                     s,
-                    "\n  index: {DIR}/kb.duckdb   ask: iohr atlas search \"...\" --site {site}   embeddings: {}",
+                    "\n  index: {}/kb.duckdb   ask: iohr atlas search \"...\" --site {site}   embeddings: {}",
+                    if self.kept_in.is_empty() {
+                        DIR
+                    } else {
+                        &self.kept_in
+                    },
                     self.embeddings
                 );
             }
@@ -369,7 +399,8 @@ pub async fn build(
     o: &Opts,
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> Result<Built, String> {
-    let dir = root.join(DIR).join(site);
+    ensure_crawl_dir(root)?;
+    let dir = crawl_dir(root).join(site);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let urls: Vec<String> = input.iter().map(|p| p.url.clone()).collect();
     let reach = fetch::Reach {
@@ -380,15 +411,23 @@ pub async fn build(
         deadline: o.deadline,
     };
     let got = fetch::collect(&reach, &urls, progress).await;
-    let html: Vec<(String, String)> = got
-        .pages
-        .iter()
-        .filter_map(|g| {
-            std::fs::read(&g.path)
-                .ok()
-                .map(|b| (g.url.clone(), String::from_utf8_lossy(&b).into_owned()))
-        })
-        .collect();
+    let mut html: Vec<(String, String)> = Vec::new();
+    let mut evidence: Vec<claims::PageEvidence> = Vec::new();
+    for g in &got.pages {
+        let Ok(bytes) = std::fs::read(&g.path) else {
+            continue;
+        };
+        html.push((g.url.clone(), String::from_utf8_lossy(&bytes).into_owned()));
+        #[cfg(unix)]
+        {
+            // The raw bytes are the evidence; the digest comes from them here, never from a
+            // later copy. A page that cannot be made evidence still indexes, with no claims.
+            let cache = g.path.strip_prefix(crawl_dir(root)).unwrap_or(&g.path);
+            if let Ok(e) = claims::PageEvidence::read(&g.url, &cache.to_string_lossy(), &bytes) {
+                evidence.push(e);
+            }
+        }
+    }
     let mut docs = docs_of(input, &html);
     follow_redirects(&mut docs, &o.redirects);
     let shells = docs
@@ -401,7 +440,7 @@ pub async fn build(
     let all = docs.iter().flat_map(|d| d.chunked.chunks.iter());
     let tokens: usize = all.clone().map(|c| c.tokens).sum();
     let est: usize = all.map(|c| c.est_model_tokens).sum();
-    let index_error = write_index(root, site, &docs, &m, &o.crawled).err();
+    let index_error = write_index(root, site, &docs, &m, &o.crawled, &evidence).err();
     Ok(Built {
         jsonl: model::jsonl(site, &o.crawled, &m),
         study: model::study(site, &o.crawled, docs.len(), chunks, tokens, &m),
@@ -423,6 +462,7 @@ pub async fn build(
             shells,
             embeddings: embed::STATUS.to_owned(),
             index_error,
+            kept_in: crawl_shown(root),
         },
     })
 }
@@ -430,7 +470,7 @@ pub async fn build(
 /// Where the index is.
 #[must_use]
 pub fn index_path(root: &Path) -> PathBuf {
-    root.join(DIR).join("kb.duckdb")
+    crawl_dir(root).join("kb.duckdb")
 }
 
 #[cfg(unix)]
@@ -440,15 +480,15 @@ fn write_index(
     docs: &[Doc],
     m: &model::Model,
     crawled: &str,
+    evidence: &[claims::PageEvidence],
 ) -> Result<(), String> {
-    index::Store::open(&index_path(root))?.replace(
-        site,
-        docs,
-        m,
+    let stamp = index::Stamp {
         crawled,
-        &crate::front::today(),
-        embed::STATUS,
-    )
+        built: &crate::front::today(),
+        embeddings: embed::STATUS,
+    };
+    index::Store::open(&index_path(root))?.replace(site, docs, m, &stamp, evidence)?;
+    Ok(())
 }
 
 #[cfg(not(unix))]
@@ -458,8 +498,27 @@ fn write_index(
     _docs: &[Doc],
     _m: &model::Model,
     _crawled: &str,
+    _evidence: &[claims::PageEvidence],
 ) -> Result<(), String> {
     Err(UNAVAILABLE.to_owned())
+}
+
+/// Makes the crawl folder for its owner alone (or checks the one there): the pages, the index
+/// and what was read from them are the project's own and not for other accounts on the machine.
+///
+/// # Errors
+///
+/// A message when the folder is not ours alone, or cannot be made.
+pub fn ensure_crawl_dir(root: &Path) -> Result<(), String> {
+    let dir = crawl_dir(root);
+    #[cfg(unix)]
+    {
+        crate::safe_open::private_dir(&dir, true).map_err(|e| e.to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))
+    }
 }
 
 /// The message when nothing has been indexed.
@@ -504,6 +563,30 @@ pub fn facts(
     limit: usize,
 ) -> Result<Vec<FactRow>, String> {
     reader(root)?.facts(site, predicate, grep, limit)
+}
+
+/// The claims the crawl made from facts, newest first (RFC 0218).
+///
+/// # Errors
+///
+/// A message when there is no index or it cannot be read.
+#[cfg(unix)]
+pub fn claims(
+    root: &Path,
+    site: Option<&str>,
+    limit: usize,
+) -> Result<Vec<claims::ClaimRow>, String> {
+    reader(root)?.claims(site, limit)
+}
+
+/// Why one claim is believed: its proof tree and the evidence it ends at.
+///
+/// # Errors
+///
+/// A message when there is no index, or no such claim.
+#[cfg(unix)]
+pub fn prove(root: &Path, id: &str) -> Result<claims::Proof, String> {
+    reader(root)?.proof(id)
 }
 
 /// The sites in the index with their counts.

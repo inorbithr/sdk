@@ -87,6 +87,30 @@ fn the_short_help_is_one_line_per_command_and_the_long_help_is_longer() {
 }
 
 #[test]
+fn the_root_help_ends_with_examples_a_start_and_every_exit_code() {
+    let long = plain(&["--help"]);
+    let tail = &long[long.find("Examples:").expect("root examples")..];
+    assert!(tail.contains("iohr whoami"), "{tail}");
+    assert!(
+        tail.contains("Get started: iohr login, then iohr doctor"),
+        "{tail}"
+    );
+    for code in ["0 ok", "2 usage", "4 forbidden", "75 a runner"] {
+        assert!(tail.contains(code), "{code}: {tail}");
+    }
+}
+
+#[test]
+fn attribution_flags_show_only_in_the_long_help() {
+    let short = plain(&["-h"]);
+    let long = plain(&["--help"]);
+    for flag in ["--sign-in", "--via-role", "--via-session", "--via-job"] {
+        assert!(!short.contains(flag), "{flag} in -h: {short}");
+        assert!(long.contains(flag), "{flag} missing from --help");
+    }
+}
+
+#[test]
 fn no_help_line_names_an_rfc_prd_or_adr_number() {
     let t = plain(&["--help"]);
     for word in ["RFC 0", "PRD 0", "ADR 0"] {

@@ -208,10 +208,11 @@ draft stays when the keys leave: Esc hands them back to the terminal with the ha
 question kept (it shows dimmed, tagged `draft`), `Ctrl-C` throws the draft away, and `Ctrl-Space`,
 `?` or a click on the input bring you back to it. A sent question starts the next line empty. The
 switch waits while an answer runs or a command is running (the box does not hold keys the shell
-would need). `Ctrl-]` (or `^G` then `c`, or a
-click on `hide`) folds the box to a corner chip and brings it back; the chip is a click away, and
-`[panel] chat = "hidden"` or `"off"` (or `IOHR_PANEL_CHAT`) sets the start. `Ctrl-]` is zsh's
-find-character key and is rebound only inside the panel. A full-screen program has the whole
+would need). Option+h (`⌥h`; Alt+h on Linux) folds the box to a corner chip and brings it back, in
+every terminal, and the box names it so. So do `^G` then `c` and a click on `hide`; the chip is a
+click away, and `[panel] chat = "hidden"` or `"off"` (or `IOHR_PANEL_CHAT`) sets the start.
+`Ctrl-]` does the same, for a keyboard layout where Option+h types another character; it is
+rebound only inside the panel. A full-screen program has the whole
 screen: the box steps aside and comes back after it. While the box shows, the panel takes the
 mouse for its buttons, so select text with Option or Shift held.
 

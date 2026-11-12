@@ -8,6 +8,7 @@ use crate::commands::login::storage_name;
 use crate::context::{Ctx, Prompts, blocking, session_for};
 use crate::error::Error;
 use crate::output::Out;
+use crate::ui::Listed;
 
 pub(crate) async fn run(g: &Global, env: &Env, cmd: ProfileCommand, out: Out) -> Result<(), Error> {
     let mut ctx = Ctx::load(g)?;
@@ -42,7 +43,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProfileCommand, out: Out) ->
                     ]
                 })
                 .collect();
-            Out::table(&["PROFILE", "KIND", "ACCOUNT", "KEPT IN"], &rows);
+            Out::list(
+                &["PROFILE", "KIND", "ACCOUNT", "KEPT IN"],
+                &rows,
+                &Listed::new("profile", "profiles"),
+            );
             Ok(())
         }
         ProfileCommand::Use { name } => {

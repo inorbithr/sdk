@@ -387,6 +387,9 @@ sync = false
 [panel]                             # the floating panel (section 4.8)
 mouse = "menu"
 chat = "on"
+
+[doctor]                            # `iohr doctor` and the `?` card (section 4.9)
+auto_fix = false
 ```
 
 Rules:
@@ -838,6 +841,20 @@ zsh's find-character key, so the panel rebinds it only inside itself and only wh
 While the box or its chip shows, the panel takes mouse reports for them (the box's buttons need
 them), so drag-to-select needs Option (Terminal.app, iTerm2) or Shift; with `chat = "off"` the
 `mouse` setting alone decides, as before.
+
+### 4.9 The doctor table
+
+`iohr doctor` checks this machine for the known problems and says how to fix each. It has one
+setting.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `auto_fix` | `true`: the safe fixes run on their own whenever `iohr doctor` runs, and the `?` card tells you what it found and what it did; `false`: a fix is shown, never run | `false` | `iohr doctor`, `iohr ask` (`?`, `??`) |
+
+A safe fix only restarts something that is already down (today: the MCP bridge's launchd job).
+Every other fix (signing in again, freeing disk, repairing `config.toml`) is shown and never
+run. `iohr doctor --fix` runs the safe fixes once without the setting. The file is read, never
+written by `iohr`: you edit it.
 
 ## 5. Credentials
 

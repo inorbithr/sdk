@@ -1,0 +1,23 @@
+{
+  "scope": "canvas",
+  "title": "Canvas",
+  "page": "canvas",
+  "where": "On a canvas, while it has the focus",
+  "rows": [
+    { "id": "canvas-undo", "label": "Undo", "accel": "CmdOrCtrl+Z" },
+    { "id": "canvas-redo", "label": "Redo", "accel": "CmdOrCtrl+Shift+Z" },
+    { "id": "canvas-fit-home", "label": "Fit to home", "accel": "Shift+1" },
+    { "id": "canvas-fit-selection", "label": "Fit to the selection", "accel": "Shift+2" },
+    { "id": "canvas-fit-all", "label": "Fit everything", "accel": "Shift+3" },
+    { "id": "canvas-delete", "label": "Delete the selection", "accel": "Backspace" },
+    { "id": "canvas-note", "label": "Add a sticky note", "accel": "N" },
+    { "id": "canvas-frame", "label": "Add a document", "accel": "M" },
+    { "id": "canvas-arrow", "label": "Add an arrow", "accel": "A" },
+    { "id": "canvas-comment", "label": "Add a comment", "accel": "C" },
+    { "id": "canvas-ask", "label": "Ask", "accel": "Q" },
+    { "id": "canvas-suggest", "label": "Suggest a change", "accel": "U" },
+    { "id": "canvas-panel", "label": "Show or hide the side panel", "accel": "Alt+P" },
+    { "id": "canvas-edit", "label": "Edit the selected note, frame or shape", "accel": "Enter" },
+    { "id": "canvas-cancel", "label": "Cancel the tool or leave edit", "accel": "Escape" }
+  ]
+}

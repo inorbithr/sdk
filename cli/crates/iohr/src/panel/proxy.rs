@@ -44,6 +44,7 @@ use crate::card::Look;
 use crate::cli::Global;
 use crate::commands::asks::{self, PanelAsk, PanelAuto};
 use crate::commands::coordinator;
+use crate::commands::incident_settings::{self, PanelIncidents};
 use crate::commands::session::{Joined, join_watched};
 use crate::error::Error;
 use crate::session::link;
@@ -290,6 +291,9 @@ struct Proxy {
     chip_on: Option<Rect>,
     /// The start of a report from the shell a chunk ended in the middle of.
     osc_held: Vec<u8>,
+    /// The start of a `CSI` the shell's output ended in the middle of, held back from the
+    /// terminal until the rest comes (so a scroll-region reset is never seen half).
+    csi_held: Vec<u8>,
     /// Bytes the proxy owes the shell's input (a `?` the box could not take).
     to_shell: Vec<u8>,
     /// The size the shell's pty has now: the rows are the screen's less the box's.
@@ -316,6 +320,7 @@ impl Proxy {
             reserved: false,
             chip_on: None,
             osc_held: Vec::new(),
+            csi_held: Vec::new(),
             to_shell: Vec::new(),
             pty_size: (rows, cols),
             chat_file: None,
@@ -488,7 +493,15 @@ impl Proxy {
 
     /// A change of the panel with no output from the shell.
     fn redraw(&mut self) -> Vec<u8> {
+        self.redraw_lifting(false)
+    }
+
+    /// `redraw`, putting back what the panel covers first when `lift` (a resize).
+    fn redraw_lifting(&mut self, lift: bool) -> Vec<u8> {
         let mut out = SYNC_ON.to_vec();
+        if lift {
+            out.extend(self.lift());
+        }
         out.extend(self.region());
         out.extend(self.sync());
         out.extend(self.mouse_sync());
@@ -509,11 +522,10 @@ impl Proxy {
         self.rows = rows;
         self.cols = cols;
         self.screen.resize(rows, cols);
-        // The terminal reflowed what it had: whatever it holds of the panel is the shell's to
-        // redraw; the next paint is a fresh one.
-        self.on_screen = None;
-        self.chip_on = None;
-        out.extend(self.redraw());
+        // The terminal keeps the painted cells where they were and the shell redraws only its
+        // prompt, so the old panel and chip rects are put back from the resized model (clipped
+        // to the new size) in the same update that paints them again.
+        out.extend(self.redraw_lifting(true));
         out
     }
 }
@@ -611,6 +623,7 @@ struct Session {
     deny_fetch: Option<Fetch<(String, Result<(), Error>)>>,
     workloads_fetch: Option<Fetch<Result<Snapshot, Error>>>,
     auto_fetch: Option<Fetch<Result<PanelAuto, Error>>>,
+    incidents_fetch: Option<Fetch<Result<PanelIncidents, Error>>>,
     /// One action at a time: a question, a message, a stop, auto mode on or off.
     act_fetch: Option<Fetch<Result<String, String>>>,
     /// One page read at a time: an ask's details, a transcript.
@@ -640,6 +653,13 @@ impl Session {
         }
         if !self.stub && self.auto_fetch.is_none() {
             self.auto_fetch = Some(read_auto(self.g.clone(), self.env.clone()));
+        }
+        // Only while the menu or its view is open: the setting changes rarely.
+        if !self.stub
+            && self.incidents_fetch.is_none()
+            && matches!(self.proxy.model.view, View::Menu | View::Incidents)
+        {
+            self.incidents_fetch = Some(read_incidents(self.g.clone(), self.env.clone()));
         }
     }
 
@@ -736,6 +756,20 @@ impl Session {
                         asks::auto_revoke(&g, &env)
                             .await
                             .map(|()| "auto mode is off".to_owned())
+                    }));
+                }
+            }
+            Effect::IncidentsAutoResolve(on) => {
+                if self.stub {
+                    self.proxy
+                        .model
+                        .acted(Ok("stub: nothing was changed".into()));
+                } else {
+                    let (g, env) = (self.g.clone(), self.env.clone());
+                    self.act(limited(async move {
+                        incident_settings::set_auto_resolve(&g, &env, on)
+                            .await
+                            .map(|()| format!("auto-resolve is {}", if on { "on" } else { "off" }))
                     }));
                 }
             }
@@ -929,6 +963,11 @@ impl Session {
                 .deny_failed(e.to_string().lines().next().unwrap_or("")),
         }
         self.redraw();
+    }
+
+    fn incidents_done(&mut self, result: Result<PanelIncidents, Error>) {
+        self.proxy.model.set_incidents(source_of(result));
+        write_terminal(&self.proxy.redraw());
     }
 
     fn auto_done(&mut self, result: Result<PanelAuto, Error>) {
@@ -1190,6 +1229,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         deny_fetch: None,
         workloads_fetch: None,
         auto_fetch: None,
+        incidents_fetch: None,
         act_fetch: None,
         read_fetch: None,
         host_gone: config.host_gone.take().map(host_closed),
@@ -1199,10 +1239,6 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         rejoin_fetch: None,
         esc_held: None,
     };
-    session
-        .proxy
-        .chat
-        .set_hide_label(settings.open_key.hide_label());
     session.redraw();
     session.refresh();
 
@@ -1248,6 +1284,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
             result = poll(&mut session.workloads_fetch) => session.workloads_done(result),
             (id, result) = poll(&mut session.deny_fetch) => session.deny_done(&id, result),
             result = poll(&mut session.auto_fetch) => session.auto_done(result),
+            result = poll(&mut session.incidents_fetch) => session.incidents_done(result),
             result = poll(&mut session.act_fetch) => session.act_done(result),
             result = poll(&mut session.read_fetch) => session.read_done(result),
             () = poll(&mut session.host_gone) => session.host_ended(),
@@ -1298,6 +1335,15 @@ fn read_limited(
         match tokio::time::timeout(FETCH_LIMIT, f).await {
             Ok(r) => r.map_err(|e| e.to_string().lines().next().unwrap_or("").to_owned()),
             Err(_) => Err("it took too long".to_owned()),
+        }
+    })
+}
+
+fn read_incidents(g: Global, env: Env) -> Fetch<Result<PanelIncidents, Error>> {
+    Box::pin(async move {
+        match tokio::time::timeout(FETCH_LIMIT, incident_settings::read(&g, &env)).await {
+            Ok(r) => r,
+            Err(_) => Err(Error::Failed("the incident settings took too long".into())),
         }
     })
 }
@@ -1372,6 +1418,141 @@ mod tests {
             truecolor: true,
         };
         Proxy::new(Model::new(true), 24, 100, look, mouse)
+    }
+
+    /// The rows of a terminal of `rows` x `cols` that has been fed `bytes`.
+    fn rows_of(rows: u16, cols: u16, bytes: &[&[u8]]) -> Vec<String> {
+        let mut parser = vt100::Parser::new(rows, cols, 0);
+        for b in bytes {
+            parser.process(b);
+        }
+        parser.screen().rows(0, cols).collect()
+    }
+
+    #[test]
+    fn a_resize_puts_back_what_the_old_panel_covered() {
+        let (mut p, mut term_bytes) = (proxy(MouseMode::Menu), Vec::new());
+        p.resize(24, 60);
+        // The shell's output fills the top row; the terminal gets it and the panel on top.
+        term_bytes.extend(p.child_output(&b"x".repeat(60)));
+        assert!(p.on_screen.is_some(), "the panel is painted");
+        let narrow = rows_of(24, 60, &[&term_bytes]);
+        let badge = narrow.iter().position(|r| r.contains("iohr")).unwrap();
+        let old_at = narrow[badge].find("iohr").unwrap();
+        // A wider terminal keeps the cells as they were.
+        let mut wide = vt100::Parser::new(24, 60, 0);
+        wide.process(&term_bytes);
+        wide.screen_mut().set_size(24, 100);
+        let mut after = Vec::new();
+        after.extend(p.resize(24, 100));
+        wide.process(&after);
+        let rows: Vec<String> = wide.screen().rows(0, 100).collect();
+        assert_eq!(
+            rows.iter().filter(|r| r.contains("iohr")).count(),
+            1,
+            "one badge, the live one: {rows:?}"
+        );
+        let new_at = rows[badge].find("iohr").unwrap();
+        assert!(new_at > old_at, "at the new corner, not the old one");
+    }
+
+    /// A proxy with the chat box open (the hook has spoken), on a terminal of `rows` x `cols`.
+    fn boxed_proxy(rows: usize, cols: usize) -> Proxy {
+        let look = Look {
+            fancy: true,
+            truecolor: true,
+        };
+        let mut p = Proxy::new(Model::new(true), rows, cols, look, MouseMode::Menu).with_chat(
+            boxed::Setting::On,
+            Some(std::path::PathBuf::from("/nonexistent/q")),
+        );
+        p.chat.message(
+            chat::Msg::Idle {
+                mode: "manual".into(),
+                ring: vec!["manual".into()],
+            },
+            std::time::Instant::now(),
+        );
+        p
+    }
+
+    /// Every line the terminal holds, scrolled-off ones first, then the screen's rows.
+    fn history_and_screen(term: &mut vt100::Parser) -> (Vec<String>, Vec<String>) {
+        let (rows, cols) = term.screen().size();
+        let mut off = Vec::new();
+        let mut at = usize::MAX;
+        term.screen_mut().set_scrollback(usize::MAX);
+        let top = term.screen().scrollback();
+        // Read the scrolled-off lines a screen's height at a time from the oldest.
+        let mut seen = 0;
+        while seen < top {
+            at = top - seen;
+            term.screen_mut().set_scrollback(at);
+            let page: Vec<String> = term.screen().rows(0, cols).collect();
+            let take = usize::from(rows).min(top - seen);
+            off.extend(page.into_iter().take(take));
+            seen += take;
+        }
+        let _ = at;
+        term.screen_mut().set_scrollback(0);
+        (off, term.screen().rows(0, cols).collect())
+    }
+
+    fn count(rows: &[String], needle: &str) -> usize {
+        rows.iter().filter(|r| r.contains(needle)).count()
+    }
+
+    #[test]
+    fn card_output_scrolling_past_the_box_never_stacks_it() {
+        let mut p = boxed_proxy(24, 100);
+        let mut term = vt100::Parser::new(24, 100, 1000);
+        let feed = |term: &mut vt100::Parser, bytes: Vec<u8>| term.process(&bytes);
+        // The hook's first report opens the box and reserves its rows.
+        feed(&mut term, p.shell_output(b"$ "));
+        assert!(p.reserved, "the box's rows are reserved");
+        // A question was sent: the box shows it and the command that runs.
+        p.chat.message(chat::Msg::Busy, std::time::Instant::now());
+        feed(&mut term, p.redraw());
+        // Cards print line by line, a few times the screen's height, in small chunks.
+        for round in 0..5 {
+            for i in 0..30 {
+                let line = format!("\x1b[1mcard {round}.{i}\x1b[0m\r\n");
+                feed(&mut term, p.shell_output(line.as_bytes()));
+            }
+            // The tick repaints the box between chunks.
+            feed(&mut term, p.redraw());
+        }
+        let (off, screen) = history_and_screen(&mut term);
+        assert_eq!(count(&screen, "ask · manual"), 1, "one header: {screen:?}");
+        assert_eq!(count(&screen, "a command is running"), 1, "{screen:?}");
+        assert_eq!(count(&off, "ask · manual"), 0, "none scrolled off: {off:?}");
+        assert_eq!(count(&off, "a command is running"), 0, "{off:?}");
+    }
+
+    #[test]
+    fn a_scroll_region_reset_never_frees_the_box_s_rows() {
+        let mut p = boxed_proxy(24, 100);
+        let mut term = vt100::Parser::new(24, 100, 1000);
+        term.process(&p.shell_output(b"$ "));
+        assert!(p.reserved);
+        p.chat.message(chat::Msg::Busy, std::time::Instant::now());
+        term.process(&p.redraw());
+        // A reset in one piece, split across two reads, with the full height named, and with
+        // a top row: none may reach the terminal as the whole screen.
+        let chunks: [&[u8]; 6] = [b"\x1b[r", b"\x1b[", b"r", b"\x1b[1;24r", b"\x1b[2;", b"30r"];
+        for (n, c) in chunks.iter().enumerate() {
+            term.process(&p.shell_output(c));
+            for i in 0..40 {
+                let line = format!("line {n}.{i}\r\n");
+                term.process(&p.shell_output(line.as_bytes()));
+            }
+        }
+        term.process(&p.redraw());
+        let (off, screen) = history_and_screen(&mut term);
+        assert_eq!(count(&screen, "ask · manual"), 1, "{screen:?}");
+        assert_eq!(count(&off, "ask · manual"), 0, "{off:?}");
+        assert_eq!(count(&screen, "a command is running"), 1, "{screen:?}");
+        assert_eq!(count(&off, "a command is running"), 0, "{off:?}");
     }
 
     fn has(bytes: &[u8], needle: &[u8]) -> bool {
