@@ -10,6 +10,7 @@ use crate::commands::day;
 use crate::context::{Session, account, session};
 use crate::error::Error;
 use crate::output::Out;
+use crate::ui::Listed;
 
 const PAGE: usize = 100;
 
@@ -116,9 +117,10 @@ async fn list(
     }
     let now = OffsetDateTime::now_utc();
     let rows: Vec<Vec<String>> = tokens.iter().map(|t| row(t, now)).collect();
-    Out::table(
+    Out::list(
         &["ID", "NAME", "SCOPES", "EXPIRES", "LAST USED", "STATE"],
         &rows,
+        &Listed::new("token", "tokens").next("new one", "iohr token create"),
     );
     Ok(())
 }

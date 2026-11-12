@@ -7,8 +7,30 @@
 id = "blank"
 description = "A starter project in your language: one runnable file, Roles and memory"
 status = "live"
+extends = "base"
 default_variant = "python"
 agent_prompt = "This folder is a fresh project in @@LANGUAGE_LABEL@@ (@@SOURCE@@). Build what is described below by editing this folder. Keep it free of secrets, and keep the test passing (@@RUN_TEST@@)."
+
+# Blank keeps no CI unless you ask: `--ci github` adds the base's workflow.
+[[questions]]
+key = "ci"
+prompt = "Keep GitHub Actions files?"
+type = "choice"
+choices = ["github", "none"]
+default = "none"
+hidden = true
+
+[[questions]]
+key = "security_contact"
+prompt = "Security contact"
+default = "CHANGE-ME: set a security contact before you publish this project"
+hidden = true
+
+[[questions]]
+key = "code_owner"
+prompt = "Code owner"
+default = "@CHANGE-ME"
+hidden = true
 
 [[variants]]
 id = "python"
@@ -93,6 +115,9 @@ IGNORE = ".DS_Store"
 RUN_TEST = "`iohr atlas sync --dry-run`"
 README_TEST = "iohr atlas sync --dry-run"
 LAYOUT = "- `atlas/`: the project's documents: PRDs, RFCs, ADRs and studies, each with front matter.\n- `.inorbit/memory/`: what the project's agents remember, one file per memory."
+CI_SETUP = '''      - name: Documents only, no toolchain to set up
+        run: echo "nothing to install"'''
+CI_TEST = "test -d atlas"
 
 [[steps]]
 name = "git"

@@ -1,6 +1,5 @@
 //! The `iohr` binary: parse, run, map the outcome to an exit code.
 
-use std::io::Write as _;
 use std::process::ExitCode;
 
 use clap::FromArgMatches as _;
@@ -9,10 +8,10 @@ use iohr::{Env, refuse_secrets_in_args, run};
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
-    if let Err(e) = refuse_secrets_in_args(&args) {
-        return fail(&e);
-    }
     let json = args.iter().any(|a| a == "--json");
+    if let Err(e) = refuse_secrets_in_args(&args) {
+        return iohr::report_failure(json, &e);
+    }
     let parsed = iohr::cli::command(json)
         .try_get_matches_from(&args)
         .and_then(|matches| Cli::from_arg_matches(&matches));
@@ -36,21 +35,15 @@ fn main() -> ExitCode {
         .build()
     {
         Ok(rt) => rt,
-        Err(e) => return fail(&iohr::Error::Failed(format!("cannot start: {e}"))),
+        Err(e) => {
+            return iohr::report_failure(json, &iohr::Error::Failed(format!("cannot start: {e}")));
+        }
     };
     match runtime.block_on(run(cli, Env::from_process())) {
         Ok(()) => ExitCode::SUCCESS,
         Err(iohr::Error::Usage(message)) if !message.is_empty() => {
             iohr::report_usage_message(&args, json, &message)
         }
-        Err(e) => fail(&e),
+        Err(e) => iohr::report_failure(json, &e),
     }
-}
-
-fn fail(e: &iohr::Error) -> ExitCode {
-    let message = e.to_string();
-    if !message.is_empty() {
-        let _ = writeln!(std::io::stderr().lock(), "iohr: {message}");
-    }
-    e.exit_code()
 }
