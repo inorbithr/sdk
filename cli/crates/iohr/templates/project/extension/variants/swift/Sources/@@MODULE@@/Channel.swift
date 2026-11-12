@@ -7,6 +7,15 @@
 
 import Foundation
 
+// `socket` takes SOCK_STREAM as an Int32 on macOS and as an enum on Linux (Glibc).
+#if canImport(Glibc)
+    import Glibc
+    let streamType = Int32(SOCK_STREAM.rawValue)
+#elseif canImport(Darwin)
+    import Darwin
+    let streamType = SOCK_STREAM
+#endif
+
 private let maxAnswer = 64 * 1024
 private let waitSeconds = 10
 
@@ -48,7 +57,7 @@ public func token(scopes: [String], environment env: [String: String]) throws ->
             raw[i] = b
         }
     }
-    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    let fd = socket(AF_UNIX, streamType, 0)
     if fd < 0 {
         throw Refused("cannot reach iohr's token channel: no socket")
     }

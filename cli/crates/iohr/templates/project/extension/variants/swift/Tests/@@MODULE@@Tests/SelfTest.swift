@@ -1,5 +1,8 @@
 import Foundation
 import XCTest
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
 
 @testable import @@MODULE@@
 
@@ -46,7 +49,7 @@ final class SelfTest: XCTestCase {
 
     func testTheChannelGrantsTheDeclaredScopeAndRefusesAnother() throws {
         let socketPath = try temp("chan") + "/t.sock"
-        let server = socket(AF_UNIX, SOCK_STREAM, 0)
+        let server = socket(AF_UNIX, streamType, 0)
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         withUnsafeMutableBytes(of: &addr.sun_path) { raw in

@@ -1847,9 +1847,13 @@ mod tests {
         let mut d = demo();
         assert_eq!(
             d.picker_description(),
-            format!("{} (Go, Python, Rust or TypeScript)", d.meta.description)
+            format!(
+                "{} (C#, Dart, Go, Java, Python, Rust, Swift or TypeScript)",
+                d.meta.description
+            )
         );
         // A variant that is added shows; one that is coming does not; no list is typed.
+        d.meta.variants.truncate(4);
         let mut java = d.meta.variants[0].clone();
         java.id = "java".into();
         d.meta.variants.push(java);

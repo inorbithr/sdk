@@ -197,7 +197,7 @@ public func servePanel(environment env: [String: String], state: String, latest:
         }
         wanted = port
     }
-    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    let fd = socket(AF_INET, streamType, 0)
     if fd < 0 {
         throw Refused("no socket for the panel")
     }
