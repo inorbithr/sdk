@@ -74,7 +74,7 @@ url = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
 # The terminal panel keeps a model of the child's screen: what lies under the floating box (its
 # shadow) and whether the child is on the alternate screen (ADR 0225).
-vt100 = { version = "0.16", default-features = false }
+vt100 = { version = "0.18", default-features = false }
 zeroize = "1"
 
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
