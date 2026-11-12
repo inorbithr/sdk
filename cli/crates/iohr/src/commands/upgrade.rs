@@ -25,7 +25,8 @@ pub(crate) mod sign;
 pub(crate) use sign::SignWith;
 
 use crate::Env;
-use crate::cli::Global;
+use crate::cli::{Global, UpgradeArgs};
+use crate::commands::ext;
 use crate::context::{Ctx, run_profile};
 use crate::error::Error;
 use crate::ext::layer;
@@ -222,6 +223,19 @@ pub(crate) fn http_within(
     read: Option<Duration>,
     total: Duration,
 ) -> Result<reqwest::Client, Error> {
+    http_builder(base, connect, read, total)
+        .build()
+        .map_err(|e| Error::Failed(format!("cannot start the HTTP client: {e}")))
+}
+
+/// [`http_within`] before it is built, for a caller that sets more (the site reader turns
+/// redirects off, so it can check each address against the site's scope).
+pub(crate) fn http_builder(
+    base: &str,
+    connect: Duration,
+    read: Option<Duration>,
+    total: Duration,
+) -> reqwest::ClientBuilder {
     // https only, except a loopback address (a test double).
     let local = url::Url::parse(base)
         .ok()
@@ -238,20 +252,31 @@ pub(crate) fn http_within(
     if let Some(r) = read {
         b = b.read_timeout(r);
     }
-    b.build()
-        .map_err(|e| Error::Failed(format!("cannot start the HTTP client: {e}")))
+    b
 }
 
-/// A body of at most `max` bytes.
-pub(crate) async fn get(c: &reqwest::Client, url: &str, max: usize) -> Result<Vec<u8>, Error> {
+/// What one request answered.
+pub(crate) struct Reply {
+    pub status: u16,
+    /// The `Content-Type`, lower case, empty when none came.
+    pub content_type: String,
+    pub body: Vec<u8>,
+}
+
+/// One `GET`: the status, the type and a body of at most `max` bytes, whatever the status.
+pub(crate) async fn fetch(c: &reqwest::Client, url: &str, max: usize) -> Result<Reply, Error> {
     let mut resp = c
         .get(url)
         .send()
         .await
         .map_err(|e| Error::Failed(format!("{url}: {}", e.without_url())))?;
-    if !resp.status().is_success() {
-        return Err(Error::Failed(format!("{url}: {}", resp.status())));
-    }
+    let status = resp.status().as_u16();
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let mut body = Vec::new();
     while let Some(chunk) = resp
         .chunk()
@@ -263,7 +288,22 @@ pub(crate) async fn get(c: &reqwest::Client, url: &str, max: usize) -> Result<Ve
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(body)
+    Ok(Reply {
+        status,
+        content_type,
+        body,
+    })
+}
+
+/// A body of at most `max` bytes, from a 2xx answer.
+pub(crate) async fn get(c: &reqwest::Client, url: &str, max: usize) -> Result<Vec<u8>, Error> {
+    let r = fetch(c, url, max).await?;
+    if !(200..300).contains(&r.status) {
+        let said = reqwest::StatusCode::from_u16(r.status)
+            .map_or_else(|_| r.status.to_string(), |s| s.to_string());
+        return Err(Error::Failed(format!("{url}: {said}")));
+    }
+    Ok(r.body)
 }
 
 struct Sources {
@@ -488,8 +528,106 @@ pub(crate) fn installed_version(path: &Path) -> Result<semver::Version, Error> {
         .ok_or_else(|| Error::Failed(format!("{} does not say its version", path.display())))
 }
 
-pub(crate) async fn run(g: &Global, env: &Env, check: bool, out: Out) -> Result<(), Error> {
+/// What upgrading the binary came to.
+#[derive(Debug, Serialize)]
+struct Binary {
+    current: String,
+    latest: String,
+    upgraded: bool,
+}
+
+/// `iohr upgrade`: the binary, then (unless `--no-extensions`) every installed extension.
+/// The extensions are tried even when the binary could not be upgraded (an APT copy waits
+/// for a person, the lookup failed): they come from another place. The exit is non-zero
+/// when either failed; an extension left for a person (new privileges) is not a failure.
+pub(crate) async fn run(g: &Global, env: &Env, args: &UpgradeArgs, out: Out) -> Result<(), Error> {
+    if args.check {
+        return check_only(g, env, out).await;
+    }
+    let binary = upgrade_binary(g, env).await;
+    let (rows, pass) = if args.no_extensions {
+        (None, Ok(()))
+    } else {
+        extension_pass(g, env, args.yes).await
+    };
+    if out.json {
+        let mut json = match &binary {
+            Ok(b) => serde_json::to_value(b).unwrap_or(Value::Null),
+            Err(_) => serde_json::json!({}),
+        };
+        if let (Some(rows), Some(map)) = (&rows, json.as_object_mut()) {
+            map.insert(
+                "extensions".into(),
+                serde_json::to_value(rows).unwrap_or(Value::Null),
+            );
+        }
+        Out::print_json(&json);
+    }
+    binary?;
+    pass
+}
+
+/// The extension pass of `iohr upgrade`: the rows (none when it could not start) and what
+/// to exit with.
+async fn extension_pass(
+    g: &Global,
+    env: &Env,
+    yes: bool,
+) -> (Option<Vec<ext::upgrades::ExtUpgrade>>, Result<(), Error>) {
+    let store = match ext::store(g) {
+        Ok(s) => s,
+        Err(e) => return (None, Err(e)),
+    };
+    match ext::upgrades::all(g, env, &store, None, None, yes).await {
+        Ok(rows) => {
+            if !rows.is_empty() {
+                Out::note(&ext::upgrades::summary(&rows));
+            }
+            let failed = ext::upgrades::failures(&rows);
+            let result = if failed > 0 {
+                Err(Error::Failed(format!(
+                    "{failed} extension(s) failed to upgrade; the others were upgraded"
+                )))
+            } else {
+                Ok(())
+            };
+            (Some(rows), result)
+        }
+        Err(e) => {
+            Out::note(&format!("extensions were not upgraded: {e}"));
+            (None, Err(e))
+        }
+    }
+}
+
+async fn upgrade_binary(g: &Global, env: &Env) -> Result<Binary, Error> {
     let (_, real, method) = detect_here()?;
+    let up = Upstream::from_process()?.signing(sign_setting(g, env).value);
+
+    let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))
+        .map_err(|e| Error::Failed(format!("this build's version: {e}")))?;
+    let latest = up.newest(&method).await?;
+    if latest <= current {
+        Out::note(&format!("iohr {current} is the newest release."));
+        return Ok(Binary {
+            current: current.to_string(),
+            latest: latest.to_string(),
+            upgraded: false,
+        });
+    }
+    up.install(&method, &real, &latest, g.verbose).await?;
+    if matches!(method, Method::InstallScript { .. }) {
+        Out::note(&format!("iohr is now {latest} (was {current})."));
+    }
+    Ok(Binary {
+        current: current.to_string(),
+        latest: latest.to_string(),
+        upgraded: true,
+    })
+}
+
+async fn check_only(g: &Global, env: &Env, out: Out) -> Result<(), Error> {
+    let (_, _, method) = detect_here()?;
     let up = Upstream::from_process()?.signing(sign_setting(g, env).value);
 
     let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))
@@ -497,45 +635,63 @@ pub(crate) async fn run(g: &Global, env: &Env, check: bool, out: Out) -> Result<
     let latest = up.newest(&method).await?;
     let update = latest > current;
 
-    if check {
-        let report = Report {
-            current: current.to_string(),
-            latest: latest.to_string(),
-            update_available: update,
-            command: command_for(&method),
-            install: method,
-        };
-        if out.json {
-            Out::print_json(&report);
-        } else {
-            Out::pairs(&[
-                ("current", report.current.clone()),
-                ("latest", report.latest.clone()),
-                (
-                    "update",
-                    if update { "available" } else { "none" }.to_owned(),
-                ),
-                ("command", report.command.clone()),
-            ]);
-        }
-        return Ok(());
-    }
-    if !update {
-        Out::note(&format!("iohr {current} is the newest release."));
-        if out.json {
-            Out::print_json(&serde_json::json!({
-                "current": current.to_string(), "latest": latest.to_string(),
-                "upgraded": false
-            }));
-        }
-        return Ok(());
-    }
-
-    up.install(&method, &real, &latest, g.verbose).await?;
-    if matches!(method, Method::InstallScript { .. }) {
-        Out::note(&format!("iohr is now {latest} (was {current})."));
+    let report = Report {
+        current: current.to_string(),
+        latest: latest.to_string(),
+        update_available: update,
+        command: command_for(&method),
+        install: method,
+    };
+    if out.json {
+        Out::print_json(&report);
+    } else {
+        Out::pairs(&[
+            ("current", report.current.clone()),
+            ("latest", report.latest.clone()),
+            (
+                "update",
+                if update { "available" } else { "none" }.to_owned(),
+            ),
+            ("command", report.command.clone()),
+        ]);
     }
     Ok(())
+}
+
+/// What `sign-binary` signs with, from `IOHR_SIGN_IDENTITY`: unset is `auto`, `auto` or a
+/// name is itself. `-` is refused: in `upgrade_sign_identity` it means "do not sign", which
+/// is exactly what a preview install exists to rule out, and quietly turning it into `auto`
+/// would hide that the setting said otherwise.
+fn sign_binary_with(identity: Option<&str>) -> Result<SignWith, Error> {
+    match identity.map(SignWith::parse) {
+        None => Ok(SignWith::Auto),
+        Some(SignWith::Off) => Err(Error::Usage(
+            "IOHR_SIGN_IDENTITY=- turns signing off, and `iohr sign-binary` must sign: \
+             unset it, or set `auto` or a signing identity"
+                .into(),
+        )),
+        Some(other) => Ok(other),
+    }
+}
+
+/// `iohr sign-binary PATH`: the signing an upgrade does, for a binary built here. `auto`
+/// unless `IOHR_SIGN_IDENTITY` names an identity (`-` is refused); an unsigned result is an error (an
+/// upgrade may go on ad hoc, a preview install may not).
+pub(crate) fn sign_binary(env: &Env, path: &Path) -> Result<(), Error> {
+    let with = sign_binary_with(env.sign_identity.as_deref())?;
+    match sign::here(path, &with) {
+        sign::Outcome::Signed(name) => {
+            Out::note(&format!(
+                "signed {} with {name} (identifier {})",
+                path.display(),
+                sign::IDENTIFIER
+            ));
+            Ok(())
+        }
+        sign::Outcome::AlreadySigned => Ok(()),
+        sign::Outcome::Off => Err(Error::Failed("signing needs macOS".to_owned())),
+        sign::Outcome::Kept(why) => Err(Error::Failed(format!("not signed: {why}"))),
+    }
 }
 
 /// `upgrade_sign_identity` as the runner reads it: `IOHR_SIGN_IDENTITY`, then the run
@@ -728,7 +884,8 @@ fn replace_with(
     let dir = dest
         .parent()
         .ok_or_else(|| Error::Failed("the install path has no directory".into()))?;
-    let tmp = dir.join(format!(".iohr.upgrade-{}", std::process::id()));
+    // A random name, made new on each write: never a file or link that was there.
+    let tmp = iohr_auth::temp_path(dir, "iohr.upgrade");
     let result = (|| -> Result<(), Error> {
         let fail = |what: &str, e: &dyn std::fmt::Display| {
             Error::Failed(format!(
@@ -737,7 +894,16 @@ fn replace_with(
             ))
         };
         let write = || -> Result<(), Error> {
-            std::fs::write(&tmp, program).map_err(|e| fail("cannot write", &e))?;
+            use std::io::Write as _;
+            match std::fs::remove_file(&tmp) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(fail("cannot write", &e));
+                }
+                _ => {}
+            }
+            iohr_auth::create_new_private(&tmp, 0o700)
+                .and_then(|mut f| f.write_all(program).and_then(|()| f.sync_all()))
+                .map_err(|e| fail("cannot write", &e))?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt as _;
@@ -810,7 +976,28 @@ mod tests {
 
     use std::path::{Path, PathBuf};
 
-    use super::{Layout, Method, brew_failure, bundles_of, detect, newest, sum_of, target};
+    use super::{
+        Layout, Method, brew_failure, bundles_of, detect, newest, sign_binary_with, sum_of, target,
+    };
+    use crate::commands::upgrade::sign::SignWith;
+    use crate::error::Error;
+
+    /// `IOHR_SIGN_IDENTITY=-` means "do not sign" everywhere else; `sign-binary` refuses it
+    /// rather than signing anyway, and signs with `auto` only when nothing was set.
+    #[test]
+    fn sign_binary_refuses_the_off_switch_and_defaults_to_auto() {
+        assert_eq!(sign_binary_with(None).unwrap(), SignWith::Auto);
+        assert_eq!(sign_binary_with(Some("auto")).unwrap(), SignWith::Auto);
+        assert_eq!(
+            sign_binary_with(Some("Apple Development: Someone (ABC123)")).unwrap(),
+            SignWith::Named("Apple Development: Someone (ABC123)".into())
+        );
+        let e = sign_binary_with(Some("-")).unwrap_err();
+        assert!(
+            matches!(&e, Error::Usage(m) if m.contains("IOHR_SIGN_IDENTITY=-")),
+            "{e:?}"
+        );
+    }
 
     fn layout() -> Layout {
         Layout {
@@ -1043,6 +1230,41 @@ mod tests {
         assert_eq!(
             std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777,
             0o755
+        );
+    }
+
+    /// The temporary binary is made new each time it is written: a link left at its name
+    /// (between a signing step and the rewrite) is replaced, never written through.
+    #[cfg(unix)]
+    #[test]
+    fn the_new_binary_is_never_written_through_what_is_at_its_name() {
+        use super::replace_with;
+        use super::sign::Outcome;
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let elsewhere = outside.path().join("elsewhere");
+        std::fs::write(&elsewhere, "kept").unwrap();
+        let dest = dir.path().join("iohr");
+        std::fs::write(&dest, "old").unwrap();
+        let v = semver::Version::parse("1.2.3").unwrap();
+        let right = b"#!/bin/sh\necho 'iohr 1.2.3'\n";
+        let seen = std::cell::RefCell::new(Vec::new());
+        replace_with(&dest, right, &v, &|tmp| {
+            seen.borrow_mut().push(tmp.to_owned());
+            std::fs::remove_file(tmp).unwrap();
+            std::os::unix::fs::symlink(&elsewhere, tmp).unwrap();
+            Outcome::Kept("codesign failed".into())
+        })
+        .unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), right);
+        assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "kept");
+        let staged = seen.borrow()[0].clone();
+        let name = staged.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with(".iohr.upgrade."), "{name}");
+        assert_eq!(
+            staged.extension(),
+            Some(std::ffi::OsStr::new("tmp")),
+            "{name}"
         );
     }
 

@@ -10,7 +10,7 @@ use crate::error::Error;
 use crate::ext::install::Store;
 
 #[cfg(unix)]
-pub(crate) use unix::{enter, open, start_host, stop};
+pub(crate) use unix::{Joined, enter, join_watched, open, start_host, stop};
 
 #[cfg(not(unix))]
 pub(crate) use other::{enter, open, start_host, stop};
@@ -335,36 +335,64 @@ mod unix {
         .map_err(|e| Error::Failed(e.to_string()))?
     }
 
+    /// What joining the host of a folder for the panel came to ([`join_watched`]).
+    pub(crate) struct Joined {
+        /// The open session: the host counts it until it is dropped, so whoever outlives the
+        /// panel holds it. `None` when there is no host.
+        pub(crate) session: Option<link::Session>,
+        /// Answers when the host closes the session (it stopped). `None` when there is no host.
+        pub(crate) gone: Option<tokio::sync::oneshot::Receiver<()>>,
+        /// Why there is no host, as the note to show: the panel runs without one.
+        pub(crate) note: Option<String>,
+    }
+
+    /// Joins the host of `project` (starting it when none runs) and watches it: the one start
+    /// for bare `iohr` ([`enter`]) and for the panel proxy when `iohr` is run again after a
+    /// stop, which is the long-lived process that has to hold the session.
+    pub(crate) async fn join_watched(g: &Global, project: &Path) -> Joined {
+        let session = match join_host(g, None, project).await {
+            Ok(j) => j,
+            Err(e) => {
+                return Joined {
+                    session: None,
+                    gone: None,
+                    note: Some(format!("no session host: {e}; the panel runs without one")),
+                };
+            }
+        };
+        let gone = session.watcher().ok().map(|watcher| {
+            let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+            // A plain thread: it blocks until the host closes, and must not hold the runtime
+            // open once the shell has exited.
+            std::thread::spawn(move || {
+                if watcher.wait_for_host() {
+                    let _ = tx.send(());
+                }
+            });
+            rx
+        });
+        Joined {
+            session: Some(session),
+            gone,
+            note: None,
+        }
+    }
+
     /// Bare `iohr` on a terminal: joins (or starts) the host of the current folder and floats
     /// the panel over the person's shell until it exits. When the host cannot be had, says so
     /// and still gives the shell with the panel: the asks and Workloads need no host.
     pub(crate) async fn enter(g: &Global, env: crate::Env) -> Result<(), Error> {
         let project = project_dir(None)?;
-        let joined = match join_host(g, None, &project).await {
-            Ok(j) => Some(j),
-            Err(e) => {
-                crate::panel::note_below_the_box(&format!(
-                    "no session host: {e}; the panel runs without one"
-                ));
-                None
-            }
-        };
-        let gone = joined
-            .as_ref()
-            .and_then(|j| j.watcher().ok())
-            .map(|watcher| {
-                let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-                // A plain thread: it blocks until the host closes, and must not hold the runtime
-                // open once the shell has exited.
-                std::thread::spawn(move || {
-                    if watcher.wait_for_host() {
-                        let _ = tx.send(());
-                    }
-                });
-                rx
-            });
-        let stopped = crate::panel::session_shell(g, env, gone).await;
-        drop(joined);
+        let Joined {
+            session,
+            gone,
+            note,
+        } = join_watched(g, &project).await;
+        if let Some(note) = note {
+            crate::panel::note_below_the_box(&note);
+        }
+        let stopped = crate::panel::session_shell(g, env, gone, project).await;
+        drop(session);
         if stopped? {
             Out::note("the session host stopped");
         }

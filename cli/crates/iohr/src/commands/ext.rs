@@ -15,6 +15,9 @@ use crate::ext::oci::{DEFAULT_REGISTRY, Digest, OciError, Registry, Source};
 use crate::ext::trust::{Policy, TrustedKey};
 use crate::output::Out;
 use crate::prompt;
+use crate::ui::{CheckRow, Listed, Mark, Paint};
+
+pub(crate) mod upgrades;
 
 impl From<ExtError> for Error {
     fn from(e: ExtError) -> Self {
@@ -225,7 +228,28 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
         ExtCommand::List => list(&store, out),
         ExtCommand::Packages => crate::commands::ext_packages::packages(g, env, &store, out).await,
         ExtCommand::Upgrade { name, lock, yes } => {
-            upgrade(g, env, &store, name, lock.as_deref(), yes, out).await
+            let rows = upgrades::all(g, env, &store, name, lock.as_deref(), yes).await?;
+            if rows.is_empty() {
+                Out::note("No extensions installed.");
+            }
+            if out.json {
+                Out::print_json(&upgrades::json(&rows));
+            }
+            let failed = upgrades::failures(&rows);
+            if failed > 0 {
+                return Err(Error::Failed(format!(
+                    "{failed} extension(s) failed to upgrade; the others were upgraded"
+                )));
+            }
+            // A refusal is left for a person; asked for here, it still exits 2.
+            match rows
+                .iter()
+                .find(|r| r.status == upgrades::Status::Refused)
+                .and_then(|r| r.detail.clone())
+            {
+                Some(why) => Err(Error::Usage(why)),
+                None => Ok(()),
+            }
         }
         ExtCommand::Remove { name, lock } => {
             check_name(&name)?;
@@ -688,6 +712,12 @@ fn report(f: &Fetched, entry: &Entry, out: Out) {
         }));
         return;
     }
+    installed_note(f, entry);
+}
+
+/// What an install or upgrade says on stderr.
+fn installed_note(f: &Fetched, entry: &Entry) {
+    let m = &f.manifest;
     Out::note(&format!(
         "Installed {} {} ({}).\n  signed by   {}\n  built from  {}\n  may ask for {}\n  privileges  {}\nRun it as `iohr {} ...`.",
         m.name,
@@ -745,7 +775,7 @@ fn list(store: &Store, out: Out) -> Result<(), Error> {
     } else if rows.is_empty() {
         Out::note("No extensions installed. `iohr ext install agent` installs the InOrbit agent.");
     } else {
-        Out::table(
+        Out::list(
             &[
                 "NAME",
                 "VERSION",
@@ -755,85 +785,8 @@ fn list(store: &Store, out: Out) -> Result<(), Error> {
                 "SIGNER",
             ],
             &rows,
+            &Listed::new("extension", "extensions").next("find more", "iohr ext search"),
         );
-    }
-    Ok(())
-}
-
-async fn upgrade(
-    g: &Global,
-    env: &Env,
-    store: &Store,
-    name: Option<String>,
-    lock: Option<&Path>,
-    yes: bool,
-    out: Out,
-) -> Result<(), Error> {
-    let installed = store.lock()?;
-    let names: Vec<String> = match name {
-        Some(n) => {
-            if !installed.entries.contains_key(&n) {
-                return Err(Error::Usage(format!(
-                    "{n} is not installed; `iohr ext install {n}` installs it"
-                )));
-            }
-            vec![n]
-        }
-        None => installed.entries.keys().cloned().collect(),
-    };
-    if names.is_empty() {
-        Out::note("No extensions installed.");
-        return Ok(());
-    }
-    let (registry, policy) = setup(g, env)?;
-    for n in names {
-        let current = &installed.entries[&n];
-        let latest = newest(&registry, &n).await?;
-        let newer = match (check_version(&latest), check_version(&current.version)) {
-            (Ok(l), Ok(c)) => l > c,
-            _ => false,
-        };
-        if !newer {
-            Out::note(&format!("{n} {} is the newest.", current.version));
-            continue;
-        }
-        let before = store
-            .installed(&n)?
-            .map(|(_, r, _)| r.manifest.scopes)
-            .unwrap_or_default();
-        let f = fetch(&registry, &policy, &n, &Want::Version(latest)).await?;
-        let added: Vec<&String> = f
-            .manifest
-            .scopes
-            .iter()
-            .filter(|s| !before.contains(s))
-            .collect();
-        let more = current.unconfirmed(&f.manifest.privileges);
-        confirm_privileges(
-            &format!("{n} {}", f.manifest.version),
-            &more,
-            true,
-            yes,
-            terminal().as_mut().map(|a| a as &mut Ask),
-        )?;
-        let entry = keep(store, &registry, &f, lock, None)?;
-        report(&f, &entry, out);
-        if !more.is_empty() {
-            Out::note(&format!(
-                "  new privileges {} (its system service holds these)",
-                more.join(", ")
-            ));
-        }
-        if !added.is_empty() {
-            Out::note(&format!(
-                "  new scopes  {} (it may now ask for these)",
-                added
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
     }
     Ok(())
 }
@@ -889,6 +842,14 @@ fn verify(
         Out::print_json(&v);
     } else if rows.is_empty() {
         Out::note("No extensions installed.");
+    } else if Paint::stdout(false).color() {
+        let n = rows.len();
+        let checked = format!("{n} extension{} verified", if n == 1 { "" } else { "s" });
+        Out::raw(
+            Paint::stdout(false)
+                .findings(&verify_rows(&rows), &checked)
+                .as_bytes(),
+        );
     } else {
         Out::table(
             &[
@@ -909,6 +870,37 @@ fn verify(
             failed.join(", ")
         )))
     }
+}
+
+/// `ext verify`'s rows for a person: a verified extension with its version and signer, a
+/// failed one with why and how to get a good copy back. The same facts as the table.
+fn verify_rows(rows: &[Vec<String>]) -> Vec<CheckRow> {
+    rows.iter()
+        .map(|r| {
+            let ok = r[2] == "ok";
+            let mut notes = Vec::new();
+            if ok {
+                if !r[3].is_empty() {
+                    notes.push(("may", r[3].clone()));
+                }
+            } else {
+                notes.push((
+                    "fix",
+                    format!("iohr ext remove {}, then install it again", r[0]),
+                ));
+            }
+            CheckRow {
+                mark: if ok { Mark::Ok } else { Mark::Fail },
+                id: r[0].clone(),
+                what: if ok {
+                    format!("{}, signed by {}", r[1], r[4])
+                } else {
+                    r[4].clone()
+                },
+                notes,
+            }
+        })
+        .collect()
 }
 
 /// Whether `iohr ext verify` was asked about an artifact rather than an installed
@@ -1148,7 +1140,29 @@ pub(crate) async fn external(g: &Global, env: &Env, argv: Vec<OsString>) -> Resu
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
 
-    use super::{Ask, confirm_privileges, parse_spec, privilege_lines};
+    use super::{Ask, confirm_privileges, parse_spec, privilege_lines, verify_rows};
+    use crate::ui::Mark;
+
+    #[test]
+    fn a_verified_extension_names_its_signer_and_a_failed_one_how_to_get_it_back() {
+        let s = |v: &[&str]| v.iter().map(|x| (*x).to_owned()).collect::<Vec<_>>();
+        let r = verify_rows(&[
+            s(&["notes", "1.2.0", "ok", "net fs-read", "dev@example.com"]),
+            s(&["broken", "", "FAILED", "", "the signature does not match"]),
+        ]);
+        assert_eq!(r[0].mark, Mark::Ok);
+        assert_eq!(r[0].what, "1.2.0, signed by dev@example.com");
+        assert_eq!(r[0].notes, vec![("may", "net fs-read".to_owned())]);
+        assert_eq!(r[1].mark, Mark::Fail);
+        assert_eq!(r[1].what, "the signature does not match");
+        assert_eq!(
+            r[1].notes,
+            vec![(
+                "fix",
+                "iohr ext remove broken, then install it again".to_owned()
+            )]
+        );
+    }
 
     #[test]
     fn the_service_command_names_the_program_the_user_and_the_interface() {

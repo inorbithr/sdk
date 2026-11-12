@@ -239,9 +239,13 @@ fn mask_values(text: &str) -> String {
                             || word.eq_ignore_ascii_case("basic");
                         return format!("[redacted]{rest}");
                     }
-                    if let Some((name, _)) = word.split_once('=')
+                    if let Some((name, value)) = word.split_once('=')
                         && secret_name(name)
                     {
+                        // `authorization=Bearer TOKEN`: the value is the scheme, the
+                        // secret is the next word.
+                        hide_next = value.eq_ignore_ascii_case("bearer")
+                            || value.eq_ignore_ascii_case("basic");
                         return format!("{name}=[redacted]{rest}");
                     }
                     if let Some(name) = word.strip_suffix(':')

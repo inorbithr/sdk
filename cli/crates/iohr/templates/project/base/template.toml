@@ -1,0 +1,84 @@
+# The base every built-in template extends: the project record, the ignore file, the
+# coordination manifest the Planner step reads, a security policy, CODEOWNERS and the CI
+# workflow (`--ci none` leaves the workflow out). Hidden: `iohr project template list --all`
+# shows it; it is not a template to start a project from.
+id = "base"
+description = "What every project has: its record, .gitignore, SECURITY.md, CODEOWNERS and the Planner manifest"
+status = "hidden"
+ci_paths = [".github/workflows/"]
+steps = [{ name = "git" }, { name = "register" }]
+
+# Never asked: `--ci none` sets it. `github` keeps the CI, release and dependency files.
+[[questions]]
+key = "ci"
+prompt = "Keep GitHub Actions files (CI, release, dependency updates)?"
+type = "choice"
+choices = ["github", "none"]
+default = "github"
+hidden = true
+
+[[questions]]
+key = "security_contact"
+prompt = "Where should people report a vulnerability in this project? (an email address or a private advisory URL)"
+default = "CHANGE-ME: set a security contact before you publish this project"
+help = "Written into SECURITY.md. Left as the marked placeholder when you answer nothing."
+
+[[questions]]
+key = "code_owner"
+prompt = "Who owns this code on GitHub? (a user or a team, with the @)"
+default = "@CHANGE-ME"
+help = "Written into .github/CODEOWNERS. Left as @CHANGE-ME when you answer nothing."
+
+# What the CI workflow needs, per language. A template's own variant `vars` win over these.
+[lang_vars.python]
+CI_SETUP = """      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13\""""
+CI_TEST = "PYTHONPATH=src python3 -m unittest discover -s tests"
+
+[lang_vars.typescript]
+CI_SETUP = """      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24\""""
+CI_TEST = "node --test 'tests/**/*.test.ts'"
+
+[lang_vars.go]
+CI_SETUP = """      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod"""
+CI_TEST = "go vet ./... && go test ./..."
+
+[lang_vars.rust]
+CI_SETUP = """      - name: Toolchain (the runner's rustup, stable)
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable"""
+CI_TEST = "cargo test --locked"
+
+# Java, C#, Swift and Dart (PRD 0088.1). The setup actions are pinned by commit like the
+# others. Conventions the templates of these languages keep so the shared CI and release can
+# name things: Java is a Maven project (`pom.xml` at the root), C# keeps its program in
+# `src/App/App.csproj` and its tests in `tests/App.Tests/`, Swift is a SwiftPM package whose
+# executable product is `@@NAME@@`, Dart keeps its program in `bin/main.dart`.
+[lang_vars.java]
+CI_SETUP = """      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21\""""
+CI_TEST = "mvn --batch-mode --no-transfer-progress test"
+
+[lang_vars.csharp]
+CI_SETUP = """      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x\""""
+CI_TEST = "dotnet test --nologo"
+
+[lang_vars.swift]
+CI_SETUP = """      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.1\""""
+CI_TEST = "swift test"
+
+[lang_vars.dart]
+CI_SETUP = """      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: stable"""
+CI_TEST = "dart pub get --enforce-lockfile && dart analyze && dart test"

@@ -397,6 +397,18 @@ pub(crate) const ALL: &[(&[&str], &[Example])] = &[
         )],
     ),
     (
+        &["theme"],
+        &[
+            ex(&["theme", "list"], "The four themes and which one is on."),
+            ex(&["theme", "show", "nord"], "The colours of one theme."),
+            ex(
+                &["theme", "install", "nord", "--prompt"],
+                "Write the Terminal.app profile and turn the zsh prompt on.",
+            ),
+            ex(&["theme", "off"], "Turn the zsh prompt off; profiles stay."),
+        ],
+    ),
+    (
         &["runner"],
         &[
             ex(
@@ -455,6 +467,19 @@ pub(crate) const ALL: &[(&[&str], &[Example])] = &[
             ex(
                 &["browser", "install", "--print"],
                 "Print the address instead.",
+            ),
+        ],
+    ),
+    (
+        &["doctor"],
+        &[
+            ex(
+                &["doctor"],
+                "Check this machine and say how to fix what fails.",
+            ),
+            ex(
+                &["doctor", "--fix"],
+                "Also run the safe fixes (restart a stopped MCP bridge).",
             ),
         ],
     ),

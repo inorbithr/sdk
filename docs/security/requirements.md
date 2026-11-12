@@ -59,8 +59,10 @@ rotation and in networks that inspect TLS, which banks often run.
 
 **SR-07. HTTPS-only base URLs.** `base_url` and `token_url` must be `https://`. Plain
 `http://` is refused at construction, except for loopback addresses, which tests and the
-conformance replay server use.
-- Verify: unit test; conformance runs on loopback.
+conformance replay server use. Loopback is `localhost`, `127.0.0.0/8` or `::1`, matched as
+a parsed address, never as the start of a name (`http://127.example.com` is refused); each
+language has one such check, used by every URL it accepts.
+- Verify: unit test with names that only start like loopback; conformance runs on loopback.
 - Refs: CRA I.2(b), I.2(e).
 
 **SR-08. FIPS-capable modes.** Each SDK can run with FIPS-validated cryptography
@@ -90,12 +92,20 @@ never retries or fails over to another region on its own.
 ## Secrets and data
 
 **SR-10. Secrets are typed and redacted.** Key secrets, access tokens, proxy passwords
-and private keys are held in a `Secret` type. Printing, formatting, serialising or
-logging it shows `<redacted>`: Go `String`/`GoString`/`Format`, Rust `Debug`/`Display`,
-TypeScript `toString`/`toJSON`/`util.inspect`, Python `__repr__`/`__str__`. The key id
-(`ak_...`) is not secret and may be shown.
-- Verify: a unit test per language for every way to print; conformance case
-  `secret-never-in-message`.
+and private keys are held in a `Secret` type, and every type that carries one (a token, a
+credential, a key's settings, a resolved configuration, proxy rules) shows only the
+marker. Printing, formatting, serialising to JSON or logging it, structured logs
+included, shows `<redacted>`: Go `String`/`GoString`/`Format` (every verb),
+`MarshalJSON` and `slog.LogValuer`; Rust `Debug`/`Display`; TypeScript
+`toString`/`toJSON`/`util.inspect`, the token kept off the object's own properties;
+Python `__repr__`/`__str__` and the pydantic JSON form; Java `toString` and Jackson,
+the secret fields `transient`; C# `ToString` and `System.Text.Json`; Swift
+`description`/`debugDescription`/`Mirror`, `Secret` not `Codable`. Swift's `HTTPRequest`
+prints the `authorization` header without its value, and an operation (Go, Python, Rust)
+prints its query, body and field names without their values. Each language has one marker constant. The
+key id (`ak_...`) is not secret and may be shown.
+- Verify: a unit test per language for every way to print, JSON and a structured log
+  among them; conformance case `secret-never-in-message`.
 - Refs: SSDF PW.5; CRA I.2(e); OSPS BR-07.
 
 **SR-11. Secrets are wiped where the language allows.** Rust zeroes secret memory on
@@ -194,7 +204,8 @@ names) only in `iohr ext install`, `upgrade` and `sync`: that registry, the toke
 service its challenge names and the storage host a blob download redirects to, with
 `GET`, over HTTPS (plain HTTP to this machine only). Never on another command, never to
 look for updates, no telemetry. A mirror's credential comes from
-`IOHR_EXT_REGISTRY_AUTH` and goes to that registry and its token service only.
+`IOHR_EXT_REGISTRY_AUTH` and goes to that registry only, and to its token service when
+that service is on the registry's own origin.
 - Why: banks and regulated companies do not allow software that changes or reports on
   its own; a security team needs to know every host the tool reaches.
 - Verify: review; integration tests run against a registry on loopback with nothing
@@ -300,8 +311,10 @@ it runs only in the runner's own bare mirror after its configuration is checked 
 credential, proxy, URL rewrite, include or hook key; `origin` exactly the job's
 repository). `gh` gets it as `GH_TOKEN` on that one child. A token for another repository
 is refused. The host's own `gh` sign-in is used only where the platform says its App is
-not installed for the account (or the platform is older than the call), and the log says
-so; any other refusal leaves the lease unaccepted. The model's process and the check's
+not installed for the account (or the platform is older than the call), only when the
+machine's settings allow it (`allow_host_git_credentials = true`; off by default), and
+the log says so; without that setting the job fails before its checkout with a reason
+that names the setting, and any other refusal leaves the lease unaccepted. The model's process and the check's
 process run with an empty `GH_CONFIG_DIR`, no `GH_TOKEN` or `GITHUB_TOKEN`, git's
 credential helpers cleared and its prompts off (RFC 0147 containment).
 - Why: a person's long-lived sign-in on a runner can push to every repository they can,
@@ -310,7 +323,8 @@ credential helpers cleared and its prompts off (RFC 0147 containment).
   that `git credential fill` answers the token for `github.com` only and never a host
   helper; that no credential is in any git configuration and an old one is removed; that
   a mirror with configuration the runner did not set is not used; that no hook runs with
-  the token; that only "not installed" falls back to the host; that `gh` in the model's
+  the token; that only "not installed" falls back to the host, and only with
+  `allow_host_git_credentials` set (refused by default, allowed when set); that `gh` in the model's
   environment is signed out and git there asks no helper.
 - Refs: CRA I.2(d); least privilege.
 
@@ -366,6 +380,32 @@ carries is capped and redacted of URLs, addresses and tokens.
 vectors; that a missing tool, a bad param or systemd off Linux runs nothing;
   that each report verifies with the run key.
 - Refs: CRA I.2(d); least privilege.
+
+**SR-36. A runner's model key reaches its `claude` alone, and its sign-in follows a local policy.**
+`iohr runner api-key set` reads an Anthropic API key from a prompt with no echo, stdin or
+a file named by a flag, never from an argument (`refuse_secrets_in_args` refuses an
+`sk-ant-` value before parsing), and stores it only in the profile's credential store,
+keyed by profile and account; `remove` deletes it. It is a `Redacted<String>` from the
+moment it is read until it is set as `ANTHROPIC_API_KEY`, with
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` beside it, on the `claude` processes the runner
+starts, and nowhere else: never an argument, a log line, an error, a `Debug`, a JSON
+answer, the config file or a request to the platform. The parent's own `ANTHROPIC_*`
+values are still dropped. How `claude` may sign in is a policy per provider,
+`api`, `plan` or `any`: the runner table sets it (`claude_auth` defaults to `api`,
+`codex_auth` to `any`), the lease can name one too, a turn runs only on a sign-in both
+allow, and an unknown value counts as `api`. Under `plan` the stored key is not passed to
+`claude`. Signing in with the person's own plan needs `any` or `plan` from the
+local file and the personal-use notice accepted on this machine; then the runner takes
+one turn at a time and refuses a turn someone else assigned.
+- Why: a key that reaches a tool, a log or the platform can be used by whoever reads it;
+  a policy the server could loosen would let it pick the person's own plan for work that
+  is not theirs.
+- Verify: unit tests that the one argument builder gives both sign-ins the same
+  arguments and only the key its environment, that `api` refuses the person's own
+  plan, `plan` withholds the stored key and the lease only narrows; an integration test that a stored key reaches the
+  stand-in `claude` and appears in no output, request or config file, and that a key
+  given as an argument is refused before anything runs.
+- Refs: CRA I.2(d), I.2(e); least privilege.
 
 ## Reliability and traceability
 

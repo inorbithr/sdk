@@ -8,7 +8,6 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
-use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -19,7 +18,7 @@ use tokio::io::{AsyncBufReadExt as _, AsyncRead};
 
 use super::lint::lint;
 use super::manifest::{Lang, SOURCE_FILE, SourceManifest};
-use super::run::{ProfileMinter, api_origin, serve, strip_credentials};
+use super::run::{ProfileMinter, api_origin, child_path_here, serve, strip_credentials};
 use super::socket::Ctx;
 use crate::Env;
 use crate::cli::Global;
@@ -44,20 +43,17 @@ fn now() -> String {
     format!("{:02}:{:02}:{:02}Z", t.hour(), t.minute(), t.second())
 }
 
-fn colour() -> bool {
-    std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal()
-}
-
-/// One log line on stderr: the time, where it came from, the text; red when `alarm`.
+/// One log line on stderr: the time, where it came from, the text; red when `alarm` (by the
+/// same colour rules as every drawn line: a terminal, `NO_COLOR` and `TERM=dumb` honoured).
 pub(crate) fn log_line(from: &str, text: &str, alarm: bool) {
     use std::io::Write as _;
     let line = format!("{} {from:<4} {text}", now());
-    let mut err = std::io::stderr().lock();
-    let _ = if alarm && colour() {
-        writeln!(err, "\x1b[31m{line}\x1b[0m")
+    let line = if alarm {
+        crate::ui::Paint::stderr(false).tone(crate::ui::Mark::Fail, &line)
     } else {
-        writeln!(err, "{line}")
+        line
     };
+    let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
 /// Streams `r` line by line with the time, to stdout or stderr.
@@ -91,43 +87,12 @@ pub(crate) fn secret_var(name: &str) -> String {
     format!("IOHR_EXT_SECRET_{}", crate::env_name(name))
 }
 
-/// The environment variables the child never sees: iohr's credentials, the SDK's
-/// credential variables, and the development secrets (given only as each one's `env`).
-fn hidden(key: &str) -> bool {
-    key == "IOHR_TOKEN"
-        || key.starts_with("IOHR_TOKEN_")
-        || key.starts_with("IOHR_EXT_SECRET_")
-        || key.starts_with("INORBIT_TOKEN")
-        || key.starts_with("INORBIT_KEY_")
-}
-
-/// `PATH` without the folder this `iohr` is in and without any folder that holds an
-/// `iohr` program: an extension must not get a full-scope token from `iohr auth token`
-/// around the channel's scope check. Returns the new `PATH` and the folders left out.
-fn child_path(path: &OsStr, me: Option<&Path>) -> (OsString, Vec<PathBuf>) {
-    let me = me
-        .and_then(|p| p.parent())
-        .and_then(|p| p.canonicalize().ok());
-    let mut kept = Vec::new();
-    let mut dropped = Vec::new();
-    for dir in std::env::split_paths(path) {
-        let canon = dir.canonicalize().ok();
-        let holds_iohr = ["iohr", "iohr.exe"].iter().any(|n| dir.join(n).is_file());
-        if holds_iohr || (canon.is_some() && canon == me) {
-            if !dropped.contains(&dir) {
-                dropped.push(dir);
-            }
-        } else {
-            kept.push(dir);
-        }
-    }
-    (std::env::join_paths(kept).unwrap_or_default(), dropped)
-}
-
 /// Resolves each secret: `IOHR_EXT_SECRET_<NAME>` first, then the Keychain item
 /// (service [`SECRET_SERVICE`], account the reference).
 async fn secrets(source: &SourceManifest) -> Result<Vec<(String, Redacted<String>)>, Error> {
     let mut out = Vec::new();
+    // One open of the Keychain for all of them, not one per secret.
+    let mut keychain: Option<std::sync::Arc<iohr_auth::KeyringStore>> = None;
     for s in &source.secrets {
         let var = secret_var(&s.name);
         if let Some(v) = std::env::var(&var).ok().filter(|v| !v.is_empty()) {
@@ -135,10 +100,17 @@ async fn secrets(source: &SourceManifest) -> Result<Vec<(String, Redacted<String
             continue;
         }
         let reference = s.reference.clone();
-        let found = iohr_auth::off_thread(move || {
-            iohr_auth::KeyringStore::open()?.get_named(SECRET_SERVICE, &reference)
-        })
-        .await;
+        let store = match &keychain {
+            Some(k) => Ok(k.clone()),
+            None => iohr_auth::KeyringStore::open().map(std::sync::Arc::new),
+        };
+        let found = match store {
+            Ok(k) => {
+                keychain = Some(k.clone());
+                iohr_auth::off_thread(move || k.get_named(SECRET_SERVICE, &reference)).await
+            }
+            Err(e) => Err(e),
+        };
         match found {
             Ok(Some(v)) => out.push((s.env.clone(), v)),
             Ok(None) | Err(_) => {
@@ -197,15 +169,8 @@ fn changed(before: &Snapshot, after: &Snapshot) -> Vec<String> {
 }
 
 fn private_dir(p: &Path) -> Result<(), Error> {
-    std::fs::create_dir_all(p)
-        .map_err(|e| Error::Failed(format!("cannot create {}: {e}", p.display())))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| Error::Failed(format!("cannot restrict {}: {e}", p.display())))?;
-    }
-    Ok(())
+    iohr_auth::create_private_dir(p)
+        .map_err(|e| Error::Failed(format!("cannot create {}: {e}", p.display())))
 }
 
 /// Watches `$STATE/heartbeat.json`: each new one is logged and marked `"dev": true`.
@@ -380,10 +345,7 @@ pub(crate) async fn dev(global: &Global, env: &Env, path: &Path, test: bool) -> 
     let repos = dev_repos(&base)?;
     let secrets = secrets(&source).await?;
 
-    let (path_var, dropped) = child_path(
-        &std::env::var_os("PATH").unwrap_or_default(),
-        std::env::current_exe().ok().as_deref(),
-    );
+    let (path_var, dropped) = child_path_here();
     for d in &dropped {
         log_line(
             "iohr",
@@ -438,14 +400,8 @@ pub(crate) async fn dev(global: &Global, env: &Env, path: &Path, test: bool) -> 
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        strip_credentials(&mut c);
-        for (k, _) in std::env::vars_os() {
-            if k.to_str().is_some_and(hidden) {
-                c.env_remove(&k);
-            }
-        }
-        c.env("PATH", &path_var)
-            .env("STATE", &state)
+        strip_credentials(&mut c, &path_var);
+        c.env("STATE", &state)
             .env("CACHE", &cache)
             .env("REPOS", &repos)
             .env("IOHR_EXT_DEV", "1");
@@ -547,48 +503,10 @@ pub(crate) async fn dev(global: &Global, env: &Env, path: &Path, test: bool) -> 
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
-
-    use super::{child_path, hidden, mark_dev, secret_var};
+    use super::{mark_dev, secret_var};
 
     #[test]
-    fn iohr_and_its_folder_leave_the_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let with = dir.path().join("with");
-        let without = dir.path().join("without");
-        let mine = dir.path().join("mine");
-        for d in [&with, &without, &mine] {
-            std::fs::create_dir_all(d).unwrap();
-        }
-        std::fs::write(with.join("iohr"), "").unwrap();
-        std::fs::write(mine.join("iohr-dev"), "").unwrap();
-        let path = std::env::join_paths([&with, &without, &mine]).unwrap();
-        let (p, dropped) = child_path(&path, Some(&mine.join("iohr-dev")));
-        assert_eq!(std::env::split_paths(&p).collect::<Vec<_>>(), [without]);
-        assert_eq!(dropped, [with, mine]);
-        assert_eq!(child_path(&OsString::new(), None).1.len(), 0);
-    }
-
-    #[test]
-    fn credentials_and_dev_secrets_are_hidden() {
-        for k in [
-            "IOHR_TOKEN",
-            "IOHR_TOKEN_CI",
-            "IOHR_EXT_SECRET_GITHUB_TOKEN",
-            "INORBIT_TOKEN",
-            "INORBIT_KEY_SECRET",
-        ] {
-            assert!(hidden(k), "{k}");
-        }
-        for k in [
-            "IOHR_TOKENS",
-            "PATH",
-            "HOME",
-            "IOHR_EXT_API",
-            "GITHUB_TOKEN",
-        ] {
-            assert!(!hidden(k), "{k}");
-        }
+    fn a_dev_secret_variable_is_named_for_its_secret() {
         assert_eq!(secret_var("github-token"), "IOHR_EXT_SECRET_GITHUB_TOKEN");
     }
 

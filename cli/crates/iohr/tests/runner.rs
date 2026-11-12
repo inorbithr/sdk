@@ -90,12 +90,12 @@ fn iohr_as(server: &MockServer, dir: &Path, profile: &str, args: &[&str]) -> Com
 
 /// Signs `iohr` in as profile `p` with `tok`, the token kept in an owner-only file (the
 /// test machine has no Keychain to use; the runner's key goes to the same store).
-async fn login(server: &MockServer, dir: &Path, tok: &str) {
-    login_as(server, dir, tok, "p").await;
+async fn sign_in(server: &MockServer, dir: &Path, tok: &str) {
+    sign_in_as(server, dir, tok, "p").await;
 }
 
-/// [`login`] as another profile.
-async fn login_as(server: &MockServer, dir: &Path, tok: &str, profile: &str) {
+/// [`sign_in`] as another profile.
+async fn sign_in_as(server: &MockServer, dir: &Path, tok: &str, profile: &str) {
     Mock::given(method("GET"))
         .and(path("/v1/me"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -127,6 +127,41 @@ async fn login_as(server: &MockServer, dir: &Path, tok: &str, profile: &str) {
         .unwrap();
     let o = child.wait_with_output().unwrap();
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+}
+
+/// [`sign_in`], then lets this machine's runner use the person's own Claude plan:
+/// `claude_auth = "any"` for profile `p` and the personal-use notice accepted now.
+async fn login(server: &MockServer, dir: &Path, tok: &str) {
+    login_as(server, dir, tok, "p").await;
+}
+
+/// [`login`] as another profile.
+async fn login_as(server: &MockServer, dir: &Path, tok: &str, profile: &str) {
+    sign_in_as(server, dir, tok, profile).await;
+    allow_own_plan(dir, profile);
+}
+
+/// What `iohr runner personal-use --accept` and a person's `claude_auth = "any"` leave.
+fn allow_own_plan(dir: &Path, profile: &str) {
+    let p = dir.join("config").join("config.toml");
+    let mut text = std::fs::read_to_string(&p).unwrap_or_default();
+    let table = format!("[profiles.{profile}.runner]");
+    if !text.contains(&table) {
+        text.push('\n');
+        text.push_str(&table);
+        text.push_str("\nclaude_auth = \"any\"\n");
+        std::fs::write(&p, text).unwrap();
+    }
+    let runner = dir.join("config").join("runner");
+    std::fs::create_dir_all(&runner).unwrap();
+    std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let f = runner.join("personal-use.json");
+    std::fs::write(&f, format!(r#"{{"notice_version":1,"accepted_at":{now}}}"#)).unwrap();
+    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
 }
 
 fn sha(s: &(impl AsRef<[u8]> + ?Sized)) -> String {
@@ -381,16 +416,161 @@ async fn register_and_status_act_on_the_profiles_account_or_the_flags() {
 }
 
 #[tokio::test]
-async fn register_refuses_an_api_key_sign_in_and_calls_nothing() {
+async fn by_default_the_own_plan_is_refused_and_the_message_names_the_api_key() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
-    fake_claude(dir.path(), API_KEY);
-    login(&server, dir.path(), &token()).await;
+    fake_claude(dir.path(), SUB);
+    sign_in(&server, dir.path(), &token()).await;
+    let before = server.received_requests().await.unwrap().len();
+    for args in [&["runner", "register"][..], &["runner", "run"][..]] {
+        let o = run(&mut iohr(&server, dir.path(), args));
+        assert_eq!(o.status.code(), Some(1), "{args:?}: {}", text(&o));
+        assert!(text(&o).contains("API key only"), "{args:?}: {}", text(&o));
+        assert!(text(&o).contains("iohr runner api-key set"), "{}", text(&o));
+    }
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+}
+
+#[tokio::test]
+async fn the_own_plan_needs_the_personal_use_notice_accepted_as_well_as_the_config() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    sign_in(&server, dir.path(), &token()).await;
+    add_to_config(dir.path(), "\n[profiles.p.runner]\nclaude_auth = \"any\"\n");
     let before = server.received_requests().await.unwrap().len();
     let o = run(&mut iohr(&server, dir.path(), &["runner", "register"]));
     assert_eq!(o.status.code(), Some(1), "{}", text(&o));
-    assert!(text(&o).contains("subscription only"));
+    assert!(
+        text(&o).contains("iohr runner personal-use"),
+        "{}",
+        text(&o)
+    );
     assert_eq!(server.received_requests().await.unwrap().len(), before);
+
+    // Accepting needs no sign-in and no call; then registration goes ahead.
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "personal-use", "--accept", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["accepted"], json!(true));
+    assert!(
+        v["notice"]
+            .as_str()
+            .unwrap()
+            .starts_with("Personal use only.")
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+    mount_register(&server).await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(text(&o).contains("personal use only"), "{}", text(&o));
+
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "personal-use", "--withdraw", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["accepted"], json!(false));
+}
+
+/// A key shaped like an Anthropic one; it only ever reaches the fake `claude`.
+const STORED_KEY: &str = "sk-ant-api03-TESTKEYVALUE0123456789abcdef";
+
+#[tokio::test]
+async fn a_stored_api_key_reaches_claude_alone_and_is_never_printed_or_sent() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), API_KEY);
+    sign_in(&server, dir.path(), &token()).await;
+    let mut c = iohr(
+        &server,
+        dir.path(),
+        &["runner", "api-key", "set", "--stdin", "--json", "--verbose"],
+    );
+    c.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = c.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("{STORED_KEY}\n").as_bytes())
+        .unwrap();
+    let set = child.wait_with_output().unwrap();
+    assert_eq!(set.status.code(), Some(0), "{}", text(&set));
+    let v: Value = serde_json::from_slice(&set.stdout).unwrap();
+    assert_eq!(v, json!({"api_key_stored": true}));
+    // An API key needs no own-plan setting or notice.
+    mount_register(&server).await;
+    let reg = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "register", "--name", "mac", "--verbose"],
+    ));
+    assert_eq!(reg.status.code(), Some(0), "{}", text(&reg));
+    let status = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "status", "--json", "--verbose"],
+    ));
+    assert_eq!(status.status.code(), Some(0), "{}", text(&status));
+    let v: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(v["this_machine"]["auth"], json!("api_key"), "{v}");
+    assert_eq!(v["this_machine"]["api_key_stored"], json!(true), "{v}");
+    assert_eq!(v["this_machine"]["subscription"], json!(false), "{v}");
+
+    // claude saw the stored key, with the subprocess scrub beside it, and never the
+    // parent's own ANTHROPIC_* values.
+    let env = std::fs::read_to_string(dir.path().join("env.txt")).unwrap();
+    assert!(env.contains(&format!("ANTHROPIC_API_KEY={STORED_KEY}")));
+    assert!(env.contains("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1"));
+    assert!(!env.contains("SECRETKEY") && !env.contains("ANTHROPIC_BASE_URL"));
+    // Nothing printed it, nothing sent it, the config does not hold it.
+    for o in [&set, &reg, &status] {
+        assert!(!text(o).contains("TESTKEYVALUE"), "{}", text(o));
+    }
+    for r in server.received_requests().await.unwrap() {
+        assert!(!String::from_utf8_lossy(&r.body).contains("TESTKEYVALUE"));
+        assert!(!format!("{:?}", r.headers).contains("TESTKEYVALUE"));
+        assert!(!r.url.as_str().contains("TESTKEYVALUE"));
+    }
+    let config = std::fs::read_to_string(dir.path().join("config").join("config.toml")).unwrap();
+    assert!(!config.contains("TESTKEYVALUE"));
+
+    // Removing it signs claude out here again.
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "api-key", "remove", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v, json!({"removed": true}));
+}
+
+#[tokio::test]
+async fn an_api_key_on_the_command_line_is_refused_before_anything_runs() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "api-key", "set", STORED_KEY],
+    ));
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
+    assert!(!text(&o).contains("TESTKEYVALUE"), "{}", text(&o));
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -703,7 +883,7 @@ async fn run_takes_the_pack_keeps_the_lease_alive_and_reports_a_signed_turn() {
 /// Registers runner `mac` on its own server (which makes this machine's key), then
 /// mounts a coordinator that lists it and answers every heartbeat with no offer.
 async fn registered_and_idle(dir: &Path) -> MockServer {
-    fake_claude(dir, SUB);
+    fake_claude(dir, API_KEY);
     let first = MockServer::start().await;
     login(&first, dir, &token()).await;
     mount_register(&first).await;
@@ -1002,7 +1182,7 @@ async fn a_service_that_holds_the_beat_is_beaten_again_without_waiting_for_the_i
 async fn config_show_names_each_value_and_its_source_without_a_sign_in() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
-    login(&server, dir.path(), &token()).await;
+    sign_in(&server, dir.path(), &token()).await;
     add_to_config(
         dir.path(),
         "\n[runner]\ncapacity = 4\nalways_on = true\n\n[profiles.p.runner]\ncapacity = 8\n",
@@ -1940,6 +2120,120 @@ async fn sign_in_io_calls_the_coordinator_with_a_minted_token_and_guards_the_sec
     );
 }
 
+const REVOKE_ID: &str = "rnr_01M5Z0WF3MRKDQ75T7F72E3F9N";
+
+/// A server that lists `REVOKE_ID` as enrolled and, in the coordinator's list, as
+/// `status`; DELETE answers `{}`.
+async fn revoke_server(dir: &Path, status: &str) -> MockServer {
+    let server = MockServer::start().await;
+    login(&server, dir, &token_with(&["identity:read"])).await;
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": [
+            {"runner_id": REVOKE_ID, "label": "mac", "public_key": "k", "revoked_at": ""}
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": [
+            {"runner_id": REVOKE_ID, "name": "mac", "os": "macos", "status": status,
+             "last_seen_at": "2026-10-12T08:00:00Z"}
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path_regex(r"^/v1/approvals/runners/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&server)
+        .await;
+    server
+}
+
+async fn deletes(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "DELETE")
+        .map(|r| r.url.path().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn revoke_refuses_a_bad_id_and_an_unknown_runner_without_a_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = revoke_server(dir.path(), "offline").await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "revoke", "run_1"],
+    ));
+    assert_ne!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(text(&o).contains("rnr_"), "{}", text(&o));
+    let other = "rnr_01M5Z0WF3MRKDQ75T7F72E3F9P";
+    let o = run(&mut iohr(&server, dir.path(), &["runner", "revoke", other]));
+    assert_ne!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(
+        text(&o).contains("not a runner of this account"),
+        "{}",
+        text(&o)
+    );
+    assert_eq!(deletes(&server).await, Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn revoke_refuses_an_online_runner_unless_forced() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = revoke_server(dir.path(), "online").await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "revoke", REVOKE_ID],
+    ));
+    assert_ne!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(text(&o).contains("--force-online"), "{}", text(&o));
+    assert_eq!(deletes(&server).await, Vec::<String>::new());
+    let args = ["runner", "revoke", REVOKE_ID, "--force-online"];
+    let o = run(&mut iohr(&server, dir.path(), &args));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert_eq!(
+        deletes(&server).await,
+        vec![format!("/v1/approvals/runners/{REVOKE_ID}")]
+    );
+}
+
+#[tokio::test]
+async fn revoke_sends_the_delete_and_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = revoke_server(dir.path(), "offline").await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "revoke", REVOKE_ID],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let said = text(&o);
+    assert!(
+        said.contains(&format!("revoked {REVOKE_ID} (mac)")),
+        "{said}"
+    );
+    assert!(said.contains("macos"), "{said}");
+    assert_eq!(
+        deletes(&server).await,
+        vec![format!("/v1/approvals/runners/{REVOKE_ID}")]
+    );
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "revoke", REVOKE_ID, "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v, json!({}));
+}
+
 // ---- the session host (RFC 0213)
 
 /// The one socket a host made below `data`, if it is there.
@@ -1949,6 +2243,29 @@ fn session_socket(data: &Path) -> Option<std::path::PathBuf> {
         .filter_map(Result::ok)
         .map(|e| e.path().join("sock"))
         .find(|p| p.exists())
+}
+
+/// How many sessions the host counts, asked on its socket (`status`): none while no host
+/// answers. A shell that was started is in the count only once it has joined, not when the
+/// socket first appears.
+fn host_sessions(data: &Path) -> usize {
+    use std::io::{BufRead as _, BufReader};
+    let Some(sock) = session_socket(data) else {
+        return 0;
+    };
+    let Ok(mut s) = std::os::unix::net::UnixStream::connect(sock) else {
+        return 0;
+    };
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+    if writeln!(s, "status").is_err() {
+        return 0;
+    }
+    let mut line = String::new();
+    let _ = BufReader::new(s).read_line(&mut line);
+    line.split("sessions=")
+        .nth(1)
+        .and_then(|n| n.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 /// What the shell and the host wrote, for a failure message.
@@ -2107,6 +2424,12 @@ async fn a_killed_shell_takes_the_host_with_it() {
     })
     .await;
     assert!(beats_at_least(&server, 1).await >= 1);
+    // Kill only a shell the host has counted: one killed before it joined leaves a host nobody
+    // joined, which waits out its first-join window (30 s) and not the pipe's close.
+    wait_until("the shell to join", || {
+        host_sessions(&dir.path().join("data")) >= 1
+    })
+    .await;
     // SIGKILL: the shell cannot say goodbye; the kernel closes its end of the pipe.
     shell.kill().unwrap();
     shell.wait().unwrap();
@@ -2224,6 +2547,75 @@ async fn bare_iohr_on_a_terminal_enters_the_session_and_stop_closes_the_panel() 
     s.until("the host's stop said", |screen| {
         pty::any(screen, "the session host stopped")
     });
+}
+
+/// `iohr stop` inside the panel ends the host and lifts the panel; the shell and the panel
+/// proxy around it stay. Running `iohr` again then brings the panel back and must leave a live
+/// host joined for as long as the panel is up: the short-lived re-run cannot be the one that
+/// joins (the host stops when its last session leaves), so the proxy rejoins for it.
+#[tokio::test]
+async fn bare_iohr_after_stop_inside_the_panel_starts_the_host_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = host_registered(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let bin = env!("CARGO_BIN_EXE_iohr");
+    let mut c = session_cmd(&server, dir.path(), &[]);
+    c.current_dir(&project)
+        .env_remove("TERM_PROGRAM")
+        .env("TERM", "xterm-256color")
+        .env("COLORTERM", "truecolor")
+        .env("SHELL", "/bin/sh")
+        .env("PS1", "shell> ");
+    let mut s = pty::Session::spawn(c);
+    s.until("the panel over the shell", |screen| {
+        pty::any(screen, "⌥i menu") && pty::any(screen, "shell>")
+    });
+    let data = dir.path().join("data");
+    wait_until("the first host's socket", || {
+        session_socket(&data).is_some()
+    })
+    .await;
+
+    // `iohr stop` typed in the panel's shell: the host ends, the panel lifts.
+    s.send(format!("{bin} stop\r").as_bytes());
+    s.until("the panel closed by stop", |screen| {
+        pty::any(screen, "the panel is closed")
+    });
+    wait_until("the first host gone", || session_socket(&data).is_none()).await;
+    let beats_before = bodies(&server, BEAT).await.len();
+
+    // Bare `iohr` in the stopped panel: the panel is back, and so is a host.
+    s.send(format!("{bin}\r").as_bytes());
+    s.until("the re-run", |screen| pty::any(screen, "the panel is on"));
+    s.until("the panel back", |screen| pty::any(screen, "⌥i menu"));
+    wait_until("a host started by the re-run", || {
+        session_socket(&data).is_some()
+    })
+    .await;
+    assert!(
+        beats_at_least(&server, beats_before + 2).await >= beats_before + 2,
+        "the second host sent no heartbeat: {}",
+        session_diag(dir.path())
+    );
+    // It stays: the re-run process has long exited, and the proxy holds the session.
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    assert!(
+        session_socket(&data).is_some(),
+        "the host ended with the re-run: {}",
+        session_diag(dir.path())
+    );
+    assert!(
+        pty::any(s.screen.screen(), "⌥i menu"),
+        "the panel went again:\n{}",
+        s.screen.screen().contents()
+    );
+
+    // Leaving the panel leaves the session, and the host stops with its last session.
+    s.send(b"exit\r");
+    let status = s.exited().expect("the shell ends after exit");
+    assert!(status.success(), "{status}");
+    wait_until("the second host gone", || session_socket(&data).is_none()).await;
 }
 
 /// Under `NO_COLOR` a terminal is not the session either: the usage report, exit 2.

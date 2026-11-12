@@ -5,9 +5,10 @@ use crate::Env;
 use crate::cli::{Global, ProfileCommand};
 use crate::commands::accounts::Me;
 use crate::commands::login::storage_name;
-use crate::context::{Ctx, blocking, session_for};
+use crate::context::{Ctx, Prompts, blocking, session_for};
 use crate::error::Error;
 use crate::output::Out;
+use crate::ui::Listed;
 
 pub(crate) async fn run(g: &Global, env: &Env, cmd: ProfileCommand, out: Out) -> Result<(), Error> {
     let mut ctx = Ctx::load(g)?;
@@ -42,7 +43,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProfileCommand, out: Out) ->
                     ]
                 })
                 .collect();
-            Out::table(&["PROFILE", "KIND", "ACCOUNT", "KEPT IN"], &rows);
+            Out::list(
+                &["PROFILE", "KIND", "ACCOUNT", "KEPT IN"],
+                &rows,
+                &Listed::new("profile", "profiles"),
+            );
             Ok(())
         }
         ProfileCommand::Use { name } => {
@@ -72,7 +77,7 @@ async fn show(g: &Global, ctx: &Ctx, name: Option<ProfileName>, out: Out) -> Res
         .cloned()
         .ok_or_else(|| Error::Usage(format!("there is no profile {name}")))?;
     let key = EntryKey::new(name.clone(), &p.account)?;
-    let present = blocking(ctx.store(p.storage)?, move |s| {
+    let present = blocking(ctx.store(p.storage, Prompts::Allowed)?, move |s| {
         s.get(&key).map(|v| v.is_some())
     })
     .await?;
@@ -178,7 +183,7 @@ pub(crate) async fn point_at(
     if id != profile.account {
         let old_key = EntryKey::new(name.clone(), &profile.account)?;
         let new_key = EntryKey::new(name.clone(), id)?;
-        let store = ctx.store(profile.storage)?;
+        let store = ctx.store(profile.storage, Prompts::Allowed)?;
         blocking(store, move |st| {
             if let Some(secret) = st.get(&old_key)? {
                 st.set(&new_key, &secret)?;

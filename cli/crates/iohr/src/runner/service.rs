@@ -171,6 +171,7 @@ pub(crate) struct RunnerInfo {
     pub(crate) user: String,
     pub(crate) name: String,
     pub(crate) status: String,
+    pub(crate) os: String,
     pub(crate) last_seen_at: String,
     pub(crate) providers: Vec<String>,
     /// The Ed25519 public key (base64) the runner registered with; empty if the
@@ -193,6 +194,7 @@ impl RunnerInfo {
             user: s("user"),
             name: s("name"),
             status: s("status"),
+            os: s("os"),
             last_seen_at: s("last_seen_at"),
             public_key: s("public_key"),
             capacity: u32::try_from(num(v, "capacity")).unwrap_or(0),
@@ -328,6 +330,14 @@ pub(crate) struct Pack {
     pub(crate) provider: String,
     /// For a review turn: the pull request's head the Critique is for.
     pub(crate) critique_commit: String,
+    /// The person who created the job the turn is for (`created_by`; `createdBy` is
+    /// read too); empty when the service sent none. On the person's own Claude plan the
+    /// runner takes only turns of jobs its own person created.
+    pub(crate) created_by: String,
+    /// The account's sign-in policy per provider (`auth_policy`: `{"claude": "api"}`;
+    /// `authPolicy` is read too). It can only narrow what the runner's own setting
+    /// allows, never widen it; a value the runner does not know is read as `api`.
+    pub(crate) auth_policy: BTreeMap<String, String>,
 }
 
 impl Pack {
@@ -375,6 +385,23 @@ impl Pack {
                 .unwrap_or_else(|| s("checkoutPath")),
             provider: s("provider"),
             critique_commit: s("critique_commit"),
+            created_by: Some(s("created_by"))
+                .filter(|c| !c.is_empty())
+                .unwrap_or_else(|| s("createdBy")),
+            auth_policy: v
+                .get("auth_policy")
+                .or_else(|| v.get("authPolicy"))
+                .and_then(Value::as_object)
+                .map(|m| {
+                    m.iter()
+                        .map(|(k, x)| {
+                            // A value that is not a string is not a value the runner
+                            // knows: the strictest.
+                            (k.clone(), x.as_str().unwrap_or("").to_owned())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }
@@ -1368,6 +1395,26 @@ mod tests {
             (9, 4000, "{}")
         );
         assert_eq!((p.max_turns, p.wall_clock_secs), (5, 600));
+    }
+
+    #[test]
+    fn a_pack_reads_its_creator_and_auth_policy_and_tolerates_neither() {
+        let old = Pack::from_json(&json!({"turn_id": "t"}));
+        assert_eq!(old.created_by, "");
+        assert!(old.auth_policy.is_empty());
+        let snake = Pack::from_json(
+            &json!({"created_by": "usr_a", "auth_policy": {"claude": "api", "codex": 3}}),
+        );
+        assert_eq!(snake.created_by, "usr_a");
+        assert_eq!(snake.auth_policy["claude"], "api");
+        assert_eq!(
+            snake.auth_policy["codex"], "",
+            "not a string: read as unknown"
+        );
+        let camel =
+            Pack::from_json(&json!({"createdBy": "usr_b", "authPolicy": {"claude": "any"}}));
+        assert_eq!(camel.created_by, "usr_b");
+        assert_eq!(camel.auth_policy["claude"], "any");
     }
 
     #[test]

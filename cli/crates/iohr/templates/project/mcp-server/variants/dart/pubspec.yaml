@@ -1,0 +1,13 @@
+name: @@MODULE@@
+description: @@DESCRIPTION@@
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  dart_mcp: 0.5.2
+
+dev_dependencies:
+  test: 1.25.15

@@ -28,6 +28,8 @@ mod workloads;
 #[cfg(unix)]
 mod cells;
 #[cfg(unix)]
+mod chat;
+#[cfg(unix)]
 mod input;
 #[cfg(unix)]
 mod model;
@@ -564,19 +566,22 @@ async fn live(g: &Global, env: Env, args: PanelArgs) -> Result<(), Error> {
             initial,
             command: args.command,
             host_gone: None,
+            project: None,
         },
     )
     .await
     .map(|_| ())
 }
 
-/// Bare `iohr`: the person's shell under the panel, in the session the caller joined. Answers
-/// `true` when the session host stopped while the shell was open (`iohr stop`).
+/// Bare `iohr`: the person's shell under the panel, in the session the caller joined for
+/// `project`. Answers `true` when the session host stopped while the shell was open (`iohr
+/// stop`); running `iohr` again then joins a host again, from here, for as long as the panel is up.
 #[cfg(unix)]
 pub(crate) async fn session_shell(
     g: &Global,
     env: Env,
     host_gone: Option<tokio::sync::oneshot::Receiver<()>>,
+    project: std::path::PathBuf,
 ) -> Result<bool, Error> {
     proxy::run(
         g,
@@ -586,6 +591,7 @@ pub(crate) async fn session_shell(
             initial: model::View::Rest,
             command: Vec::new(),
             host_gone,
+            project: Some(project),
         },
     )
     .await
@@ -600,6 +606,30 @@ pub(crate) fn bare_enters(g: &Global) -> bool {
 
 #[cfg(not(unix))]
 pub(crate) fn bare_enters(_: &Global) -> bool {
+    false
+}
+
+/// Whether the panel's chat box is on the screen and shows an answer's progress (RFC 0212): the
+/// ask then leaves its own spinner out.
+#[cfg(unix)]
+pub(crate) fn chat_shown() -> bool {
+    proxy::chat_shown()
+}
+
+#[cfg(not(unix))]
+pub(crate) fn chat_shown() -> bool {
+    false
+}
+
+/// One progress report to the chat box (`begin`, `step;2;-;reading 2 files`, `end`, `back;1`);
+/// whether it was sent.
+#[cfg(unix)]
+pub(crate) fn chat_report(body: &str) -> bool {
+    proxy::chat_report(body)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn chat_report(_: &str) -> bool {
     false
 }
 

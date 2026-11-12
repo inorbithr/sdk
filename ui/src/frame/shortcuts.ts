@@ -7,9 +7,9 @@
 //
 // The frame's own shortcuts live in one file, frame/shortcuts.json: id, label and accelerator. This module reads it,
 // and so does iohr-mac, both its page (src/lib/shortcuts.ts) and its Rust native menu (keys.rs, by include_str!),
-// which add only where the Mac menu bar places each row. A browser has no native menu, so a keydown listener on the
-// window delivers them (the Mac app's fallback outside Tauri does the same).
-import { useEffect, useRef } from "react";
+// which add only where the Mac menu bar places each row. A browser has no native menu: the web UI's one keydown
+// listener (lib/use-shortcuts.ts) delivers them, from the registry in lib/shortcut-registry.ts.
+import layoutTable from "./layout-shortcuts.json" with { type: "json" };
 import frameTable from "./shortcuts.json" with { type: "json" };
 
 export type KeyLike = {
@@ -33,6 +33,8 @@ const SYMBOLS: Record<string, string> = {
   arrowdown: "↓",
   enter: "↩",
   backspace: "⌫",
+  escape: "Esc",
+  tab: "⇥",
 };
 const ORDER = ["ctrl", "alt", "shift", "cmd"];
 const NAMES: Record<string, string> = {
@@ -104,28 +106,49 @@ export type FrameShortcut = { id: string; label: string; accel: string };
 /** The shortcuts the frame answers, from frame/shortcuts.json: the one table of them. */
 export const FRAME_SHORTCUTS: FrameShortcut[] = frameTable;
 
+/**
+ * The layout shortcuts (⌃⌥ and an arrow, Return, G or Z), as the Mac app's window layouts spell them. They are in
+ * their own table, not shortcuts.json, because iohr-mac reads that file for its native menu and already keeps these
+ * rows in its own table; the two fold into one when the owner extends ADR 0230 to the layouts (RFC 0217).
+ */
+export const LAYOUT_SHORTCUTS: FrameShortcut[] = layoutTable;
+
+const ALL_SHORTCUTS = [...FRAME_SHORTCUTS, ...LAYOUT_SHORTCUTS];
+
 /** The frame shortcut a key event is, if any. */
-export const shortcutOf = (e: KeyLike) => FRAME_SHORTCUTS.find((s) => matches(s.accel, e));
+export const shortcutOf = (e: KeyLike) => ALL_SHORTCUTS.find((s) => matches(s.accel, e));
 
 /** The keys to show for a frame shortcut id; "" for an unknown id. */
 export const keysOf = (id: string) => {
-  const s = FRAME_SHORTCUTS.find((x) => x.id === id);
+  const s = ALL_SHORTCUTS.find((x) => x.id === id);
   return s ? symbols(s.accel) : "";
 };
 
-/** Runs the handler of each frame shortcut pressed anywhere in the page; ids without a handler pass through. */
-export function useFrameShortcuts(handlers: Partial<Record<string, () => void>>) {
-  const now = useRef(handlers);
-  now.current = handlers;
-  useEffect(() => {
-    const on = (e: KeyboardEvent) => {
-      const s = shortcutOf(e);
-      const run = s ? now.current[s.id] : undefined;
-      if (!run) return;
-      e.preventDefault();
-      run();
-    };
-    window.addEventListener("keydown", on, true);
-    return () => window.removeEventListener("keydown", on, true);
-  }, []);
+// ---------------------------------------------------------------- showing a key for the platform
+
+/** Whether this is a Mac: ⌘ and the glyphs show there, Ctrl and words everywhere else. */
+export const isMac = (platform: string = typeof navigator === "undefined" ? "" : navigator.platform): boolean =>
+  /^(mac|iphone|ipad)/i.test(platform);
+
+const WORDS: Record<string, string> = {
+  cmdorctrl: "Ctrl",
+  cmd: "Meta",
+  ctrl: "Ctrl",
+  alt: "Alt",
+  shift: "Shift",
+  arrowleft: "←",
+  arrowright: "→",
+  arrowup: "↑",
+  arrowdown: "↓",
+  enter: "Enter",
+  escape: "Esc",
+  backspace: "Backspace",
+};
+
+/** The keys to show for an accelerator: "⌘K" on a Mac, "Ctrl+K" elsewhere. */
+export function show(accel: string, mac: boolean): string {
+  if (mac) return symbols(accel);
+  return split(accel)
+    .map((p) => WORDS[p.toLowerCase()] ?? (p.length === 1 ? p.toUpperCase() : p))
+    .join("+");
 }
