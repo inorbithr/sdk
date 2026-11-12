@@ -84,9 +84,11 @@ use super::provider;
 
 mod disk_prune;
 mod edge_site;
+pub(crate) mod extension;
 mod install_checks;
 mod labs_reattribute;
 mod runner_scale;
+pub(crate) mod v1;
 
 /// The schema a run's `schema_id` names.
 pub(crate) const HOST_ACTION: &str = "runner/host-action/v0";
@@ -106,6 +108,28 @@ pub(crate) const DISK_PRUNE: &str = "disk.prune";
 pub(crate) const RUNNER_SCALE: &str = "helm.runner-scale";
 pub(crate) const EDGE_SITE_CALL: &str = "edge.caddy-site-call";
 pub(crate) const REATTRIBUTE_DOCUMENT: &str = "labs.reattribute-document";
+
+/// Whether `id` is one of the runner's own actions: no extension may declare it.
+pub(crate) fn is_builtin(id: &str) -> bool {
+    matches!(
+        id,
+        DELETE_FAILED_PODS
+            | ROLLOUT_RESTART
+            | USER_RESTART
+            | PRUNE_IMAGES
+            | CANCEL_RUN
+            | UPGRADE
+            | PREVIEW_TAKE
+            | ROLL_TASK
+            | SWEEP_TARGETS
+            | RELEASE_RERUN
+            | INSTALL_CHECKS
+            | DISK_PRUNE
+            | RUNNER_SCALE
+            | EDGE_SITE_CALL
+            | REATTRIBUTE_DOCUMENT
+    )
+}
 /// Core's task the action runs.
 pub(crate) const LABS_REATTRIBUTE: &str = "labs:reattribute";
 
@@ -147,7 +171,7 @@ const MAX_RUN_ID: u64 = 9_007_199_254_740_991;
 const REPO_OWNER: &str = "inorbithr/";
 
 /// `^[a-z0-9]+(-[a-z0-9]+)*$`: one word of an action id.
-fn is_word(s: &str) -> bool {
+pub(crate) fn is_word(s: &str) -> bool {
     !s.is_empty()
         && s.split('-').all(|part| {
             !part.is_empty()
@@ -257,7 +281,7 @@ fn is_sweep_mode(s: &str) -> bool {
 }
 
 /// The effect sentence: 1 to 200 characters, no control character.
-fn is_effect(s: &str) -> bool {
+pub(crate) fn is_effect(s: &str) -> bool {
     let n = s.chars().count();
     (1..=200).contains(&n)
         && !s
@@ -605,17 +629,13 @@ impl Action {
     }
 }
 
-/// The registry: the action `doc` names, from a document [`validate`] passed, on this
-/// runner's system. An id that is not in the catalog is `unknown action`.
+/// The registry: the action `doc` names, from a document [`validate`] passed, for a
+/// runner on `os` (`std::env::consts::OS`). An id that is not in the catalog is
+/// `unknown action`.
 ///
 /// # Errors
 /// `unknown action`, a parameter of the wrong type, a namespace refused by
 /// [`namespace_allowed`], or an action this system cannot carry out.
-pub(crate) fn lookup(doc: &Value) -> Result<Action, String> {
-    lookup_on(doc, std::env::consts::OS)
-}
-
-/// [`lookup`] for a runner on `os` (`std::env::consts::OS`).
 pub(crate) fn lookup_on(doc: &Value, os: &str) -> Result<Action, String> {
     let text = |key: &str| -> Result<String, String> {
         doc.pointer(&format!("/params/{key}"))
@@ -1302,6 +1322,31 @@ pub(crate) trait ArgvRunner {
     async fn settle(&self) {
         tokio::time::sleep(install_checks::SETTLE).await;
     }
+
+    /// The installed extension `name`, verified again, whose declared host actions this
+    /// runner carries out.
+    ///
+    /// # Errors
+    /// This runner carries out no extension's actions, or `name` is not installed or no
+    /// longer verifies.
+    fn installed_extension(&self, _name: &str) -> Result<extension::Installed, String> {
+        Err("this runner carries out no extension's host actions".to_owned())
+    }
+
+    /// Starts an extension's `program` as `<program> host-action <id>` with `input` on its
+    /// standard input, killed after `limit`.
+    ///
+    /// # Errors
+    /// It did not start or outlived `limit`.
+    async fn run_extension(
+        &self,
+        _program: &Path,
+        _id: &str,
+        _input: &[u8],
+        _limit: Duration,
+    ) -> Result<Output, String> {
+        Err("this runner carries out no extension's host actions".to_owned())
+    }
 }
 
 /// The cluster every `kubectl` call is pinned to: a context of the kubeconfig, a
@@ -1402,6 +1447,8 @@ pub(crate) struct HostRunner {
     pub(crate) ssh_env: Vec<(OsString, OsString)>,
     /// The account this runner's approvals belong to (`labs.reattribute-document`).
     pub(crate) account: Option<String>,
+    /// The installed extensions whose declared host actions this runner carries out.
+    pub(crate) extensions: Option<extension::Extensions>,
 }
 
 impl HostRunner {
@@ -1429,6 +1476,7 @@ impl HostRunner {
             core_checkout: core_checkout.map(PathBuf::from),
             ssh_env: pass(&["SSH_AUTH_SOCK", "INORBIT_SSH_HOST"]),
             account: None,
+            extensions: None,
         }
     }
 
@@ -1571,6 +1619,32 @@ impl ArgvRunner for HostRunner {
             .clone()
             .ok_or_else(|| "this runner does not know its account".to_owned())
     }
+
+    fn installed_extension(&self, name: &str) -> Result<extension::Installed, String> {
+        self.extensions
+            .as_ref()
+            .ok_or_else(|| "this runner carries out no extension's host actions".to_owned())?
+            .installed(name)
+    }
+
+    async fn run_extension(
+        &self,
+        program: &Path,
+        id: &str,
+        input: &[u8],
+        limit: Duration,
+    ) -> Result<Output, String> {
+        let mut c = tokio::process::Command::new(program);
+        c.args(["host-action", id]).env_clear().envs(
+            self.env
+                .iter()
+                .filter(|(k, _)| {
+                    k != "KUBECONFIG" && !k.to_str().is_some_and(crate::ext::run::hidden)
+                })
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+        collect(c, id, limit, Some(input)).await
+    }
 }
 
 /// The top-level `current-context:` of a kubeconfig's text.
@@ -1669,38 +1743,61 @@ impl HostRunner {
         } else if let Some(dir) = self.folder(tool)? {
             c.current_dir(dir);
         }
-        c.args(&full)
-            .env_clear()
-            .envs(env)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        // Its own process group, so a timeout takes what the tool started with it.
-        #[cfg(unix)]
-        c.process_group(0);
-        let mut child = c
-            .spawn()
-            .map_err(|e| format!("{name} did not start: {}", e.kind()))?;
-        let mut group = GroupGuard::new(child.id());
-        let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
-        let all = async {
-            let (out, err, status) = tokio::join!(drain(stdout), drain(stderr), child.wait());
-            Ok::<_, std::io::Error>((out?, err?, status?))
-        };
-        let ((stdout, tally), (stderr, _), status) = tokio::time::timeout(tool.timeout(), all)
-            .await
-            .map_err(|_| format!("{name} took over {}s", tool.timeout().as_secs()))?
-            .map_err(|e| format!("{name} failed: {}", e.kind()))?;
-        // Reaped: its pid may be reused, so nothing is left to kill.
-        group.disarm();
-        Ok(Output {
-            success: status.success(),
-            stdout,
-            stderr,
-            tally,
-        })
+        c.args(&full).env_clear().envs(env);
+        collect(c, name, tool.timeout(), None).await
     }
+}
+
+/// Starts `c` in its own process group and reads both its streams through [`Capture`],
+/// `input` written to its standard input and then closed (no input: none at all), killed
+/// with what it started when it outlives `limit`. `name` is what an error calls it.
+async fn collect(
+    mut c: tokio::process::Command,
+    name: &str,
+    limit: Duration,
+    input: Option<&[u8]>,
+) -> Result<Output, String> {
+    c.stdin(if input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true);
+    // Its own process group, so a timeout takes what the tool started with it.
+    #[cfg(unix)]
+    c.process_group(0);
+    let mut child = c
+        .spawn()
+        .map_err(|e| format!("{name} did not start: {}", e.kind()))?;
+    let mut group = GroupGuard::new(child.id());
+    let (stdin, stdout, stderr) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
+    let feed = async move {
+        use tokio::io::AsyncWriteExt as _;
+        if let (Some(mut w), Some(bytes)) = (stdin, input) {
+            // A program that exits without reading its input still reports its own result.
+            if w.write_all(bytes).await.is_ok() {
+                w.shutdown().await.ok();
+            }
+        }
+    };
+    let all = async {
+        let ((), out, err, status) = tokio::join!(feed, drain(stdout), drain(stderr), child.wait());
+        Ok::<_, std::io::Error>((out?, err?, status?))
+    };
+    let ((stdout, tally), (stderr, _), status) = tokio::time::timeout(limit, all)
+        .await
+        .map_err(|_| format!("{name} took over {}s", limit.as_secs()))?
+        .map_err(|e| format!("{name} failed: {}", e.kind()))?;
+    // Reaped: its pid may be reused, so nothing is left to kill.
+    group.disarm();
+    Ok(Output {
+        success: status.success(),
+        stdout,
+        stderr,
+        tally,
+    })
 }
 
 /// What a tool said, made safe to put in a report: any URL, `host:port`, IP address,
@@ -2055,7 +2152,7 @@ pub(crate) mod testing {
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
-    use super::{Action, ArgvRunner, Output, Tool};
+    use super::{Action, ArgvRunner, Output, Tool, extension};
 
     pub(crate) struct Fake {
         /// What `kubectl get namespaces` answers.
@@ -2079,6 +2176,10 @@ pub(crate) mod testing {
         pub(crate) account: Option<String>,
         /// The folders of the calls made with `run_in`, in order.
         pub(crate) folders: Mutex<Vec<std::path::PathBuf>>,
+        /// The installed extensions, by name.
+        pub(crate) extensions: Vec<(String, extension::Installed)>,
+        /// The extension programs started: program, action id and standard input.
+        pub(crate) ext_calls: Mutex<Vec<(std::path::PathBuf, String, Vec<u8>)>>,
     }
 
     impl Fake {
@@ -2130,6 +2231,42 @@ pub(crate) mod testing {
             self.run(tool, argv).await
         }
 
+        fn installed_extension(&self, name: &str) -> Result<extension::Installed, String> {
+            self.extensions
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, i)| i.clone())
+                .ok_or_else(|| format!("{name} is not installed"))
+        }
+
+        async fn run_extension(
+            &self,
+            program: &std::path::Path,
+            id: &str,
+            input: &[u8],
+            _limit: std::time::Duration,
+        ) -> Result<Output, String> {
+            if let Some(why) = &self.missing {
+                return Err(why.clone());
+            }
+            self.ext_calls.lock().unwrap().push((
+                program.to_path_buf(),
+                id.to_owned(),
+                input.to_vec(),
+            ));
+            if let Some(out) = self.script.lock().unwrap().pop_front() {
+                return Ok(out);
+            }
+            if let Some(out) = &self.answer {
+                return Ok(out.clone());
+            }
+            Ok(Output::new(
+                !self.fail,
+                "",
+                if self.fail { "forbidden" } else { "" },
+            ))
+        }
+
         async fn run(&self, tool: Tool, argv: &[String]) -> Result<Output, String> {
             if let Some(why) = &self.missing {
                 return Err(why.clone());
@@ -2170,6 +2307,8 @@ pub(crate) mod testing {
             state: None,
             account: None,
             folders: Mutex::new(Vec::new()),
+            extensions: Vec::new(),
+            ext_calls: Mutex::new(Vec::new()),
         }
     }
 }

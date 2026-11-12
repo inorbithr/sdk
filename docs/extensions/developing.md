@@ -60,6 +60,7 @@ secrets = []                     # [{ name, ref, env }]: references, never value
 [panel]                          # title, entry: a program that serves a panel its host shows
 [upgrade]                        # strategy, keep_previous, migrate, rollback
 [dev]                            # lang: how iohr ext dev runs the folder
+[[host_actions]]                 # id, params, os, effect, timeout_secs: actions a runner carries out once approved
 ```
 
 `permissions.scopes` and `permissions.privileges` mean what `scopes` and `privileges`
@@ -73,6 +74,58 @@ writes (a later slice), and on macOS they stay declared and audited.
 0063's non-sensitive kinds: `ids`, `measurements`, `hashes`, `declared.names`,
 `evidence.claims`, `check.result`, `monitor.result`, `extension.health`. Anything else
 leaves only through a per-item share, never from an extension.
+
+### Host actions
+
+An extension can offer actions that an `iohr runner` carries out on its host, each one
+only after a person approves it. Each `[[host_actions]]` entry declares one:
+
+```toml
+[[host_actions]]
+id = "hello.restart-worker"      # <name>.<action>: lower-case words joined by '-', at most 64 characters
+os = ["linux", "macos"]          # one or more of linux, macos, windows
+effect = "Restarts worker {worker} after {grace_secs} seconds."
+timeout_secs = 120               # 1 to 3600
+
+[host_actions.params]            # at most 8, each required
+worker = { type = "dns-label" }
+grace_secs = { type = "integer", min = 0, max = 600 }
+```
+
+A parameter name is 1 to 32 lower-case letters, digits and `_`, starting with a letter.
+Each parameter has one of these types, and takes no other field:
+
+| Type | Holds |
+|---|---|
+| `word` | lower-case letters and digits, words joined by `-`, at most 64 characters |
+| `dns-label` | 1 to 63 lower-case letters, digits and `-`, a letter or digit at each end |
+| `rev` | a full commit: 40 lower-case hexadecimal digits |
+| `repo` | `owner/name`, each part 1 to 100 letters, digits, `-`, `_` and `.` |
+| `integer` | an integer from `min` to `max` (both required, at most 2^53 - 1) |
+| `enum` | one of `values`: 1 to 32 different values, each 1 to 64 lower-case letters, digits, `:`, `.`, `_` and `-`, starting with a letter or digit |
+
+None of them can hold a space, a quote, a `/` outside `repo`, or anything else a shell
+or a path reads specially. `effect` is the one line a person reads before approving:
+at most 200 characters, and each `{name}` in it must be a declared parameter. The id
+must not be one of the runner's own actions, and an extension declares at most 32.
+
+An artifact that declares host actions is published with the config media type
+`application/vnd.inorbit.iohr.extension.config.v2+json`; `iohr ext install` refuses
+host actions in a v1 config, and shows each declared action with its effect, as `iohr
+ext lint` does.
+
+When a person approves one, the runner checks the approval against the installed copy
+(see "Approved run asks" in `cli/README.md`) and then starts your entrypoint as:
+
+```sh
+<entrypoint> host-action hello.restart-worker   # stdin: {"grace_secs":30,"worker":"build-1"}
+```
+
+No shell is involved. The checked parameters arrive as one JSON object on standard
+input; the environment is the runner's scrubbed one, without `IOHR_TOKEN*` or
+`KUBECONFIG`. Exit 0 for done, anything else for failed. What the program prints is
+reported back, redacted and cut to 500 characters, and the runner stops it at
+`timeout_secs`.
 
 ## `iohr ext lint`
 

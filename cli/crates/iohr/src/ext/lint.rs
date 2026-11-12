@@ -64,6 +64,8 @@ pub struct Preview {
     pub data_leaves: Vec<Words>,
     /// Where it may be installed.
     pub targets: Vec<String>,
+    /// The host actions it offers, each with its effect as a person reads it.
+    pub host_actions: Vec<Words>,
     /// What is enforced and what is declared only.
     pub enforcement: String,
 }
@@ -596,6 +598,24 @@ pub fn preview(s: &SourceManifest) -> Preview {
             printable(&panel.title)
         ));
     }
+    let host_actions: Vec<Words> = s
+        .host_actions
+        .iter()
+        .map(|a| Words {
+            name: a.id.clone(),
+            words: a.effect.clone(),
+        })
+        .collect();
+    if !host_actions.is_empty() {
+        lines.push(format!(
+            "Offers its runner's host actions, each approved by a person before it runs: {}.",
+            host_actions
+                .iter()
+                .map(|w| format!("{} ({})", w.name, w.words))
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+    }
     let targets: Vec<String> = s
         .targets
         .as_ref()
@@ -636,6 +656,7 @@ pub fn preview(s: &SourceManifest) -> Preview {
         secrets,
         data_leaves,
         targets,
+        host_actions,
         enforcement,
     }
 }

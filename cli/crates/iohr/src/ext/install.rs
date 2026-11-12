@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use super::layer;
 use super::lock::{Entry, FILE, Lock};
-use super::manifest::{CONFIG_MEDIA_TYPE, LAYER_MEDIA_TYPE, MAX_MANIFEST, Manifest, check_panel};
+use super::manifest::{
+    CONFIG_MEDIA_TYPE, CONFIG_MEDIA_TYPE_V2, LAYER_MEDIA_TYPE, MAX_MANIFEST, Manifest, check_panel,
+};
 use super::oci::{Descriptor, Digest, INDEX, ImageManifest, Index, MANIFEST, Platform, Registry};
 use super::trust::{self, Policy, Verified};
 
@@ -161,6 +163,11 @@ pub async fn fetch(
     let verified = trust::verify(policy, &bundles)?;
 
     let manifest = Manifest::parse(&registry.blob(&repo, config, MAX_MANIFEST).await?)?;
+    if config.media_type == CONFIG_MEDIA_TYPE && !manifest.host_actions.is_empty() {
+        return Err(ExtError::Manifest(super::manifest::ManifestError(
+            "the manifest declares host actions, which only a v2 config carries".to_owned(),
+        )));
+    }
     if manifest.name != name {
         return Err(ExtError::Manifest(super::manifest::ManifestError(format!(
             "the artifact says it is {}, not {name}",
@@ -199,7 +206,7 @@ fn shape(image: &ImageManifest) -> Result<(&Descriptor, &Descriptor), ExtError> 
     if image.media_type.as_deref().is_some_and(|m| m != MANIFEST) {
         return Err(bad("the platform manifest is not an OCI image manifest"));
     }
-    if image.config.media_type != CONFIG_MEDIA_TYPE {
+    if ![CONFIG_MEDIA_TYPE, CONFIG_MEDIA_TYPE_V2].contains(&image.config.media_type.as_str()) {
         return Err(bad(
             "the artifact is not an iohr extension (its config media type)",
         ));
@@ -479,16 +486,21 @@ impl Store {
     }
 
     /// Checks an installed version again, offline: the program's hash and every kept
-    /// bundle against `policy`, and the signer against the lock.
+    /// bundle against `policy`, and the signer against the lock. The path is the checked
+    /// program's.
     ///
     /// # Errors
     ///
     /// [`ExtError`] naming what no longer holds.
-    pub fn verify(&self, name: &str, policy: &Policy) -> Result<(Entry, Record), ExtError> {
+    pub fn verify(
+        &self,
+        name: &str,
+        policy: &Policy,
+    ) -> Result<(Entry, Record, PathBuf), ExtError> {
         let (entry, record, dir) = self
             .installed(name)?
             .ok_or_else(|| ExtError::Usage(format!("{name} is not installed")))?;
-        check_program(&record, &dir)?;
+        let program = check_program(&record, &dir)?;
         check_confirmed(&entry, &record)?;
         let mut bundles = Vec::new();
         for (file, digest) in &record.bundles {
@@ -509,7 +521,7 @@ impl Store {
                 v.signer, entry.signer
             ))));
         }
-        Ok((entry, record))
+        Ok((entry, record, program))
     }
 }
 

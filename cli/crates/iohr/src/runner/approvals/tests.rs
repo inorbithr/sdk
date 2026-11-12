@@ -261,6 +261,12 @@ fn ask<'a>(id: &'a str, nonce: &'a str) -> Ask<'a> {
 /// key (or `signer`).
 fn approval(w: &World, a: Ask<'_>) -> Value {
     let id_word = a.action["action"].as_str().unwrap().to_owned();
+    // A document that names its provider is a v1 one.
+    let schema = if a.action.get("provider").is_some() {
+        HOST_ACTION_V1
+    } else {
+        HOST_ACTION
+    };
     let stored = json!({
         "cmd": id_word,
         "argv": [id_word],
@@ -269,7 +275,7 @@ fn approval(w: &World, a: Ask<'_>) -> Value {
         "runner_id": a.runner_id,
         "runner_public_key": a.runner_key.unwrap_or_else(|| w.run.public_key()),
         "expires_at": a.expires_at,
-        "schema_id": HOST_ACTION,
+        "schema_id": schema,
         "action": a.action,
     });
     let hash = payload_digest(&stored);
@@ -434,9 +440,98 @@ async fn an_approved_action_is_started_carried_out_and_done() {
     assert_eq!(svc.steps().len(), 2);
 }
 
+/// `example.restart-worker` for build-1, as an installed `example` 1.2.0 declares it.
+fn extension_action() -> Value {
+    json!({
+        "provider": {
+            "extension": "example",
+            "version": "1.2.0",
+            "manifest_digest": format!("sha256:{}", "0".repeat(64)),
+        },
+        "action": "example.restart-worker",
+        "runner_id": RUNNER,
+        "params": { "worker": "build-1", "grace_secs": 30 },
+        "effect": "Restarts worker build-1 after 30 seconds.",
+    })
+}
+
+fn with_example(mut f: Fake) -> Fake {
+    let declared = serde_json::from_value(json!({
+        "id": "example.restart-worker",
+        "params": {
+            "worker": {"type": "dns-label"},
+            "grace_secs": {"type": "integer", "min": 0, "max": 600},
+        },
+        "os": ["linux", "macos", "windows"],
+        "effect": "Restarts worker {worker} after {grace_secs} seconds.",
+        "timeout_secs": 120,
+    }))
+    .unwrap();
+    f.extensions = vec![(
+        "example".to_owned(),
+        host_action::extension::Installed {
+            version: "1.2.0".to_owned(),
+            digests: vec![format!("sha256:{}", "0".repeat(64))],
+            actions: vec![declared],
+            program: PathBuf::from("/ext/example/bin"),
+        },
+    )];
+    f
+}
+
+#[tokio::test]
+async fn an_approved_extension_action_runs_its_program_and_is_done() {
+    let w = world();
+    let mut a = ask(ID1, nonce("nonce-1"));
+    a.action = extension_action();
+    let a = approval(&w, a);
+    let svc = Mock::with(vec![a.clone()]);
+    let mut f = with_example(fake("", false));
+    f.answer = Some(host_action::Output::new(true, "restarted\n", ""));
+    let mut asks = asks(&w, Seen::default(), Some(f));
+    let t = asks.tick(&svc, &|_| {}).await.unwrap();
+    assert_eq!((t.refused, t.done, t.failed), (0, 1, 0));
+    assert_eq!(
+        svc.steps(),
+        [(ID1.into(), "started".into()), (ID1.into(), "done".into())]
+    );
+    assert_eq!(svc.note(1), "example.restart-worker: done\nrestarted");
+    let calls = asks.tools.ext_calls.lock().unwrap().clone();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, PathBuf::from("/ext/example/bin"));
+    assert_eq!(calls[0].1, "example.restart-worker");
+    let input: Value = serde_json::from_slice(&calls[0].2).unwrap();
+    assert_eq!(input, json!({ "worker": "build-1", "grace_secs": 30 }));
+    assert_eq!(asks.tools.calls(), []);
+}
+
+#[tokio::test]
+async fn an_extension_action_this_runner_cannot_carry_out_is_refused_and_nothing_runs() {
+    let w = world();
+    for (version, tools, why) in [
+        ("1.2.0", fake("", false), "example is not installed"),
+        (
+            "1.3.0",
+            with_example(fake("", false)),
+            "example 1.3.0 was approved, but 1.2.0 is installed",
+        ),
+    ] {
+        let mut a = ask(ID1, nonce("nonce-1"));
+        a.action = extension_action();
+        a.action["provider"]["version"] = json!(version);
+        let svc = Mock::with(vec![approval(&w, a)]);
+        let mut asks = asks(&w, Seen::default(), Some(tools));
+        let t = asks.tick(&svc, &|_| {}).await.unwrap();
+        assert_eq!((t.refused, t.done, t.failed), (1, 0, 0));
+        assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
+        assert!(svc.note(0).contains(why), "{}", svc.note(0));
+        assert!(asks.tools.ext_calls.lock().unwrap().is_empty());
+    }
+}
+
 #[tokio::test]
 async fn a_replayed_nonce_runs_nothing() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = state_dir(dir.path(), "acct").unwrap().join("seen");
     let w = world();
     let first = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
@@ -733,7 +828,7 @@ fn the_state_directory_is_one_per_account_and_never_a_path() {
 
 #[test]
 fn a_malformed_seen_line_is_an_error_not_a_skip() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = dir.path().join("seen");
     let ok = format!("{ID1} device-0 n1\n");
     for (text, why) in [
@@ -767,7 +862,7 @@ fn a_malformed_seen_line_is_an_error_not_a_skip() {
 
 #[test]
 fn recording_into_a_malformed_seen_file_writes_nothing() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = dir.path().join("seen");
     let mut seen = Seen::load(&path).unwrap();
     std::fs::write(&path, "garbage\n").unwrap();
@@ -784,7 +879,7 @@ fn recording_into_a_malformed_seen_file_writes_nothing() {
 #[test]
 fn the_trust_root_and_the_seen_file_must_be_the_user_s_and_not_writable_by_others() {
     use std::os::unix::fs::PermissionsExt as _;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let w = world();
     let keys = dir.path().join("device-keys");
     let seen = dir.path().join("seen");
@@ -831,7 +926,7 @@ fn the_trust_root_and_the_seen_file_must_be_the_user_s_and_not_writable_by_other
 
 #[tokio::test]
 async fn the_decision_is_recorded_before_started_is_reported() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = state_dir(dir.path(), "acct").unwrap().join("seen");
     let w = world();
     let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
@@ -864,7 +959,7 @@ fn asks_with(w: &World, path: &std::path::Path) -> Asks<Fake> {
 
 #[tokio::test]
 async fn a_record_that_cannot_be_written_runs_nothing_and_says_so() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = dir.path().join("seen");
     let w = world();
     let mut seen = Seen::load(&path).unwrap();
@@ -882,7 +977,7 @@ async fn a_record_that_cannot_be_written_runs_nothing_and_says_so() {
 
 #[test]
 fn two_handles_on_one_seen_file_record_a_decision_once() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = dir.path().join("seen");
     let mut one = Seen::load(&path).unwrap();
     let mut two = Seen::load(&path).unwrap();
@@ -897,7 +992,7 @@ fn two_handles_on_one_seen_file_record_a_decision_once() {
 
 #[tokio::test]
 async fn a_replay_the_load_missed_is_caught_under_the_lock() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private::private_tempdir();
     let path = dir.path().join("seen");
     let w = world();
     // Loaded empty; another process records the same decision before this one acts.
