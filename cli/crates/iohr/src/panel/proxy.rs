@@ -1502,6 +1502,7 @@ fn deny(g: Global, env: Env, id: String) -> Fetch<(String, Result<(), Error>)> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::screen::clamp;
     use super::*;
 
     fn proxy(mouse: MouseMode) -> Proxy {
@@ -1514,7 +1515,7 @@ mod tests {
 
     /// The rows of a terminal of `rows` x `cols` that has been fed `bytes`.
     fn rows_of(rows: u16, cols: u16, bytes: &[&[u8]]) -> Vec<String> {
-        let mut parser = vt100::Parser::new(rows, cols, 0);
+        let mut parser = vt100::Parser::new(clamp(usize::from(rows)), clamp(usize::from(cols)), 0);
         for b in bytes {
             parser.process(b);
         }
@@ -1532,9 +1533,9 @@ mod tests {
         let badge = narrow.iter().position(|r| r.contains("iohr")).unwrap();
         let old_at = narrow[badge].find("iohr").unwrap();
         // A wider terminal keeps the cells as they were.
-        let mut wide = vt100::Parser::new(24, 60, 0);
+        let mut wide = vt100::Parser::new(clamp(24), clamp(60), 0);
         wide.process(&term_bytes);
-        wide.screen_mut().set_size(24, 100);
+        wide.screen_mut().set_size(clamp(24), clamp(100));
         let mut after = Vec::new();
         after.extend(p.resize(24, 100));
         wide.process(&after);
@@ -1571,6 +1572,7 @@ mod tests {
     /// Every line the terminal holds, scrolled-off ones first, then the screen's rows.
     fn history_and_screen(term: &mut vt100::Parser) -> (Vec<String>, Vec<String>) {
         let (rows, cols) = term.screen().size();
+        let (rows, cols) = (rows.get(), cols.get());
         let mut off = Vec::new();
         let mut at = usize::MAX;
         term.screen_mut().set_scrollback(usize::MAX);
@@ -1597,7 +1599,7 @@ mod tests {
     #[test]
     fn card_output_scrolling_past_the_box_never_stacks_it() {
         let mut p = boxed_proxy(24, 100);
-        let mut term = vt100::Parser::new(24, 100, 1000);
+        let mut term = vt100::Parser::new(clamp(24), clamp(100), 1000);
         let feed = |term: &mut vt100::Parser, bytes: Vec<u8>| term.process(&bytes);
         // The hook's first report opens the box and reserves its rows.
         feed(&mut term, p.shell_output(b"$ "));
@@ -1624,7 +1626,7 @@ mod tests {
     #[test]
     fn a_scroll_region_reset_never_frees_the_box_s_rows() {
         let mut p = boxed_proxy(24, 100);
-        let mut term = vt100::Parser::new(24, 100, 1000);
+        let mut term = vt100::Parser::new(clamp(24), clamp(100), 1000);
         term.process(&p.shell_output(b"$ "));
         assert!(p.reserved);
         p.chat.message(chat::Msg::Busy, std::time::Instant::now());

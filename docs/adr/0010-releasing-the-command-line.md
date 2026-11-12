@@ -34,6 +34,9 @@ with release-please and attests what it publishes (ADR 0003, ADR 0005).
    the repository root and replaces inherited versions. Pre-1.0 versions are alpha
    pre-releases and every GitHub release before 1.0 is marked pre-release (RFC 0021, the
    Cyber Resilience Act's reporting duty applies to them too).
+   Amended 2026-11-12 (ADR 0237, RFC 0226): from `0.1.0` iohr is no longer an alpha
+   pre-release line; it follows the other SDKs' pre-1.0 rule (`feat` and `fix` bump the patch,
+   a declared break the minor).
 6. **One approval**: the publish job runs in the `release-cli` environment (main only, a
    required reviewer). The channel jobs (APT, Homebrew, winget) follow it without a second
    gate. The Homebrew job proposes the formula to `inorbithr/homebrew-tap` as a pull
