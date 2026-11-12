@@ -470,18 +470,7 @@ pub enum Command {
     /// newest release, one at a time: one that fails does not stop the others, and one
     /// whose release declares new privileges is left for a person unless --yes (or a
     /// terminal) confirms them. `--check` only reports. Needs no sign-in.
-    Upgrade {
-        /// Only say whether a newer release exists and what would run; change nothing.
-        #[arg(long)]
-        check: bool,
-        /// Upgrade iohr only, not the installed extensions.
-        #[arg(long)]
-        no_extensions: bool,
-        /// Confirm the new privileges of an extension release without asking (needed
-        /// without a terminal).
-        #[arg(long, short = 'y')]
-        yes: bool,
-    },
+    Upgrade(UpgradeArgs),
     /// Sign a built iohr the way releases are signed (the preview install, `cli:preview-install`).
     ///
     /// Signs the binary at PATH with this Mac's Apple Development or Developer ID
@@ -691,6 +680,21 @@ pub enum LabCommand {
     /// front matter, status logs, and the redaction rules on public documents. Reads
     /// only the files named, makes no network call, needs no sign-in.
     Check(LabCheck),
+}
+
+/// The flags of `iohr upgrade`.
+#[derive(Debug, Args)]
+pub struct UpgradeArgs {
+    /// Only say whether a newer release exists and what would run; change nothing.
+    #[arg(long)]
+    pub check: bool,
+    /// Upgrade iohr only, not the installed extensions.
+    #[arg(long)]
+    pub no_extensions: bool,
+    /// Confirm the new privileges of an extension release without asking (needed
+    /// without a terminal).
+    #[arg(long, short = 'y')]
+    pub yes: bool,
 }
 
 #[derive(Debug, Args)]

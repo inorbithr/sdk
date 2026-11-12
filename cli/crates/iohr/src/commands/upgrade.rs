@@ -25,7 +25,7 @@ pub(crate) mod sign;
 pub(crate) use sign::SignWith;
 
 use crate::Env;
-use crate::cli::Global;
+use crate::cli::{Global, UpgradeArgs};
 use crate::commands::ext;
 use crate::context::{Ctx, run_profile};
 use crate::error::Error;
@@ -540,22 +540,15 @@ struct Binary {
 /// The extensions are tried even when the binary could not be upgraded (an APT copy waits
 /// for a person, the lookup failed): they come from another place. The exit is non-zero
 /// when either failed; an extension left for a person (new privileges) is not a failure.
-pub(crate) async fn run(
-    g: &Global,
-    env: &Env,
-    check: bool,
-    extensions: bool,
-    yes: bool,
-    out: Out,
-) -> Result<(), Error> {
-    if check {
+pub(crate) async fn run(g: &Global, env: &Env, args: &UpgradeArgs, out: Out) -> Result<(), Error> {
+    if args.check {
         return check_only(g, env, out).await;
     }
     let binary = upgrade_binary(g, env).await;
-    let (rows, pass) = if extensions {
-        extension_pass(g, env, yes).await
-    } else {
+    let (rows, pass) = if args.no_extensions {
         (None, Ok(()))
+    } else {
+        extension_pass(g, env, args.yes).await
     };
     if out.json {
         let mut json = match &binary {
