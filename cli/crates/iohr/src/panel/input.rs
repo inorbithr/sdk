@@ -8,6 +8,20 @@ use super::model::Key;
 /// that works where Option+i does not.
 const MENU_KEYS: [&[u8]; 4] = [b"\x1bi", "\u{2c6}".as_bytes(), b"\x1b[105;3u", b"\x07"];
 
+/// The chat box's hide and show key, forms as the menu key's: Option+h is Esc then `h`, the macOS
+/// dead-key `˙` (U+02D9), or the CSI-u form (`ESC [ 104 ; 3 u`). Ctrl-] (the byte 0x1d) is the
+/// older key, kept as an alias.
+const HIDE_KEYS: [&[u8]; 4] = [b"\x1bh", "\u{2d9}".as_bytes(), b"\x1b[104;3u", b"\x1d"];
+
+/// What the chat box calls its hide key, in every terminal: `⌥h` on macOS and `Alt+h` elsewhere.
+/// The forms above catch Option+h even where Option types characters, so the name never changes
+/// with the terminal.
+pub(super) const HIDE_LABEL: &str = if cfg!(target_os = "macos") {
+    "\u{2325}h"
+} else {
+    "Alt+h"
+};
+
 /// The byte Ctrl-G sends.
 const CTRL_G: &[u8] = b"\x07";
 
@@ -57,6 +71,17 @@ impl OpenKey {
     /// The key as the pill and the help name it.
     pub(super) fn label(self) -> &'static str {
         self.label
+    }
+
+    /// Whether this input is exactly the chat box's hide and show key, in any of its forms.
+    pub(super) fn is_hide(bytes: &[u8]) -> bool {
+        HIDE_KEYS.contains(&bytes)
+    }
+
+    /// Whether this read is a lone Esc, which may be the first half of Option+h (a terminal
+    /// that sends Esc and `h` in two writes): it is held a moment before it is anyone's.
+    pub(super) fn starts_hide(bytes: &[u8]) -> bool {
+        bytes == b"\x1b"
     }
 
     /// Whether this input is exactly the panel's key (the only keyboard input the panel reads
@@ -189,6 +214,26 @@ fn mouse(params: &str, last: char) -> Option<Mouse> {
     }
 }
 
+/// Whether the parameters of a cursor-key sequence are the ones a terminal puts there: none,
+/// or numbers split by `;` and `:` (`1;2` Shift, `1;3` Option, `1;1:3` a key released under the
+/// kitty keyboard protocol). Whatever the modifier, the key is the arrow.
+fn arrow_params(params: &str) -> bool {
+    params
+        .bytes()
+        .all(|b| b.is_ascii_digit() || b == b';' || b == b':')
+}
+
+/// The arrow `key`, unless the parameters say the key was released (`:3` on the modifier field,
+/// kitty protocol), which is not a second press.
+fn arrow(params: &str, key: Key) -> Option<Input> {
+    let released = params
+        .rsplit(';')
+        .next()
+        .and_then(|field| field.split_once(':'))
+        .is_some_and(|(_, event)| event == "3");
+    (!released).then_some(Input::Key(key))
+}
+
 /// The inputs in `bytes` (a lone Esc is Esc; Backspace is DEL or BS; arrows are `ESC [ A` or
 /// `ESC O A`; Enter is a carriage return or a newline; every other sequence is skipped; text is
 /// one `Char` per character), and how many bytes at the end are a sequence that is not finished.
@@ -222,10 +267,10 @@ fn scan(bytes: &[u8]) -> (Vec<Input>, usize) {
                         break;
                     };
                     let found = match (intro, last, params.as_str()) {
-                        (_, 'A', "") | ('O', 'A', _) => Some(Input::Key(Key::Up)),
-                        (_, 'B', "") | ('O', 'B', _) => Some(Input::Key(Key::Down)),
-                        (_, 'C', "") | ('O', 'C', _) => Some(Input::Key(Key::Right)),
-                        (_, 'D', "") | ('O', 'D', _) => Some(Input::Key(Key::Left)),
+                        (_, 'A', p) if arrow_params(p) => arrow(p, Key::Up),
+                        (_, 'B', p) if arrow_params(p) => arrow(p, Key::Down),
+                        (_, 'C', p) if arrow_params(p) => arrow(p, Key::Right),
+                        (_, 'D', p) if arrow_params(p) => arrow(p, Key::Left),
                         ('[', 'u', "105;3") => Some(Input::Key(Key::Menu)),
                         ('[', 'M' | 'm', p) => mouse(p, last).map(Input::Mouse),
                         _ => None,
@@ -274,6 +319,43 @@ mod tests {
         assert!(!k.is(b"ls\x1bi"));
         assert!(!k.is(b"\x1b"));
         assert!(!k.is(b"\x07\x07"));
+    }
+
+    #[test]
+    fn the_hide_key_is_option_h_in_its_forms_with_ctrl_close_bracket_as_alias() {
+        let k = OpenKey::default();
+        assert!(OpenKey::is_hide(b"\x1bh"));
+        assert!(OpenKey::is_hide("\u{2d9}".as_bytes()));
+        assert!(OpenKey::is_hide(b"\x1b[104;3u"));
+        assert!(OpenKey::is_hide(b"\x1d"), "Ctrl-] stays");
+        assert!(!OpenKey::is_hide(b"h"));
+        assert!(!OpenKey::is_hide(b"\x1b"));
+        assert!(!OpenKey::is_hide(b"ls\x1bh"));
+        assert!(
+            !OpenKey::is_hide(b"\x1bi"),
+            "the menu key is not the hide key"
+        );
+        assert!(!k.is(b"\x1bh"));
+        // Typed `h` and a cut Esc are parsed as what they are.
+        assert_eq!(parse(b"h"), [Key::Char('h')]);
+        assert!(
+            OpenKey::starts_hide(b"\x1b")
+                && !OpenKey::starts_hide(b"\x1bh")
+                && !OpenKey::starts_hide(b"h")
+        );
+    }
+
+    #[test]
+    fn the_hide_key_has_one_name_in_every_terminal() {
+        let name = if cfg!(target_os = "macos") {
+            "\u{2325}h"
+        } else {
+            "Alt+h"
+        };
+        assert_eq!(HIDE_LABEL, name);
+        // Option+h's dead-key form is caught, so the terminals where Option types characters
+        // need no other name for it.
+        assert!(OpenKey::is_hide("\u{2d9}".as_bytes()));
     }
 
     #[test]
@@ -378,6 +460,22 @@ mod tests {
     }
 
     #[test]
+    fn arrows_with_parameters_are_arrows() {
+        // Shift, Option and Ctrl forms, and the kitty keyboard protocol's press and repeat.
+        assert_eq!(parse(b"\x1b[1;2A\x1b[1;2B"), [Key::Up, Key::Down]);
+        assert_eq!(parse(b"\x1b[1;3C\x1b[1;5D"), [Key::Right, Key::Left]);
+        assert_eq!(parse(b"\x1b[1;1:1B\x1b[1;1:2A"), [Key::Down, Key::Up]);
+        assert_eq!(parse(b"\x1b[1B\x1bO1;2B"), [Key::Down, Key::Down]);
+        // A release is not a second press, and an unknown final byte is still skipped.
+        assert_eq!(parse(b"\x1b[1;1:3B"), Vec::<Key>::new());
+        assert_eq!(parse(b"\x1b[1;2Ex"), [Key::Char('x')]);
+        // The parameters may arrive in two reads.
+        let mut r = Reader::default();
+        assert_eq!(r.feed(b"\x1b[1;"), Vec::<Input>::new());
+        assert_eq!(r.feed(b"2B"), [Input::Key(Key::Down)]);
+    }
+
+    #[test]
     fn keys_are_parsed_from_one_read() {
         assert_eq!(parse(b"\x1b"), [Key::Esc]);
         assert_eq!(parse(b"\x1b[A\x1b[B"), [Key::Up, Key::Down]);
@@ -394,8 +492,8 @@ mod tests {
         assert_eq!(parse(b"\x1b[105;3u"), [Key::Menu]);
         assert_eq!(
             parse(b"\x1b[1;5A"),
-            Vec::<Key>::new(),
-            "modified arrows are skipped"
+            [Key::Up],
+            "a modified arrow is still the arrow (it used to be dropped)"
         );
         assert_eq!(
             parse(b"\x1bx"),

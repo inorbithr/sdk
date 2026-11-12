@@ -117,11 +117,10 @@ impl Waiting {
     }
 
     pub(crate) fn tick(&mut self, text: &str) {
-        const FRAMES: [char; 4] = ['|', '/', '-', '\\'];
         if !self.on {
             return;
         }
-        let c = FRAMES[self.frame % FRAMES.len()];
+        let c = crate::card::spinner(self.frame);
         self.frame += 1;
         let mut err = io::stderr().lock();
         let _ = write!(err, "\r{c} {text}\x1b[K");

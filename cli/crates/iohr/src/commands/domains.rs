@@ -11,6 +11,7 @@ use crate::cli::{DomainsCommand, Global};
 use crate::context::{Session, account, session};
 use crate::error::Error;
 use crate::output::Out;
+use crate::ui::Listed;
 
 const POLL: Duration = Duration::from_secs(10);
 
@@ -278,9 +279,10 @@ async fn list(s: &Session, acc: &str, out: Out) -> Result<(), Error> {
             ]
         })
         .collect();
-    Out::table(
+    Out::list(
         &["DOMAIN", "SCOPE", "STATUS", "VERIFIED", "LAST CHECKED"],
         &rows,
+        &Listed::new("domain", "domains").next("prove one", "iohr domains add"),
     );
     Ok(())
 }

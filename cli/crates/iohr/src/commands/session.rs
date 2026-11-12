@@ -3,11 +3,26 @@
 //! A shell never opens the queue and never touches a task: it joins the host's socket
 //! ([`crate::session::link`]) and the host does the rest.
 
+use std::path::PathBuf;
+
+use crate::cli::Global;
+use crate::error::Error;
+use crate::ext::install::Store;
+
 #[cfg(unix)]
-pub(crate) use unix::{data_dir, enter, open, start_host, stop};
+pub(crate) use unix::{Joined, enter, join_watched, open, start_host, stop};
 
 #[cfg(not(unix))]
 pub(crate) use other::{enter, open, start_host, stop};
+
+/// The iohr data folder: `--data-dir` (`IOHR_DATA_DIR`), else the platform's data
+/// directory, the one extensions use. The session hosts and `iohr ui` keep files below it.
+pub(crate) fn data_dir(g: &Global) -> Result<PathBuf, Error> {
+    match &g.data_dir {
+        Some(d) => Ok(d.clone()),
+        None => Store::data_root().map_err(|e| Error::Failed(e.to_string())),
+    }
+}
 
 #[cfg(unix)]
 mod unix {
@@ -20,9 +35,9 @@ mod unix {
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
+    use super::data_dir;
     use crate::cli::{Global, SessionArgs, StopArgs};
     use crate::error::Error;
-    use crate::ext::install::Store;
     use crate::output::Out;
     use crate::roles;
     use crate::session::host::{self, HostError, Options};
@@ -51,14 +66,6 @@ mod unix {
     /// platform's data directory, the one extensions use.
     fn paths_for(g: &Global, project: &Path) -> Result<Paths, Error> {
         Ok(Paths::for_project(&data_dir(g)?, project))
-    }
-
-    /// The iohr data folder the hosts keep their files below.
-    pub(crate) fn data_dir(g: &Global) -> Result<PathBuf, Error> {
-        match &g.data_dir {
-            Some(d) => Ok(d.clone()),
-            None => Store::data_root().map_err(|e| Error::Failed(e.to_string())),
-        }
     }
 
     /// The Roles a project hosts: the packs it holds, else what its language selects.
@@ -145,7 +152,7 @@ mod unix {
                     &roles,
                     &turn,
                     &stop,
-                    Options::default(),
+                    Options::started_by_parent(),
                     |recovered| {
                         let _ = told.send(Ok(()));
                         if recovered.requeued + recovered.failed > 0 {
@@ -246,6 +253,8 @@ mod unix {
             .append(true)
             .open(&paths.log)
             .map_err(|e| Error::Failed(format!("cannot open {}: {e}", paths.log.display())))?;
+        // The log is appended to across starts: what this start wrote begins here.
+        let log_from = log.metadata().map_or(0, |m| m.len());
         let mut child = Command::new(exe)
             .args(host_args(&argv, dir, project))
             .stdin(Stdio::null())
@@ -262,9 +271,10 @@ mod unix {
                 return Ok(());
             }
             if let Ok(Some(status)) = child.try_wait() {
-                return Err(Error::Failed(format!(
-                    "the session host stopped at once ({status}); see {}",
-                    paths.log.display()
+                return Err(Error::Failed(stopped_at_once(
+                    &status.to_string(),
+                    &paths.log,
+                    log_from,
                 )));
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -274,6 +284,35 @@ mod unix {
             START_WAIT.as_secs(),
             paths.log.display()
         )))
+    }
+
+    /// Why the host stopped at once: its own last line in the log (the cause, and what to do
+    /// about it), redacted like every report of a tool's output, then the log's path.
+    fn stopped_at_once(status: &str, log: &Path, from: u64) -> String {
+        let said = std::fs::read(log).ok().and_then(|bytes| {
+            let start = usize::try_from(from).unwrap_or(0).min(bytes.len());
+            last_line(&String::from_utf8_lossy(&bytes[start..]))
+        });
+        match said {
+            Some(line) => format!(
+                "the session host stopped at once ({status}): {line}; see {}",
+                log.display()
+            ),
+            None => format!(
+                "the session host stopped at once ({status}); see {}",
+                log.display()
+            ),
+        }
+    }
+
+    /// The last line of the host's log with something on it, redacted and cut to 300
+    /// characters. `None` when the log said nothing.
+    fn last_line(text: &str) -> Option<String> {
+        const CAP: usize = 300;
+        let line = text.lines().rev().map(str::trim).find(|l| !l.is_empty())?;
+        let line = crate::runner::host_action::redact_output(line);
+        let line = line.trim().trim_end_matches('.');
+        Some(line.chars().take(CAP).collect())
     }
 
     /// `iohr session`: joins the host, starting it when none runs, and stays open.
@@ -296,34 +335,64 @@ mod unix {
         .map_err(|e| Error::Failed(e.to_string()))?
     }
 
+    /// What joining the host of a folder for the panel came to ([`join_watched`]).
+    pub(crate) struct Joined {
+        /// The open session: the host counts it until it is dropped, so whoever outlives the
+        /// panel holds it. `None` when there is no host.
+        pub(crate) session: Option<link::Session>,
+        /// Answers when the host closes the session (it stopped). `None` when there is no host.
+        pub(crate) gone: Option<tokio::sync::oneshot::Receiver<()>>,
+        /// Why there is no host, as the note to show: the panel runs without one.
+        pub(crate) note: Option<String>,
+    }
+
+    /// Joins the host of `project` (starting it when none runs) and watches it: the one start
+    /// for bare `iohr` ([`enter`]) and for the panel proxy when `iohr` is run again after a
+    /// stop, which is the long-lived process that has to hold the session.
+    pub(crate) async fn join_watched(g: &Global, project: &Path) -> Joined {
+        let session = match join_host(g, None, project).await {
+            Ok(j) => j,
+            Err(e) => {
+                return Joined {
+                    session: None,
+                    gone: None,
+                    note: Some(format!("no session host: {e}; the panel runs without one")),
+                };
+            }
+        };
+        let gone = session.watcher().ok().map(|watcher| {
+            let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+            // A plain thread: it blocks until the host closes, and must not hold the runtime
+            // open once the shell has exited.
+            std::thread::spawn(move || {
+                if watcher.wait_for_host() {
+                    let _ = tx.send(());
+                }
+            });
+            rx
+        });
+        Joined {
+            session: Some(session),
+            gone,
+            note: None,
+        }
+    }
+
     /// Bare `iohr` on a terminal: joins (or starts) the host of the current folder and floats
     /// the panel over the person's shell until it exits. When the host cannot be had, says so
     /// and still gives the shell with the panel: the asks and Workloads need no host.
     pub(crate) async fn enter(g: &Global, env: crate::Env) -> Result<(), Error> {
         let project = project_dir(None)?;
-        let joined = match join_host(g, None, &project).await {
-            Ok(j) => Some(j),
-            Err(e) => {
-                Out::note(&format!("no session host: {e}; the panel runs without one"));
-                None
-            }
-        };
-        let gone = joined
-            .as_ref()
-            .and_then(|j| j.watcher().ok())
-            .map(|watcher| {
-                let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-                // A plain thread: it blocks until the host closes, and must not hold the runtime
-                // open once the shell has exited.
-                std::thread::spawn(move || {
-                    if watcher.wait_for_host() {
-                        let _ = tx.send(());
-                    }
-                });
-                rx
-            });
-        let stopped = crate::panel::session_shell(g, env, gone).await;
-        drop(joined);
+        let Joined {
+            session,
+            gone,
+            note,
+        } = join_watched(g, &project).await;
+        if let Some(note) = note {
+            crate::panel::note_below_the_box(&note);
+        }
+        let stopped = crate::panel::session_shell(g, env, gone, project).await;
+        drop(session);
         if stopped? {
             Out::note("the session host stopped");
         }
@@ -409,6 +478,40 @@ mod unix {
 
         fn os(v: &[&str]) -> Vec<OsString> {
             v.iter().map(OsString::from).collect()
+        }
+
+        #[test]
+        fn the_hosts_last_line_is_the_cause_and_is_redacted() {
+            let log = "starting\n\nthis sign-in lacks coordinator:runner: sign in with `iohr login --scope coordinator:runner`\n  \n";
+            assert_eq!(
+                last_line(log).as_deref(),
+                Some(
+                    "this sign-in lacks coordinator:runner: sign in with `iohr login --scope coordinator:runner`"
+                )
+            );
+            let cut = last_line("failed: Bearer abc123 at https://u:p@host/x").unwrap();
+            let leaked = cut.contains("abc123") || cut.contains("u:p");
+            assert!(!leaked, "the host's last line kept a credential");
+            assert_eq!(last_line("  \n\n"), None);
+            assert!(last_line(&"x ".repeat(400)).unwrap().chars().count() <= 300);
+        }
+
+        #[test]
+        fn only_what_this_start_wrote_is_read_from_the_log() {
+            let dir = tempfile::tempdir().unwrap();
+            let log = dir.path().join("host.log");
+            std::fs::write(&log, "old failure\n").unwrap();
+            let from = std::fs::metadata(&log).unwrap().len();
+            // This start wrote nothing: the old line is not its cause.
+            assert_eq!(
+                stopped_at_once("exit status: 1", &log, from),
+                format!(
+                    "the session host stopped at once (exit status: 1); see {}",
+                    log.display()
+                )
+            );
+            std::fs::write(&log, "old failure\nno runner key\n").unwrap();
+            assert!(stopped_at_once("exit status: 1", &log, from).contains(": no runner key; see"));
         }
 
         #[test]

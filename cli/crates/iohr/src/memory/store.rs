@@ -282,7 +282,10 @@ impl Store {
     /// The project store under `root`.
     #[must_use]
     pub fn project(root: &Path) -> Self {
-        Self::new(root.join(PROJECT_DIR), Scope::Project)
+        Self::new(
+            crate::project::place::Layout::of(root).memory(),
+            Scope::Project,
+        )
     }
 
     /// The person's own store on this machine: `~/.inorbit/memory/notes/`, apart from every

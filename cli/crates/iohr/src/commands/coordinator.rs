@@ -18,6 +18,7 @@ use crate::context::{Ctx, Session, io_session, session};
 use crate::error::Error;
 use crate::output::Out;
 use crate::planner::scoped;
+use crate::ui::Listed;
 
 use super::{day, str_of};
 
@@ -246,9 +247,10 @@ async fn list_jobs(
             ]
         })
         .collect();
-    Out::table(
+    Out::list(
         &["JOB", "STATE", "KIND", "MODEL", "CREATED", "BRIEF"],
         &rows,
+        &Listed::new("job", "jobs"),
     );
     Ok(())
 }
@@ -394,9 +396,10 @@ async fn list_asks(
             ]
         })
         .collect();
-    Out::table(
+    Out::list(
         &["ASK", "STATE", "SOURCE", "KIND", "CREATED", "TITLE"],
         &rows,
+        &Listed::new("ask", "asks"),
     );
     Ok(())
 }

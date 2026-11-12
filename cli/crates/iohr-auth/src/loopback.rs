@@ -20,7 +20,7 @@ use crate::page::{Page, Rendered};
 /// How long a browser sign-in may take before the listener gives up.
 pub const SIGN_IN_WINDOW: Duration = Duration::from_mins(5);
 /// How long one connection may take to send its request head.
-const READ_WINDOW: Duration = Duration::from_secs(10);
+pub const READ_WINDOW: Duration = Duration::from_secs(10);
 /// The largest request head read; a redirect with a code and state fits in far less.
 pub const MAX_HEAD: usize = 8 * 1024;
 
@@ -124,10 +124,7 @@ impl Listener {
     ///
     /// The I/O error when neither loopback address can be bound.
     pub async fn bind() -> io::Result<Self> {
-        let inner = match TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).await {
-            Ok(l) => l,
-            Err(_) => TcpListener::bind(SocketAddr::from((Ipv6Addr::LOCALHOST, 0))).await?,
-        };
+        let inner = bind_loopback(0).await?;
         let addr = inner.local_addr()?;
         let redirect_uri = match addr {
             SocketAddr::V4(a) => format!("http://127.0.0.1:{}/callback", a.port()),
@@ -194,7 +191,30 @@ impl Reply {
     }
 }
 
-async fn read_head(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+/// Binds `port` (0: the system picks) on `127.0.0.1`, or on `[::1]` when the host has
+/// no IPv4 loopback. A named port that is already taken is an error, never a move to
+/// another address; no address but loopback is ever bound.
+///
+/// # Errors
+///
+/// [`io::ErrorKind::AddrInUse`] when `port` is taken, else the I/O error when neither
+/// loopback address can be bound.
+pub async fn bind_loopback(port: u16) -> io::Result<TcpListener> {
+    match TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await {
+        Ok(l) => Ok(l),
+        Err(e) if e.kind() == io::ErrorKind::AddrInUse => Err(e),
+        Err(_) => TcpListener::bind(SocketAddr::from((Ipv6Addr::LOCALHOST, port))).await,
+    }
+}
+
+/// Reads a request head: up to the blank line that ends it, or [`MAX_HEAD`] bytes, or
+/// the end of the stream, whichever comes first. The caller bounds it with
+/// [`READ_WINDOW`].
+///
+/// # Errors
+///
+/// The I/O error of the read.
+pub async fn read_head(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
     let mut head = Vec::with_capacity(1024);
     let mut buf = [0u8; 1024];
     loop {

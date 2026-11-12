@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling==1.29.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "@@NAME@@"
+version = "0.1.0"
+description = "@@ID@@"
+requires-python = ">=3.12"
+license = "@@LICENSE@@"
+dependencies = []
+
+[project.scripts]
+@@NAME@@ = "@@MODULE@@.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/@@MODULE@@"]

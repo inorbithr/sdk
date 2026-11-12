@@ -4,7 +4,7 @@
 //! words the note; the card, the terminal ask and the stored yes live where they already do
 //! ([`crate::permissions::trust`], [`crate::actions`]).
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::headless::{Blocked, blocked};
 use crate::permissions::secrets;
@@ -91,30 +91,11 @@ fn word_path(word: &str) -> Option<&str> {
         || w.starts_with('/')
         || w.starts_with("./")
         || w.starts_with("../")
-        || w.contains('/');
+        || w.contains('/')
+        // Windows also writes `C:\Users\me`, `..\api` and `~\Downloads`.
+        || (cfg!(windows) && w.contains('\\'));
     (path_like && w.len() <= 512 && !w.contains("://") && !w.chars().any(char::is_control))
         .then_some(w)
-}
-
-/// `word`, written with `/` as a question is, taken from `base` (an absolute word replaces it).
-/// On Windows a canonical `base` is a `\\?\` path, which the system takes literally: `/` is not a
-/// separator in it and `..` is not resolved. So there the word is made `\`-separated and its
-/// `.` and `..` are folded here, by component; elsewhere this is `base.join(word)`.
-fn join_word(base: &Path, word: &str) -> PathBuf {
-    if !cfg!(windows) {
-        return base.join(word);
-    }
-    let mut out = PathBuf::new();
-    for part in base.join(word.replace('/', "\\")).components() {
-        match part {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
 }
 
 /// The folders the question names (`/etc/nginx`, `~/Downloads/x`, `../api`, `src/`), in order,
@@ -128,12 +109,22 @@ pub(crate) fn named_folders<'a>(
     let here = cwd.canonicalize().ok();
     question.split_whitespace().filter_map(move |word| {
         let w = word_path(word)?;
+        // Both slashes separate on Windows, but not after a `\\?\` prefix, which
+        // `canonicalize` gives: a `/` there is part of the name.
+        let w = if cfg!(windows) {
+            std::borrow::Cow::Owned(w.replace('/', "\\"))
+        } else {
+            std::borrow::Cow::Borrowed(w)
+        };
+        let home_rest = w
+            .strip_prefix("~/")
+            .or_else(|| w.strip_prefix("~\\").filter(|_| cfg!(windows)));
         let at = if w == "~" {
             home?.to_path_buf()
-        } else if let Some(rest) = w.strip_prefix("~/") {
-            join_word(home?, rest)
+        } else if let Some(rest) = home_rest {
+            home?.join(rest)
         } else {
-            join_word(cwd, w)
+            cwd.join(&*w)
         };
         let real = allowable_at(&at, cwd, home, Source::Card).ok()?;
         (Some(&real) != here.as_ref()).then_some(real)
@@ -148,7 +139,7 @@ pub(crate) fn expand_home(path: &Path, home: Option<&Path>) -> PathBuf {
         (Some("~"), Some(h)) => h.to_path_buf(),
         (Some(p), Some(h)) => p
             .strip_prefix("~/")
-            .map_or_else(|| path.to_path_buf(), |r| join_word(h, r)),
+            .map_or_else(|| path.to_path_buf(), |r| h.join(r)),
         _ => path.to_path_buf(),
     }
 }
@@ -433,7 +424,7 @@ mod tests {
         let r = needed(&q, &work, Some(&home), (true, &[])).unwrap();
         assert_eq!(r.why, Why::Named);
         assert!(!r.is_cwd);
-        assert_eq!(r.folder, home.join("Downloads").join("x"));
+        assert_eq!(r.folder, home.join("Downloads/x"));
         // `~/` and `../` name folders too.
         let tilde = needed("list ~/Downloads", &work, Some(&home), (true, &[])).unwrap();
         assert_eq!(tilde.folder, home.join("Downloads"));
@@ -445,6 +436,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(up.folder, home.join("Downloads"));
+        // A Windows path, written with its own separator, is named as well.
+        #[cfg(windows)]
+        {
+            let q = format!("what is in {}?", home.join("Downloads").join("x").display());
+            let r = needed(&q, &work, Some(&home), (true, &[])).unwrap();
+            assert_eq!(r.folder, home.join("Downloads/x"));
+            let up = needed("look at ..\\Downloads", &work, Some(&home), (true, &[])).unwrap();
+            assert_eq!(up.folder, home.join("Downloads"));
+        }
     }
 
     #[test]

@@ -84,6 +84,11 @@ pub(crate) fn run(g: &Global, cmd: &ShellCommand) -> Result<(), Error> {
                 .replace("__IOHR_MODES__", &Mode::ring())
                 .replace("__IOHR_MENU_KEYS__", &key_words(key));
             Out::raw(hook.as_bytes());
+            // The InOrbit prompt (`iohr theme install NAME --prompt`), only when it is on.
+            if let Some(prompt) = super::theme::hook_prompt() {
+                Out::raw(b"\n");
+                Out::raw(prompt.as_bytes());
+            }
             Ok(())
         }
         HookShell::Bash => Err(Error::Failed(

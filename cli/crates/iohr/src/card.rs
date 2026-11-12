@@ -22,6 +22,12 @@ const RAIL: &str = "│  ";
 /// The braille spinner, one frame per tick.
 const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/// The spinner's frame for a tick: the one frame set the card, the terminal panel and its chat
+/// box all draw.
+pub(crate) fn spinner(frame: usize) -> &'static str {
+    FRAMES[frame % FRAMES.len()]
+}
+
 /// A colour as red, green, blue.
 pub(crate) type Rgb = (u8, u8, u8);
 
@@ -33,11 +39,11 @@ pub(crate) mod palette {
     pub(crate) const CYAN: Rgb = (125, 211, 252);
     pub(crate) const DIM: Rgb = (139, 144, 163);
     pub(crate) const AMBER: Rgb = (251, 191, 36);
+    pub(crate) const RED: Rgb = (248, 113, 113);
 }
 
 /// The xterm 256-colour index nearest to `rgb`: the 6x6x6 cube or the grey ramp, whichever
 /// is closer (squared distance), for terminals without 24-bit colour.
-#[cfg(unix)]
 pub(crate) fn nearest_256(rgb: Rgb) -> u8 {
     const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
     let dist = |a: Rgb, b: Rgb| -> u32 {
@@ -130,6 +136,9 @@ impl Look {
     }
     pub(crate) fn amber(self) -> Style {
         self.style(palette::AMBER, 214)
+    }
+    pub(crate) fn red(self) -> Style {
+        self.style(palette::RED, 203)
     }
     fn badge(self) -> Style {
         let s = Style::new().force_styling(self.fancy).black().bold();
@@ -311,7 +320,12 @@ fn header(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
     // A good answer has no badge: the header is `Io` and the engine, model and mode on the right
     // (they name the AI); only a failure is marked.
     let badge = if failed { " no answer " } else { "" };
-    let mut meta = vec![card.agent.to_owned(), card.model.to_owned()];
+    // A Role's card is titled with the Role (its agent reads `Role <name>`); every other is Io.
+    let (title, mut meta) = if card.agent.starts_with("Role ") {
+        (card.agent, vec![card.model.to_owned()])
+    } else {
+        ("Io", vec![card.agent.to_owned(), card.model.to_owned()])
+    };
     if let Some(m) = card.mode {
         meta.push(format!("{m} mode"));
     }
@@ -321,7 +335,7 @@ fn header(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
     let _ = writeln!(
         out,
         "{}",
-        header_line(badge, failed, &meta.join(" · "), width, look)
+        titled_line(title, badge, failed, &meta.join(" · "), width, look)
     );
 }
 
@@ -337,10 +351,24 @@ pub(crate) fn header_line(
     width: usize,
     look: Look,
 ) -> String {
+    titled_line("Io", badge, amber, meta, width, look)
+}
+
+/// [`header_line`] with the card's own title: `Io`, or `Role <name>` on a Role's card, so a
+/// Role's answer or failure is never an unnamed `Io` card.
+fn titled_line(
+    title: &str,
+    badge: &str,
+    amber: bool,
+    meta: &str,
+    width: usize,
+    look: Look,
+) -> String {
     let mut meta = meta.to_owned();
-    // "╭─ ◆ Io " + badge + " " + filler + " " + meta (no badge: no space after it either)
+    // "╭─ ◆ <title> " + badge + " " + filler + " " + meta (no badge: no space after it either)
     let gap = if badge.is_empty() { "" } else { " " };
-    let fixed = measure_text_width("╭─ ◆ Io ") + measure_text_width(badge) + gap.len() + 1;
+    let fixed =
+        measure_text_width(&format!("╭─ ◆ {title} ")) + measure_text_width(badge) + gap.len() + 1;
     let room = width.saturating_sub(fixed + 2);
     if measure_text_width(&meta) > room {
         meta = console::truncate_str(&meta, room, "…").into_owned();
@@ -356,7 +384,7 @@ pub(crate) fn header_line(
     format!(
         "{}{}{badge}{gap}{} {}",
         look.violet().apply_to("╭─ "),
-        look.violet().bold().apply_to("◆ Io "),
+        look.violet().bold().apply_to(format!("◆ {title} ")),
         look.violet().apply_to("─".repeat(fill)),
         look.dim().apply_to(meta),
     )
@@ -666,8 +694,20 @@ enum Kind {
     Head,
 }
 
+/// Text with no terminal escapes of its own: whole escape sequences and the orphaned tails of
+/// cut ones (`;252m`, `167;139;250m`, which a model copies from a screen it read) are dropped,
+/// so words and widths are measured on what shows and a stray fragment never reaches a card.
+fn scrub(text: &str) -> std::borrow::Cow<'_, str> {
+    static CUT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\x1b\[[0-9;:]*[A-Za-z]|\x1b|(?:\b\d{1,3})?(?:;\d{1,3}){1,4}m\b")
+            .unwrap_or_else(|_| unreachable!("a fixed pattern"))
+    });
+    CUT.replace_all(text, "")
+}
+
 /// Inline `code` and **bold**, the marks dropped; everything else is text.
 fn spans(text: &str) -> Vec<(Kind, String)> {
+    let text = &*scrub(text);
     let mut out: Vec<(Kind, String)> = Vec::new();
     let mut rest = text;
     while !rest.is_empty() {
@@ -820,7 +860,7 @@ fn wrap(spans: &[(Kind, String)], width: usize, look: Look, base: Kind) -> Vec<S
 pub(crate) fn body(text: &str, width: usize, look: Look) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut last: Option<&Block> = None;
-    let all = blocks(text);
+    let all = blocks(&scrub(text));
     for b in &all {
         // Items of one list and commands of one fence sit together; other blocks get air.
         let together = matches!(
@@ -932,9 +972,20 @@ fn table(rows: &[Vec<String>], width: usize, look: Look) -> Vec<String> {
 /// Set while a permission question is on the terminal, so the spinner leaves the line alone.
 static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Runs `ask`, a question put to the person in the terminal, with the panel's chat box
+/// stepping aside while it is open (RFC 0212).
+pub(crate) fn asking_person<T>(ask: impl FnOnce() -> T) -> T {
+    crate::panel::chat_report("back;1");
+    let answer = ask();
+    crate::panel::chat_report("back;0");
+    answer
+}
+
 /// Stops (or restarts) the spinner while a question is open.
 #[cfg(unix)]
 pub(crate) fn pause_spin(on: bool) {
+    // The panel's chat box (RFC 0212) steps aside for the question as well.
+    crate::panel::chat_report(if on { "back;1" } else { "back;0" });
     // Held while the stderr lock is taken in `spin`, so no frame lands after this returns.
     let _guard = std::io::stderr().lock();
     PAUSED.store(on, std::sync::atomic::Ordering::SeqCst);
@@ -950,7 +1001,7 @@ pub(crate) fn say(line: &str) {
 
 /// One spinner frame on stderr, over the line before it.
 pub(crate) fn spin(frame: usize, elapsed: Duration, agent: &str, look: Look) {
-    let f = FRAMES[frame % FRAMES.len()];
+    let f = spinner(frame);
     let mut err = std::io::stderr().lock();
     if PAUSED.load(std::sync::atomic::Ordering::SeqCst) {
         return;
@@ -1141,6 +1192,24 @@ mod tests {
         assert!(out.starts_with("╭─ ◆ Io  no answer  ─"), "{out}");
         assert!(out.contains("│  claude is not signed in"), "{out}");
         assert!(out.contains("Nothing was run."), "{out}");
+    }
+
+    #[test]
+    fn a_roles_card_is_titled_with_the_role_and_says_why_it_failed() {
+        let mut c = card("");
+        c.agent = "Role rust-engineer";
+        c.model = "";
+        c.body = Body::Failed("the Role's turn ended with exit 1");
+        let out = strip(&render(&c, 60, FANCY));
+        assert!(
+            out.starts_with("╭─ ◆ Role rust-engineer  no answer  ─"),
+            "{out}"
+        );
+        assert!(!out.contains("◆ Io"), "{out}");
+        assert!(out.contains("the Role's turn ended with exit 1"), "{out}");
+        c.body = Body::Answer("It reads files.");
+        let out = strip(&render(&c, 60, FANCY));
+        assert!(out.starts_with("╭─ ◆ Role rust-engineer ─"), "{out}");
     }
 
     #[test]
@@ -1369,5 +1438,53 @@ mod tests {
         assert!(plain.iter().all(|l| !l.contains('\u{1b}')), "{plain:?}");
         let fancy: Vec<String> = body(SUMMARY, 50, FANCY).iter().map(|l| strip(l)).collect();
         assert_eq!(plain, fancy);
+    }
+
+    /// Every line of a card, through a real terminal model: no stray `NN;NNm` text and every
+    /// word still there, at several widths and both looks.
+    #[test]
+    fn styled_wrapped_text_never_leaks_an_escape_into_the_screen() {
+        let answer = "Use **reqwest and rustls** for `iohr ask --help` calls; the `;252m` and 167;139;250m \
+            fragments a model copies from a screen, plus \x1b[38;2;167;139;250mraw\x1b[0m escapes, must not show. \
+            A long `command --with --many --flags --that --wrap --across --lines` ends it.";
+        let words = [
+            "reqwest",
+            "and",
+            "rustls",
+            "iohr",
+            "ask",
+            "--help",
+            "fragments",
+            "wrap",
+            "ends",
+        ];
+        let stray = regex::Regex::new(r"\d;\d*m|;\d+m").unwrap();
+        for look in [
+            Look {
+                fancy: true,
+                truecolor: true,
+            },
+            Look {
+                fancy: true,
+                truecolor: false,
+            },
+        ] {
+            for cols in [40usize, 60, 80] {
+                let c = Card {
+                    body: Body::Answer(answer),
+                    full: false,
+                    hint: Some("`iohr ask --help` for flags."),
+                    ..card(answer)
+                };
+                let out = render(&c, cols, look).replace('\n', "\r\n");
+                let mut p = vt100::Parser::new(60, u16::try_from(cols).unwrap(), 0);
+                p.process(out.as_bytes());
+                let shown = p.screen().contents();
+                assert!(!stray.is_match(&shown), "{cols}: {shown}");
+                for w in words {
+                    assert!(shown.contains(w), "{w} lost at {cols}: {shown}");
+                }
+            }
+        }
     }
 }

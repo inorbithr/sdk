@@ -4,6 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::runner::claude;
+
 pub(crate) mod stream;
 
 /// Where the answer comes from.
@@ -195,7 +197,9 @@ pub(crate) const SECRET_READS: &[&str] = crate::permissions::secrets::READ_RULES
 /// so the two cannot be mixed). Whatever the run may do, `SECRET_READS` stay unreadable. Codex (<https://developers.openai.com/codex/cli/reference>): `exec --json`
 /// prints JSON lines, `--ephemeral` keeps no session, `--sandbox` is `read-only` unless edits
 /// are allowed, `--skip-git-repo-check` lets it answer in any folder.
-#[must_use]
+///
+/// Claude's vector comes from the one builder ([`claude::build`]), which refuses a flag that
+/// would change what Claude Code is (invariant 8); that refusal is the error.
 pub(crate) fn argv(
     agent: Agent,
     model: Option<&str>,
@@ -204,44 +208,74 @@ pub(crate) fn argv(
     max_turns: Option<u32>,
     role: Option<&str>,
     question: &str,
-) -> Vec<String> {
-    let mut a: Vec<String> = match agent {
-        Agent::Claude => [
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--include-partial-messages",
-            "--no-session-persistence",
-        ]
+) -> Result<Vec<String>, String> {
+    if agent == Agent::Claude {
+        return claude_argv(model, (allow_edits, plan), allow, max_turns, role, question);
+    }
+    let mut a: Vec<String> = ["exec", "--json", "--ephemeral", "--skip-git-repo-check"]
         .map(str::to_owned)
-        .to_vec(),
-        Agent::Codex => ["exec", "--json", "--ephemeral", "--skip-git-repo-check"]
-            .map(str::to_owned)
-            .to_vec(),
-    };
+        .to_vec();
     if let Some(m) = model {
         a.extend(["--model".to_owned(), m.to_owned()]);
     }
-    match (agent, allow_edits) {
-        // Plan mode (`plan`, which beats `allow_edits`): Claude's own plan mode, so it reads and
-        // proposes and changes nothing, with the shell and the secret files denied outright.
-        (Agent::Claude, _) if plan => {
-            a.extend(["--permission-mode".to_owned(), "plan".to_owned()]);
-            a.push("--disallowedTools".to_owned());
-            a.extend(SECRET_READS.iter().map(|r| (*r).to_owned()));
-            a.push("Bash".to_owned());
+    // Codex has no plan mode (checked against its CLI reference): plan is its read-only sandbox.
+    a.extend([
+        "--sandbox".to_owned(),
+        if allow_edits && !plan {
+            "workspace-write"
+        } else {
+            "read-only"
         }
-        (Agent::Claude, true) => {
-            a.extend(["--permission-mode".to_owned(), "acceptEdits".to_owned()]);
-            let mut denied: Vec<String> = SECRET_READS.iter().map(|r| (*r).to_owned()).collect();
-            if allow.is_empty() {
-                denied.push("Bash".to_owned());
-            } else {
-                a.extend(["--setting-sources".to_owned(), String::new()]);
-                a.push("--allowedTools".to_owned());
-                a.extend(allow.iter().map(|c| format!("Bash({c}:*)")));
-                a.extend(
+        .to_owned(),
+    ]);
+    // Codex has no turn limit and no system prompt flag: the caller's time limit is its only
+    // bound, and a Role's text (RFC 0211) leads the prompt.
+    let question = match role {
+        Some(r) => format!("{r}\n\n{question}"),
+        None => question.to_owned(),
+    };
+    a.extend(["--".to_owned(), question]);
+    Ok(a)
+}
+
+/// Claude's half of [`argv`]: plan mode (which beats `allow_edits`) is Claude's own, so it
+/// reads and proposes and changes nothing, with the shell and the secret files denied
+/// outright; an editing run accepts edits and takes `allow` and the file and web tools, or
+/// denies the shell when `allow` is empty. A Role's text (RFC 0211) is more system prompt
+/// (`--append-system-prompt`, <https://code.claude.com/docs/en/cli-reference>), so the
+/// question stays the person's own words.
+fn claude_argv(
+    model: Option<&str>,
+    (allow_edits, plan): (bool, bool),
+    allow: &[String],
+    max_turns: Option<u32>,
+    role: Option<&str>,
+    question: &str,
+) -> Result<Vec<String>, String> {
+    let secrets = || SECRET_READS.iter().map(|r| (*r).to_owned());
+    let mut call = claude::Call {
+        output: claude::Output::Stream,
+        model,
+        max_turns,
+        keep: claude::Keep::Nothing,
+        prompt: role.map_or(claude::Prompt::Own, claude::Prompt::Append),
+        question: Some(question),
+        ..claude::Call::default()
+    };
+    if plan {
+        call.permission_mode = Some("plan");
+        call.disallowed = secrets().chain(["Bash".to_owned()]).collect();
+    } else if allow_edits {
+        call.permission_mode = Some("acceptEdits");
+        call.disallowed = secrets().collect();
+        if allow.is_empty() {
+            call.disallowed.push("Bash".to_owned());
+        } else {
+            call.setting_sources = Some("");
+            call.allowed = allow
+                .iter()
+                .map(|c| format!("Bash({c}:*)"))
+                .chain(
                     [
                         "Read",
                         "Glob",
@@ -252,40 +286,13 @@ pub(crate) fn argv(
                         "WebFetch",
                     ]
                     .map(str::to_owned),
-                );
-            }
-            a.push("--disallowedTools".to_owned());
-            a.extend(denied);
+                )
+                .collect();
         }
-        (Agent::Claude, false) => {}
-        // Codex has no plan mode (checked against its CLI reference): plan is its read-only sandbox.
-        (Agent::Codex, edits) => a.extend([
-            "--sandbox".to_owned(),
-            if edits && !plan {
-                "workspace-write"
-            } else {
-                "read-only"
-            }
-            .to_owned(),
-        ]),
     }
-    // Codex has no turn limit; the caller's time limit is its only bound.
-    if let (Agent::Claude, Some(n)) = (agent, max_turns) {
-        a.extend(["--max-turns".to_owned(), n.to_string()]);
-    }
-    // A Role's text (RFC 0211): Claude Code takes it as more system prompt
-    // (`--append-system-prompt`, <https://code.claude.com/docs/en/cli-reference>), so the
-    // question stays the person's own words; Codex has no such flag, so the text leads the prompt.
-    let question = match (agent, role) {
-        (Agent::Claude, Some(r)) => {
-            a.extend(["--append-system-prompt".to_owned(), r.to_owned()]);
-            question.to_owned()
-        }
-        (Agent::Codex, Some(r)) => format!("{r}\n\n{question}"),
-        (_, None) => question.to_owned(),
-    };
-    a.extend(["--".to_owned(), question]);
-    a
+    claude::build(&call, &claude::Auth::OwnSignIn)
+        .map(|b| b.args)
+        .map_err(|e| e.to_string())
 }
 
 /// `program` and `args` as one line a shell reads back the same way.
@@ -470,6 +477,18 @@ mod tests {
         assert!(choose_model(Agent::Claude, bad).is_err());
     }
 
+    /// The rules a vector denies, one `--disallowedTools=<rule>` flag each.
+    fn denied(a: &[String]) -> Vec<String> {
+        assert!(
+            !a.contains(&"--disallowedTools".to_owned()),
+            "list form: {a:?}"
+        );
+        a.iter()
+            .filter_map(|x| x.strip_prefix("--disallowedTools="))
+            .map(str::to_owned)
+            .collect()
+    }
+
     #[test]
     fn the_argv_has_no_session_and_no_edits_unless_asked() {
         let a = argv(
@@ -480,7 +499,8 @@ mod tests {
             None,
             None,
             "q",
-        );
+        )
+        .unwrap();
         assert!(a.contains(&"--no-session-persistence".to_owned()));
         assert!(!a.contains(&"--permission-mode".to_owned()));
         assert_eq!(a[a.len() - 2..], ["--", "q"]);
@@ -492,32 +512,33 @@ mod tests {
             Some(7),
             None,
             "q",
-        );
+        )
+        .unwrap();
         assert!(
             e.windows(2)
                 .any(|w| w == ["--permission-mode", "acceptEdits"])
         );
         // With nothing allowed the shell is denied outright, the secret files are unreadable,
         // and the turn bound reaches Claude only.
-        let denied = &e[e.iter().position(|x| x == "--disallowedTools").unwrap() + 1..];
-        assert!(denied.contains(&"Bash".to_owned()));
+        let refused = &denied(&e);
+        assert!(refused.contains(&"Bash".to_owned()));
         assert!(
             SECRET_READS
                 .iter()
-                .all(|r| denied.contains(&(*r).to_owned()))
+                .all(|r| refused.contains(&(*r).to_owned()))
         );
         assert!(!e.contains(&"--allowedTools".to_owned()));
         assert!(!e.contains(&"--setting-sources".to_owned()));
         assert!(e.windows(2).any(|w| w == ["--max-turns", "7"]));
-        assert!(
-            !a.contains(&"--max-turns".to_owned()) && !a.contains(&"--disallowedTools".to_owned())
-        );
+        assert!(!a.contains(&"--max-turns".to_owned()) && denied(&a).is_empty());
         assert!(
             !argv(Agent::Codex, None, (false, false), &[], Some(7), None, "q")
+                .unwrap()
                 .contains(&"--max-turns".to_owned())
         );
         assert!(
             argv(Agent::Codex, None, (false, false), &[], Some(7), None, "q")
+                .unwrap()
                 .windows(2)
                 .any(|w| w == ["--sandbox", "read-only"])
         );
@@ -534,13 +555,14 @@ mod tests {
                 Some(7),
                 None,
                 "q",
-            );
+            )
+            .unwrap();
             assert!(
                 c.windows(2).any(|w| w == ["--permission-mode", "plan"]),
                 "{c:?}"
             );
             assert!(!c.contains(&"acceptEdits".to_owned()), "{c:?}");
-            let denied = &c[c.iter().position(|x| x == "--disallowedTools").unwrap() + 1..];
+            let denied = &denied(&c);
             assert!(denied.contains(&"Bash".to_owned()));
             assert!(
                 SECRET_READS
@@ -550,7 +572,7 @@ mod tests {
             assert!(!c.contains(&"--allowedTools".to_owned()));
             assert_eq!(c[c.len() - 2..], ["--", "q"]);
             // Codex has no plan mode: plan is its read-only sandbox, even with edits asked.
-            let x = argv(Agent::Codex, None, (edits, true), &[], None, None, "q");
+            let x = argv(Agent::Codex, None, (edits, true), &[], None, None, "q").unwrap();
             assert!(
                 x.windows(2).any(|w| w == ["--sandbox", "read-only"]),
                 "{x:?}"
@@ -569,7 +591,8 @@ mod tests {
             Some(7),
             None,
             "q",
-        );
+        )
+        .unwrap();
         let at = e.iter().position(|x| x == "--allowedTools").unwrap();
         assert_eq!(
             e[at + 1..at + 10],
@@ -589,11 +612,11 @@ mod tests {
         assert!(!e.iter().any(|x| x.contains("curl") || x == "Bash"));
         // A deny beats an allow, so a scoped allow means no blanket `Bash` deny, and the
         // secret files stay denied; the person's own settings cannot allow more.
-        let denied = &e[e.iter().position(|x| x == "--disallowedTools").unwrap() + 1..];
+        let denied = &denied(&e);
         assert!(!denied.contains(&"Bash".to_owned()));
-        // The deny list is exactly the secret reads (then `--`, the question): never wider
-        // tools without it, never narrower.
-        assert_eq!(denied[..SECRET_READS.len()], *SECRET_READS);
+        // The deny list is exactly the secret reads: never wider tools without it, never
+        // narrower.
+        assert_eq!(denied[..], *SECRET_READS);
         assert!(
             SECRET_READS
                 .iter()
@@ -610,7 +633,8 @@ mod tests {
             None,
             None,
             "q",
-        );
+        )
+        .unwrap();
         assert!(!r.contains(&"--allowedTools".to_owned()));
     }
 
@@ -624,7 +648,8 @@ mod tests {
             None,
             Some("Role text"),
             "q",
-        );
+        )
+        .unwrap();
         let at = a
             .iter()
             .position(|x| x == "--append-system-prompt")
@@ -639,7 +664,8 @@ mod tests {
             None,
             Some("Role text"),
             "q",
-        );
+        )
+        .unwrap();
         assert!(!c.contains(&"--append-system-prompt".to_owned()));
         assert_eq!(c[c.len() - 1], "Role text\n\nq");
     }

@@ -155,6 +155,10 @@ pub(crate) async fn run(g: &Global, env: &Env, mut args: AskArgs, out: Out) -> R
     result
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one ask from its flags to the agent's start, in order"
+)]
 async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Error> {
     if args.menu {
         return menu(g, &args);
@@ -192,7 +196,8 @@ async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Er
         None,
         role_text.as_deref(),
         &question,
-    );
+    )
+    .map_err(Error::Usage)?;
     if args.dry_run {
         dry_run(via, agent, bin.as_deref(), &command_line, role_json, out);
         return Ok(());
@@ -551,7 +556,10 @@ fn role_cwd(h: &HeadlessArgs) -> std::path::PathBuf {
     )
 }
 
-fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>), Error> {
+fn context_of(
+    h: &HeadlessArgs,
+    g: &Global,
+) -> Result<(Context, Option<std::path::PathBuf>), Error> {
     let cwd = match &h.cwd {
         Some(c) => c.clone(),
         None => std::env::current_dir()
@@ -560,6 +568,12 @@ fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>),
     };
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let root = crate::memory::find_root(Path::new(&cwd));
+    // One walk up for the project root serves the notes and the IO.md chain.
+    let io_md = crate::iomd::load_in(
+        Path::new(&cwd),
+        crate::iomd::user_dir(g).as_deref(),
+        root.as_deref(),
+    );
     let ctx =
         Context {
             files: headless::list_folder(Path::new(&cwd)),
@@ -590,6 +604,8 @@ fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>),
             prior: h.prior_question.clone().zip(h.prior_answer.clone()),
             refresh: false,
             role: String::new(),
+            sources: String::new(),
+            io_md,
         };
     Ok((ctx, root))
 }
@@ -688,7 +704,12 @@ async fn headless(
     let Chosen {
         bin, agent, model, ..
     } = *chosen;
-    let (mut ctx, root) = context_of(h)?;
+    let (mut ctx, root) = context_of(h, g)?;
+    // The project's local site knowledge base (PRD 0192): the best chunks for the question,
+    // with their sources. Nothing indexed, nothing added.
+    if let Some(r) = root.as_deref() {
+        ctx.sources = crate::kb::sources_block(&crate::kb::sources(r, question, 5));
+    }
     if let Some(r) = chosen.role {
         ctx.role = r.system_text();
     }
@@ -909,17 +930,18 @@ fn grant_access(
         }
         let may_ask = terminal && matches!(mode, Mode::Manual | Mode::Auto);
         let kept = trust::is_trusted(chosen.dir, &req.folder);
-        let asked = (!kept && may_ask).then(|| match trust::ask(&req.folder) {
-            trust::Answer::Always => {
-                if let Err(why) = trust::remember(chosen.dir, &req.folder) {
-                    let _ = console::Term::stderr()
-                        .write_line(&format!("Trusted for this time only: {why}"));
+        let asked =
+            (!kept && may_ask).then(|| match card::asking_person(|| trust::ask(&req.folder)) {
+                trust::Answer::Always => {
+                    if let Err(why) = trust::remember(chosen.dir, &req.folder) {
+                        let _ = console::Term::stderr()
+                            .write_line(&format!("Trusted for this time only: {why}"));
+                    }
+                    true
                 }
-                true
-            }
-            trust::Answer::Once => true,
-            trust::Answer::No => false,
-        });
+                trust::Answer::Once => true,
+                trust::Answer::No => false,
+            });
         if !(kept || asked == Some(true)) || ctx.also.len() >= MAX_FOLDERS {
             return Ok(Some(req));
         }
@@ -1299,6 +1321,10 @@ async fn think(
 /// The card: the model runs under a spinner while the asks waiting are counted, the answer is
 /// drawn, a question the model asked back is put to the person (kept, then the answer is
 /// refreshed once), and the one line about waiting asks closes it.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one card from the agent's answer to the hand-over, in order"
+)]
 async fn card_run(
     chosen: &Chosen<'_>,
     question: &str,
@@ -1397,6 +1423,7 @@ async fn card_run(
                 (h, menu_key, look, width),
                 (pending.as_ref(), note.as_deref()),
             );
+            crate::health::print_notes(g, dir);
             let undo = saved_rules(session.as_ref());
             hand_over(
                 h,
@@ -1470,7 +1497,9 @@ async fn ask_back(
     look: CardLook,
     how: (Option<&Session>, Mode),
 ) -> Result<Option<(String, Vec<Step>, u64)>, Error> {
-    let Some(answers) = askback::ask_person(questions) else {
+    // The box steps aside while the person is asked (the questions are drawn in the terminal).
+    let asked = card::asking_person(|| askback::ask_person(questions));
+    let Some(answers) = asked else {
         return Ok(None);
     };
     for line in askback::save(root, &answers) {
@@ -1581,24 +1610,29 @@ async fn spin_while<T>(
     tokio::pin!(work);
     let stop = tokio::signal::ctrl_c();
     tokio::pin!(stop);
+    // With the panel's chat box on the screen its progress row is the spinner (RFC 0212): this
+    // one stays out of its way, and the box is told when the run starts and when it ends.
+    let boxed = crate::panel::chat_shown() && crate::panel::chat_report("begin");
     let mut tick = tokio::time::interval(Duration::from_millis(90));
     let mut frame = 0usize;
-    loop {
+    let ended = loop {
         tokio::select! {
-            done = &mut work => {
-                card::spin_clear();
-                return Ok(done);
-            }
-            _ = &mut stop => {
-                card::spin_clear();
-                return Err(Error::Child(130));
-            }
+            done = &mut work => break Ok(done),
+            _ = &mut stop => break Err(Error::Child(130)),
             _ = tick.tick() => {
-                card::spin(frame, started.elapsed(), agent.display(), look);
+                if !boxed {
+                    card::spin(frame, started.elapsed(), agent.display(), look);
+                }
                 frame += 1;
             }
         }
+    };
+    if boxed {
+        crate::panel::chat_report("end");
+    } else {
+        card::spin_clear();
     }
+    ended
 }
 
 #[cfg(test)]
