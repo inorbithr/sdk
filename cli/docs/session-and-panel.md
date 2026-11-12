@@ -181,7 +181,7 @@ Both keys always work. For `⌥i`, set Option to send Esc or Meta (iTerm2: Profi
 panel leaves Ctrl-G to the `?` menu and shows `⌥i`.
 
 The key opens the menu: `a` auto mode, `p` approvals, `w` workloads, `r` run, `s` status,
-`?` help, `x` stop the panel. Arrows and Enter move and open, Esc closes. Keys are taken only
+`h` share to phone, `t` let the phone type, `?` help, `x` stop the panel. Arrows and Enter move and open, Esc closes. Keys are taken only
 while the panel is open; every other byte goes to your shell untouched.
 
 The mouse works on the menu and the views while they are open: a click on a row selects and
@@ -224,6 +224,19 @@ question that is sent to the asker, `d` denies after a y/n confirmation, and `a`
 The panel never asks for Touch ID itself. An ask a Mac may sign is handed to
 `iohr asks approve <id>` in a shell, which asks Touch ID; every other ask goes to your phone.
 A merge, a roll, a migration and an auto-approve rule always stay on the phone.
+
+**Share to phone** (`h`) shows this panel's terminal on your phone, and **Let phone type**
+(`t`) lets the phone type into it. The panel does not serve the phone itself: it hands its
+shell to the InOrbit Mac app's terminal host as an external session (host protocol 2), and the
+app's relay, pairing and questions do the rest, so the Mac asks you "Share this terminal?"
+before anything leaves it. While it is on, the pill says `phone ● shared` (and `· types`
+while typing is on). The row says why in one line when it cannot: the Mac app is not running,
+is too old (update it), or the link was lost (an app update restarts the host); turn the row
+on again. Typing is off until you turn it on here, and it needs a second yes on the Mac;
+a key the phone sends is dropped unless both are on, and the app's own rules for typing (the
+terminal is idle, Claude is in front, no permission dialog waiting, one clean line, rate
+limits, `IOHR_TERMINAL_INPUT`) still apply before it gets here. The demo shares nothing. Needs
+the Mac app; a Linux machine or a server has no app to hand the shell to yet.
 
 **Workloads** (`w`) is the InOrbit Mac app's workload tree, flattened: a coordinator root for
 this machine, its children with `├` and `└`, then one "Coordinator service" row for the
