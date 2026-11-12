@@ -851,11 +851,13 @@ mod tests {
         assert_eq!(none.build_floor, None, "unset: no build-disk pause");
 
         let mut file = RunnerConfig::default();
-        file.build_volume = Some("/srv/build".into());
+        // Absolute on every OS: `/srv/build` has no drive letter on Windows.
+        let build = std::env::temp_dir().join("build");
+        file.build_volume = Some(build.to_string_lossy().into_owned());
         let e = resolve(&file, None, &Flags::default()).unwrap();
         let floor = e.build_floor.unwrap();
         assert_eq!(floor.source, Source::File);
-        assert_eq!(floor.value.volume, PathBuf::from("/srv/build"));
+        assert_eq!(floor.value.volume, build);
         assert_eq!(floor.value.bytes, BUILD_FLOOR_GB * GB);
 
         let mut work = RunnerConfig::default();

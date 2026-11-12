@@ -24,7 +24,10 @@ const scopes = ['identity:read'];
 
 void _writeJson(String state, String name, Object value) {
   final tmp = File('$state/.$name.tmp')..writeAsStringSync(jsonEncode(value));
-  Process.runSync('/bin/chmod', ['600', tmp.path]);
+  // Windows has no chmod; the user's profile guards the file there.
+  if (!Platform.isWindows) {
+    Process.runSync('/bin/chmod', ['600', tmp.path]);
+  }
   tmp.renameSync('$state/$name');
 }
 

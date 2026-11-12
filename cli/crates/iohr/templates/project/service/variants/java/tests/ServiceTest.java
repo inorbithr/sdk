@@ -82,7 +82,7 @@ public final class ServiceTest {
         String all = logText(b);
         String span = null;
         String request = null;
-        for (String line : all.strip().split("\n")) {
+        for (String line : all.strip().split("\\R")) {
             check(line.startsWith("{") && line.endsWith("}"), "a log line is JSON: " + line);
             if (line.contains("\"msg\":\"span\"")) {
                 span = line;
