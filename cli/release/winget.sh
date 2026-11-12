@@ -67,7 +67,7 @@ Publisher: InOrbit d.o.o.
 PublisherUrl: https://inorbit.hr
 PublisherSupportUrl: https://github.com/inorbithr/sdk/issues
 PackageName: iohr
-PackageUrl: https://docs.inorbit.hr
+PackageUrl: https://developers.inorbit.hr
 License: Apache-2.0
 LicenseUrl: https://github.com/inorbithr/sdk/blob/main/LICENSE
 ShortDescription: The InOrbit command line. Sign in, keep several accounts, call the API.
