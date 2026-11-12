@@ -54,3 +54,48 @@ RELEASE_STEPS = '''      - name: Build (locked, release)
           mkdir -p dist
           install -m 0755 "target/release/@@NAME@@" "dist/@@NAME@@-linux-amd64"'''
 DEPENDABOT_ECOSYSTEM = "cargo"
+
+[lang_vars.java]
+RELEASE_STEPS = """      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Build the jar
+        run: |
+          mvn --batch-mode --no-transfer-progress -DskipTests package
+          mkdir -p dist
+          cp target/@@NAME@@-*.jar dist/"""
+DEPENDABOT_ECOSYSTEM = "maven"
+
+[lang_vars.csharp]
+RELEASE_STEPS = """      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"
+      - name: Publish and archive
+        run: |
+          dotnet publish src/App/App.csproj -c Release -o publish
+          mkdir -p dist
+          tar -C publish -czf "dist/@@NAME@@-dotnet.tar.gz" ."""
+DEPENDABOT_ECOSYSTEM = "nuget"
+
+[lang_vars.swift]
+RELEASE_STEPS = """      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.1"
+      - name: Build (release)
+        run: |
+          swift build -c release
+          mkdir -p dist
+          install -m 0755 ".build/release/@@NAME@@" "dist/@@NAME@@-linux-amd64\""""
+DEPENDABOT_ECOSYSTEM = "swift"
+
+[lang_vars.dart]
+RELEASE_STEPS = """      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: stable
+      - name: Compile (native executable)
+        run: |
+          dart pub get --enforce-lockfile
+          mkdir -p dist
+          dart compile exe bin/main.dart -o "dist/@@NAME@@-linux-amd64\""""
+DEPENDABOT_ECOSYSTEM = "pub"

@@ -1477,7 +1477,11 @@ mod tests {
                     ..card(answer)
                 };
                 let out = render(&c, cols, look).replace('\n', "\r\n");
-                let mut p = vt100::Parser::new(60, u16::try_from(cols).unwrap(), 0);
+                let mut p = vt100::Parser::new(
+                    std::num::NonZeroU16::new(60).unwrap(),
+                    std::num::NonZeroU16::new(u16::try_from(cols).unwrap()).unwrap(),
+                    0,
+                );
                 p.process(out.as_bytes());
                 let shown = p.screen().contents();
                 assert!(!stray.is_match(&shown), "{cols}: {shown}");
