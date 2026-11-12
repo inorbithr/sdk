@@ -166,9 +166,12 @@ fn an_id_outside_the_catalog_is_an_unknown_action() {
     let mut d = doc(&json!({}));
     d["action"] = json!("k8s.delete-namespace");
     assert_eq!(validate(&d), Err("/action: unknown action".to_owned()));
-    assert_eq!(lookup(&d), Err("unknown action".to_owned()));
     assert_eq!(
-        lookup(&doc(&json!({"namespace": "example"}))),
+        lookup_on(&d, std::env::consts::OS),
+        Err("unknown action".to_owned())
+    );
+    assert_eq!(
+        lookup_on(&doc(&json!({"namespace": "example"})), std::env::consts::OS),
         Ok(Action::DeleteFailedPods {
             namespace: Some("example".to_owned())
         })
@@ -497,6 +500,7 @@ fn host(dir: &std::path::Path, kube: Result<KubeTarget, String>) -> HostRunner {
         core_checkout: None,
         ssh_env: Vec::new(),
         account: None,
+        extensions: None,
     }
 }
 

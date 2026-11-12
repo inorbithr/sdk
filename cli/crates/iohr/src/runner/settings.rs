@@ -5,9 +5,10 @@
 //! a runner offers change without registering again. Each beat also carries the machine
 //! (`runner::host`: cores, memory, disks, load and pressure) for placement (RFC 0197).
 //!
-//! The build-disk guard lives here too: while the build volume has less than
-//! [`BUILD_FLOOR_BYTES`] free, the runner declares itself without `build`, so the service
-//! offers it no new build turn. Turns already running are never touched.
+//! The build-disk guard lives here too: while the `build_volume` the runner is given has
+//! less than `build_volume_min_free_gb` free, the runner declares itself without `build`,
+//! so the service offers it no new build turn. Turns already running are never touched.
+//! With no `build_volume`, there is no guard.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -29,10 +30,11 @@ pub(crate) const BUILD: &str = "build";
 /// offered nothing new. An empty list would not do: the service reads it as "not
 /// declared" and keeps the kinds of the beat before.
 pub(crate) const NOTHING: &str = "none";
-/// The volume build turns use on a build server.
-pub(crate) const BUILD_VOLUME: &str = "/mnt/build";
-/// Under this much free space on [`BUILD_VOLUME`], no new build turn: 100 GB.
-pub(crate) const BUILD_FLOOR_BYTES: u64 = 100 * 1_000_000_000;
+/// The free space a `build_volume` keeps for new build turns when
+/// `build_volume_min_free_gb` is not set: 100 GB.
+pub(crate) const BUILD_FLOOR_GB: u64 = 100;
+/// One GB, as `build_volume_min_free_gb` counts it.
+const GB: u64 = 1_000_000_000;
 
 /// Where a setting's value came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +122,9 @@ pub(crate) struct Effective {
     pub(crate) kube_context: Option<Setting<String>>,
     /// The kubeconfig file the pinned `kubectl` reads (absolute path), if any.
     pub(crate) kubeconfig: Option<Setting<String>>,
+    /// The build-disk guard (`build_volume`, `build_volume_min_free_gb`); `None` when no
+    /// `build_volume` is set: no build-disk pause.
+    pub(crate) build_floor: Option<Setting<BuildFloor>>,
     /// Whether the runner upgrades itself (default yes; `--no-auto-upgrade` or
     /// `auto_upgrade = false` turns it off).
     pub(crate) auto_upgrade: Setting<bool>,
@@ -193,6 +198,7 @@ fn pick<T: Clone>(
 /// 32, an empty kinds list, a kind other than `coordinate` and `build`, an upgrade
 /// interval outside 5 to 10080 minutes, a restart mode other than `exec` and `exit`, or a
 /// `user_units` entry that is not a user service unit.
+#[allow(clippy::too_many_lines, reason = "one resolution per setting")]
 pub(crate) fn resolve(
     file: &RunnerConfig,
     profile: Option<(&str, &RunnerConfig)>,
@@ -241,6 +247,7 @@ pub(crate) fn resolve(
     }
     let kube_context = pick(None, profile, file, |c| c.kube_context.clone());
     let kubeconfig = pick(None, profile, file, |c| c.kubeconfig.clone());
+    let build_floor = build_floor_of(profile, file)?;
     let auto_upgrade = pick(flags.no_auto_upgrade.then_some(false), profile, file, |c| {
         c.auto_upgrade
     })
@@ -282,6 +289,7 @@ pub(crate) fn resolve(
         id,
         kube_context,
         kubeconfig,
+        build_floor,
         auto_upgrade,
         upgrade_interval,
         upgrade_restart,
@@ -514,13 +522,52 @@ pub(crate) struct BuildFloor {
     pub(crate) bytes: u64,
 }
 
-impl Default for BuildFloor {
-    fn default() -> Self {
-        Self {
-            volume: PathBuf::from(BUILD_VOLUME),
-            bytes: BUILD_FLOOR_BYTES,
-        }
+/// `build_volume` and `build_volume_min_free_gb`, each from the profile's table, then
+/// `[runner]`. `None` when no volume is set.
+///
+/// # Errors
+///
+/// A volume that is not an absolute path, a floor of 0, or a floor with no volume.
+fn build_floor_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Option<Setting<BuildFloor>>, String> {
+    let volume = pick(None, profile, file, |c| c.build_volume.clone());
+    let gb = pick(None, profile, file, |c| c.build_volume_min_free_gb);
+    if let Some(g) = &gb
+        && g.value == 0
+    {
+        return Err(format!(
+            "runner build_volume_min_free_gb ({}) is 0; leave it out for {BUILD_FLOOR_GB}",
+            g.source
+        ));
     }
+    let Some(volume) = volume else {
+        return match gb {
+            Some(g) => Err(format!(
+                "runner build_volume_min_free_gb ({}) needs a build_volume",
+                g.source
+            )),
+            None => Ok(None),
+        };
+    };
+    if !Path::new(&volume.value).is_absolute() {
+        return Err(format!(
+            "runner build_volume ({}) is not an absolute path",
+            volume.source
+        ));
+    }
+    let bytes = gb
+        .as_ref()
+        .map_or(BUILD_FLOOR_GB, |g| g.value)
+        .saturating_mul(GB);
+    Ok(Some(Setting {
+        value: BuildFloor {
+            volume: PathBuf::from(&volume.value),
+            bytes,
+        },
+        source: volume.source,
+    }))
 }
 
 /// Free and total bytes of one volume.
@@ -770,7 +817,7 @@ mod tests {
             kinds: vec!["coordinate".into(), "build".into()],
             host: None,
         };
-        let floor = BUILD_FLOOR_BYTES;
+        let floor = BUILD_FLOOR_GB * GB;
         assert_eq!(
             d.clone().guarded(Some(floor - 1), floor).kinds,
             ["coordinate"]
@@ -799,13 +846,44 @@ mod tests {
     }
 
     #[test]
+    fn the_build_volume_has_no_default_and_its_floor_needs_it() {
+        let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(none.build_floor, None, "unset: no build-disk pause");
+
+        let mut file = RunnerConfig::default();
+        file.build_volume = Some("/srv/build".into());
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        let floor = e.build_floor.unwrap();
+        assert_eq!(floor.source, Source::File);
+        assert_eq!(floor.value.volume, PathBuf::from("/srv/build"));
+        assert_eq!(floor.value.bytes, BUILD_FLOOR_GB * GB);
+
+        let mut work = RunnerConfig::default();
+        work.build_volume_min_free_gb = Some(20);
+        let e = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap();
+        assert_eq!(e.build_floor.unwrap().value.bytes, 20 * GB);
+
+        let err = resolve(&work, None, &Flags::default()).unwrap_err();
+        assert!(err.contains("needs a build_volume"), "{err}");
+        work.build_volume_min_free_gb = Some(0);
+        let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
+        assert!(err.contains("is 0") && err.contains("work"), "{err}");
+        file.build_volume = Some("build".into());
+        let err = resolve(&file, None, &Flags::default()).unwrap_err();
+        assert!(
+            err.contains("not an absolute path") && err.contains("[runner]"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn reads_the_available_column_of_df() {
         let linux = "Filesystem     1024-blocks      Used Available Capacity Mounted on\n\
-                     /dev/nvme1n1   3844640564 2950015300 699253584      81% /mnt/build\n";
+                     /dev/nvme1n1   3844640564 2950015300 699253584      81% /srv/build\n";
         assert_eq!(
             df_line(linux),
             Some((
-                "/mnt/build".into(),
+                "/srv/build".into(),
                 DiskSpace {
                     free: 699_253_584 * 1024,
                     total: 3_844_640_564 * 1024

@@ -273,7 +273,7 @@ checks, in the order the platform checks them, that:
 
 - the ask is approved and pinned, and its payload hashes to what was approved;
 - a person decided it;
-- the action fits the `runner/host-action/v0` schema and names this runner and its key;
+- the action fits the `runner/host-action/v0` or `runner/host-action/v1` schema and names this runner and its key;
 - it has not expired;
 - a pinned device key signed the decision;
 - this machine has not carried out that decision before. The record is
@@ -289,4 +289,20 @@ own. Each action runs its program from an absolute `PATH` entry with an argument
 (never a shell), the scrubbed environment above (no `KUBECONFIG`: the configured cluster is
 used) and a time limit of its own, from 120 to 3,600 seconds. A `kubectl` action that takes
 a namespace needs a DNS label, and `kube-system`, `kube-public` and `kube-node-lease` are
-refused. An action that is not in the catalogue is reported `failed` as unknown.
+refused. An action that is not in the catalogue is reported `failed` as unknown, unless an
+installed extension declares it.
+
+A `runner/host-action/v1` ask names its `provider`: `"builtin"` (or no provider, a v0 ask) for
+the catalogue above, or an extension with the version and manifest digest the person approved.
+For an extension's action the runner verifies the installed copy again (the program's hash,
+the kept bundles and the signer, as `iohr ext verify` does), then checks that it is the
+approved version and digest, that it declares the action for this system, that the parameters
+are exactly the declared ones, each of its type, and that the `effect` is the declared one
+with those parameters filled in. Any mismatch is reported `failed` and runs nothing. It then
+starts the extension's entrypoint as `<entrypoint> host-action <id>`, with the parameters as
+one JSON object on standard input, no shell, the scrubbed environment above without
+`IOHR_TOKEN*` or `KUBECONFIG`, and the declared time limit. `iohr ext install` and
+`iohr ext lint` show the host actions an extension declares; see
+[the extension guide](../../docs/extensions/developing.md). If the extension store or trust
+settings cannot be read when the runner starts, it prints `extension host actions: off` with
+the reason, and every extension action is refused as not installed.
