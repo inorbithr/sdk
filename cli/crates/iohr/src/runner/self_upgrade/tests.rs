@@ -40,6 +40,9 @@ struct Fake {
     looks: Arc<AtomicUsize>,
     /// How many extension passes ran.
     ext_passes: Arc<AtomicUsize>,
+    /// What each extension pass says (nothing unless a test sets it, so the other
+    /// tests count only the binary's own lines).
+    ext_says: Arc<Mutex<Vec<String>>>,
     /// Whether the drain was wanted at each download.
     wanted_at_prepare: Arc<Mutex<Vec<bool>>>,
     /// When each swap ran.
@@ -61,6 +64,7 @@ impl Fake {
             swapped: Arc::default(),
             looks: Arc::default(),
             ext_passes: Arc::default(),
+            ext_says: Arc::default(),
             wanted_at_prepare: Arc::default(),
             installs: Arc::default(),
             wanted_at_install: Arc::default(),
@@ -125,7 +129,7 @@ impl Source for Fake {
     }
     async fn extensions(&self) -> Vec<String> {
         self.ext_passes.fetch_add(1, Ordering::SeqCst);
-        vec!["extensions: 1 upgraded, 0 current, 0 refused, 1 failed".into()]
+        self.ext_says.lock().unwrap().clone()
     }
 }
 
@@ -668,6 +672,8 @@ async fn each_look_runs_the_extension_pass_and_logs_it() {
         Supervisor::Systemd,
         RestartMode::Exit,
     );
+    *r.fake.ext_says.lock().unwrap() =
+        vec!["extensions: 1 upgraded, 0 current, 0 refused, 1 failed".into()];
     let (all, log) = lines();
     let run = r.up.run(r.stop.subscribe(), &log);
     let _ = tokio::time::timeout(2 * HOUR, run).await;
