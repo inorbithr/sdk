@@ -942,17 +942,39 @@ pub fn smoke(dir: &Path, state: &Path, name: &str, runner: Option<&Runner>) -> S
 /// What the demo child may inherit: the runner's own allowlist (`PATH`, the temp directory,
 /// and on Windows `SYSTEMROOT` and the rest Node and Winsock need to start), without the
 /// XDG directories, which would point the demo at the real configuration. The unix `PATH`
-/// stays the fixed system one.
+/// stays the fixed system one. Windows also keeps [`DEMO_WINDOWS_FOLDERS`], which the
+/// runner's provider allowlist does not carry.
 fn demo_base_env() -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
     // The fixed system path on unix; Windows keeps the runner's own, where its tools live.
-    let fixed = cfg!(unix);
-    let mut env: Vec<_> = crate::runner::env::scrub(std::env::vars_os())
+    demo_env_from(std::env::vars_os(), cfg!(unix))
+}
+
+/// The Program Files folders. `NuGet` reads them from the environment for its machine-wide
+/// config and stops every restore with "Value cannot be null. (Parameter 'path1')" when
+/// they are missing. They name system folders and never carry a credential.
+const DEMO_WINDOWS_FOLDERS: &[&str] = &["PROGRAMFILES", "PROGRAMFILES(X86)"];
+
+/// [`demo_base_env`] over `vars`; `fixed` is the unix case (the fixed `PATH`, no Windows
+/// folders).
+fn demo_env_from<I>(vars: I, fixed: bool) -> Vec<(std::ffi::OsString, std::ffi::OsString)>
+where
+    I: IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+{
+    let vars: Vec<_> = vars.into_iter().collect();
+    let upper = |k: &std::ffi::OsString| k.to_string_lossy().to_ascii_uppercase();
+    let mut env: Vec<_> = crate::runner::env::scrub(vars.iter().cloned())
         .into_iter()
         .filter(|(k, _)| {
-            let up = k.to_string_lossy().to_ascii_uppercase();
+            let up = upper(k);
             !(up.starts_with("XDG_") || fixed && up == "PATH")
         })
         .collect();
+    if !fixed {
+        env.extend(
+            vars.into_iter()
+                .filter(|(k, _)| DEMO_WINDOWS_FOLDERS.contains(&upper(k).as_str())),
+        );
+    }
     if fixed {
         env.push((
             "PATH".into(),
@@ -1594,6 +1616,35 @@ mod tests {
             "just a README"
         );
         assert!(one_line_description(None).contains("iohr project init"));
+    }
+
+    /// The demo child keeps the Program Files folders on Windows, which `NuGet` needs for a
+    /// restore, and still drops credentials; unix keeps neither and gets the fixed `PATH`.
+    #[test]
+    fn the_demo_env_keeps_program_files_on_windows_only() {
+        let vars = || {
+            [
+                ("ProgramFiles", r"C:\Program Files"),
+                ("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                ("PATH", r"C:\tools"),
+                ("GH_TOKEN", "t"),
+                ("XDG_CONFIG_HOME", "/x"),
+            ]
+            .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v)))
+        };
+        let names = |env: Vec<(std::ffi::OsString, std::ffi::OsString)>| -> Vec<String> {
+            let mut n: Vec<String> = env
+                .into_iter()
+                .map(|(k, _)| k.to_string_lossy().into_owned())
+                .collect();
+            n.sort();
+            n
+        };
+        assert_eq!(
+            names(demo_env_from(vars(), false)),
+            ["PATH", "ProgramFiles", "ProgramFiles(x86)"]
+        );
+        assert_eq!(names(demo_env_from(vars(), true)), ["PATH"]);
     }
 
     /// Every live language of the demo: its files render, its manifest passes the lint, its
