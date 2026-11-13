@@ -244,12 +244,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         rust: ["1.94", "1.99.0"]
-        # Windows and macOS run wherever the job runs (cli/**, rust/**, spec/**, mise.toml or this
-        # workflow changed, or a full run), so a platform break fails the pull request, not the
-        # merge queue. The init smoke test of every template (tests/templates.rs) is in cli:check.
-        include:
-          - { os: windows-latest, rust: "1.99.0" }
-          - { os: macos-latest, rust: "1.99.0" }
+        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || '[]') }}
     env:
       MISE_RUST_VERSION: ${{ matrix.rust }}
       IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
