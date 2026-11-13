@@ -1,10 +1,10 @@
 //! The profile table `iohr login` writes, read by the SDK (RFC 0231 slice 1,
 //! docs/config.md section 5.6).
 //!
-//! These tests need the `login` feature and `inorbithr::profile`, which slice 2 of
+//! These tests need the `login` feature and `inorbithr::login`, which slice 2 of
 //! RFC 0231 adds by moving `iohr-auth`'s profile reader into this crate. Until then
-//! `cargo test --features login` fails to compile, on purpose: `inorbithr::profile` has no
-//! `Config`. On the default features the file is empty, so `cargo test` stays green.
+//! `cargo test --features login` fails to compile, on purpose: `inorbithr::login` does not exist
+//! yet. On the default features the file is empty, so `cargo test` stays green.
 #![cfg(feature = "login")]
 
 use std::path::Path;
@@ -38,7 +38,7 @@ client_id = "iohr-cli"
 
 #[test]
 fn the_sdk_reads_the_profile_table_iohr_writes() {
-    let config = inorbithr::profile::Config::parse(IOHR_WRITES, Path::new("config.toml"))
+    let config = inorbithr::login::Config::parse(IOHR_WRITES, Path::new("config.toml"))
         .expect("the table iohr writes is valid");
 
     assert_eq!(config.default().map(|n| n.as_str()), Some("work"));
@@ -46,16 +46,16 @@ fn the_sdk_reads_the_profile_table_iohr_writes() {
     let work = config
         .profile("work")
         .expect("the person profile is listed");
-    assert_eq!(work.kind(), inorbithr::profile::Kind::Person);
+    assert_eq!(work.kind(), inorbithr::login::Kind::Person);
     assert_eq!(work.account(), "acc_8d2e");
     assert!(work.account_pinned());
-    assert_eq!(work.storage(), inorbithr::profile::Storage::Keyring);
+    assert_eq!(work.storage(), inorbithr::login::Storage::Keyring);
     assert_eq!(work.issuer(), Some("https://auth.inorbit.hr"));
     assert_eq!(work.client_id(), Some("iohr-cli"));
 
     let ci = config.profile("ci").expect("the token profile is listed");
-    assert_eq!(ci.kind(), inorbithr::profile::Kind::Token);
-    assert_eq!(ci.storage(), inorbithr::profile::Storage::File);
+    assert_eq!(ci.kind(), inorbithr::login::Kind::Token);
+    assert_eq!(ci.storage(), inorbithr::login::Storage::File);
     assert_eq!(ci.issuer(), None);
     assert_eq!(ci.client_id(), None);
 }
