@@ -60,7 +60,7 @@ use tokio::time::timeout;
 
 use crate::Env;
 use crate::cli::{Global, UiArgs, UiCommand, UiPackage, UiServe};
-use crate::commands::sdk_add::{resolve, run_program};
+use crate::commands::sdk_add::run_program;
 use crate::commands::session::data_dir;
 use crate::error::Error;
 use crate::ext::install::Store;
@@ -116,11 +116,13 @@ fn working_folder() -> Result<PathBuf, Error> {
 /// Runs the UI package's script `name` with pnpm and passes its exit code on.
 fn script(args: &UiPackage, name: &str, out: Out) -> Result<(), Error> {
     let dir = ui_package(args.package.as_deref(), &working_folder()?)?;
-    let pnpm = resolve(Path::new("pnpm")).ok_or_else(|| {
-        Error::Usage(
-            "pnpm is not on PATH: install it (`corepack enable pnpm`), then run this again".into(),
-        )
-    })?;
+    let pnpm = crate::paths::find_program("pnpm", &std::env::var_os("PATH").unwrap_or_default())
+        .ok_or_else(|| {
+            Error::Usage(
+                "pnpm is not on PATH: install it (`corepack enable pnpm`), then run this again"
+                    .into(),
+            )
+        })?;
     Out::note(&format!("Running `pnpm run {name}` in {}", dir.display()));
     run_program(
         &pnpm,

@@ -420,7 +420,7 @@ fn ask_question(
         let path = std::env::var_os("PATH").unwrap_or_default();
         let (choices, mut initial) = language_choices(
             tpl,
-            |n| ask::find_on_path(n, &path).is_some(),
+            |n| crate::paths::find_program(n, &path).is_some(),
             |v| {
                 let lang = Lang::of_toolchain(&v.toolchain)?;
                 toolchain::state(lang).map(|s| s.hint(lang))
@@ -1440,7 +1440,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         let missing: Vec<&String> = v
             .needs
             .iter()
-            .filter(|n| ask::find_on_path(n, &path).is_none())
+            .filter(|n| crate::paths::find_program(n, &path).is_none())
             .collect();
         if !missing.is_empty() {
             let w = format!(

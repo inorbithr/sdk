@@ -178,7 +178,7 @@ async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Er
     let hints = hints::Mode::parse(cfg.hints.as_deref()).map_err(Error::Usage)?;
     let menu_key = MenuKey::parse(cfg.menu_key.as_deref()).map_err(Error::Usage)?;
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let bin = ask::find_on_path(agent.name(), &path);
+    let bin = crate::paths::find_program(agent.name(), &path);
     // The question is only ever an argument of the agent; nothing below prints or stores it
     // except `--dry-run`, which prints the command line you asked to see.
     let question = args.question.join(" ");

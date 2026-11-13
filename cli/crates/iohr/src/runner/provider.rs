@@ -3,9 +3,6 @@
 //! reads `.credentials.json`, the keychain or `auth.json`: it runs `claude auth status`
 //! and reads what it prints. Which of the two a turn may run on is the [`AuthPolicy`].
 
-use std::ffi::OsString;
-use std::path::{Path, PathBuf};
-
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
@@ -227,27 +224,6 @@ pub(crate) fn parse_auth_status(text: &str) -> AuthState {
             "sign-in method \"{m}\" on provider \"{p}\" is neither an Anthropic API key nor a Claude plan"
         )),
     }
-}
-
-/// The first `name` file on `PATH`, as an absolute path: the binary as installed.
-pub(crate) fn find_on_path(name: &str, path: Option<&OsString>) -> Option<PathBuf> {
-    let path = path?;
-    std::env::split_paths(path)
-        .filter(|d| d.is_absolute())
-        .map(|d| d.join(name))
-        .find(|p| is_exe(p))
-}
-
-#[cfg(unix)]
-fn is_exe(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt as _;
-    p.metadata()
-        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_exe(p: &Path) -> bool {
-    p.is_file() || p.with_extension("exe").is_file() || p.with_extension("cmd").is_file()
 }
 
 /// The canonical identity line of a subscription sign-in, from `claude auth status`:
@@ -585,21 +561,5 @@ mod tests {
         ] {
             assert_eq!(identity_line(&text), None, "{text}");
         }
-    }
-
-    #[test]
-    fn path_lookup_takes_absolute_entries_only() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin = dir.path().join("claude");
-        std::fs::write(&bin, "#!/bin/sh\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        let path =
-            std::env::join_paths([PathBuf::from("relative"), dir.path().to_owned()]).unwrap();
-        assert_eq!(find_on_path("claude", Some(&path)), Some(bin));
-        assert_eq!(find_on_path("claude", None), None);
     }
 }
