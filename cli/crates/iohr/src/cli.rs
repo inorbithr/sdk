@@ -417,12 +417,9 @@ pub enum Command {
     /// key, so `approve` says so and waits for it.
     #[command(subcommand)]
     Asks(AsksCommand),
-    /// Share signed scam reports with other machines: register, status, unregister.
-    ///
-    /// `register` starts a background agent that keeps this machine in touch with the
-    /// bootstrap node. Reports are one domain or one handle and a reason, signed by your
-    /// device key; peers, publish, subscribe and retract follow in the next release.
-    #[command(subcommand)]
+    /// Share signed scam reports with other machines. Postponed (2026-11-13): hidden from
+    /// help, and every verb exits 1; reports go through the InOrbit reports API.
+    #[command(subcommand, hide = true)]
     P2p(P2pCommand),
     /// Keep what a project knows as files, check it, and sync it when you choose.
     ///
