@@ -4,7 +4,7 @@
 //! and reads what it prints. Which of the two a turn may run on is the [`AuthPolicy`].
 
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
@@ -229,25 +229,10 @@ pub(crate) fn parse_auth_status(text: &str) -> AuthState {
     }
 }
 
-/// The first `name` file on `PATH`, as an absolute path: the binary as installed.
+/// The first `name` file on `PATH`, as an absolute path: the binary as installed
+/// ([`crate::ask::find_on_path`]).
 pub(crate) fn find_on_path(name: &str, path: Option<&OsString>) -> Option<PathBuf> {
-    let path = path?;
-    std::env::split_paths(path)
-        .filter(|d| d.is_absolute())
-        .map(|d| d.join(name))
-        .find(|p| is_exe(p))
-}
-
-#[cfg(unix)]
-fn is_exe(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt as _;
-    p.metadata()
-        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_exe(p: &Path) -> bool {
-    p.is_file() || p.with_extension("exe").is_file() || p.with_extension("cmd").is_file()
+    crate::ask::find_on_path(name, path?)
 }
 
 /// The canonical identity line of a subscription sign-in, from `claude auth status`:

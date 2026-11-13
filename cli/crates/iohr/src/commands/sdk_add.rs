@@ -419,47 +419,14 @@ pub(crate) fn run_program(
     }
 }
 
-/// The program's full path: itself when it is a path, otherwise the first match in an
-/// absolute `PATH` entry. A relative entry (`.`, an empty one) is skipped, so a program
-/// of that name in the project directory is never run.
+/// The program's full path: itself when it is a path, otherwise the first match on `PATH`
+/// ([`crate::ask::find_on_path`]: relative entries skipped, `PATHEXT` on Windows).
 pub(crate) fn resolve(program: &Path) -> Option<PathBuf> {
     if program.components().count() > 1 {
         return program.is_file().then(|| program.to_path_buf());
     }
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .filter(|dir| dir.is_absolute())
-        .find_map(|dir| candidates(&dir, program).into_iter().find(|p| runnable(p)))
-}
-
-#[cfg(windows)]
-fn candidates(dir: &Path, program: &Path) -> Vec<PathBuf> {
-    let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
-    exts.split(';')
-        .filter(|e| !e.is_empty())
-        .map(|e| {
-            let mut name = program.as_os_str().to_owned();
-            name.push(e);
-            dir.join(name)
-        })
-        .collect()
-}
-
-#[cfg(not(windows))]
-fn candidates(dir: &Path, program: &Path) -> Vec<PathBuf> {
-    vec![dir.join(program)]
-}
-
-#[cfg(unix)]
-fn runnable(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt as _;
-    p.metadata()
-        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn runnable(p: &Path) -> bool {
-    p.is_file()
+    crate::ask::find_on_path(program.to_str()?, &path)
 }
 
 /// Which tool is missing and where to get it.
