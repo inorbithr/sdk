@@ -43,6 +43,11 @@ fn run(home: &Path, cwd: &Path, args: &[&str]) -> Output {
         )
         .env("DOTNET_CLI_HOME", home.join("dotnet"))
         .env("NUGET_PACKAGES", home.join("nuget"))
+        // NuGet on .NET reads its user config folder from APPDATA and its caches from
+        // LOCALAPPDATA (NuGet.Common `NuGetEnvironment`); without them every Windows restore
+        // stops with "Value cannot be null. (Parameter 'path1')". Unix NuGet ignores both.
+        .env("APPDATA", home.join("appdata"))
+        .env("LOCALAPPDATA", home.join("localappdata"))
         .env("DOTNET_NOLOGO", "1")
         .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
         .env("PUB_CACHE", home.join("pub"))
