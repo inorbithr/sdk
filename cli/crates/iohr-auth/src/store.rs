@@ -752,21 +752,49 @@ mod tests {
         assert!(store.delete(&k).unwrap());
     }
 
+    /// A store whose reads never answer (they wait for a release the test gives only at
+    /// the end) and whose writes take `write_delay`.
+    struct StuckRead {
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+        write_delay: std::time::Duration,
+    }
+
+    impl Store for StuckRead {
+        fn get(&self, _: &EntryKey) -> Result<Option<Redacted<String>>, StoreError> {
+            // Dropping the sender lets the call go.
+            let _ = self.release.lock().unwrap().recv();
+            Ok(None)
+        }
+        fn set(&self, _: &EntryKey, _: &Redacted<String>) -> Result<(), StoreError> {
+            std::thread::sleep(self.write_delay);
+            Ok(())
+        }
+        fn delete(&self, _: &EntryKey) -> Result<bool, StoreError> {
+            Ok(true)
+        }
+    }
+
     /// A write is a refresh token the server already rotated: it waits longer than a read
     /// and is not given up on at the read's budget.
     #[test]
     fn a_quiet_store_gives_a_write_more_time_than_a_read() {
-        // The store answers in 100 ms: well past the 20 ms read budget, well inside a
-        // 5 s write budget, so a busy test host cannot push the write over its deadline.
+        // The read cannot answer before its 20 ms budget, whatever the host's load (it
+        // waits on a release the test holds), so it must fail with WouldAsk. The write
+        // takes 100 ms: past the read budget, well inside the 5 s write budget.
         let ms = std::time::Duration::from_millis;
+        let (release, held) = std::sync::mpsc::channel();
         let store = QuietStore::with_budgets(
-            std::sync::Arc::new(Slow { delay: ms(100) }),
+            std::sync::Arc::new(StuckRead {
+                release: std::sync::Mutex::new(held),
+                write_delay: ms(100),
+            }),
             ms(20),
             ms(5_000),
         );
         let k = key("work", "acc_1");
         assert!(matches!(store.get(&k), Err(StoreError::WouldAsk)));
         store.set(&k, &Redacted::new("x".into())).unwrap();
+        drop(release);
     }
 
     /// A store whose calls wait until the test lets them go, as a Keychain does when it

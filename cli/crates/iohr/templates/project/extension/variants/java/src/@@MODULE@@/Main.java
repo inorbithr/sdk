@@ -41,7 +41,10 @@ public final class Main {
     private static void writeAtomic(Path state, String name, String text) throws IOException {
         Path tmp = state.resolve("." + name + ".tmp");
         Files.writeString(tmp, text);
-        Files.setPosixFilePermissions(tmp, PosixFilePermissions.fromString("rw-------"));
+        // Not every file system has POSIX permissions (NTFS does not): there the user's profile guards it.
+        if (tmp.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+            Files.setPosixFilePermissions(tmp, PosixFilePermissions.fromString("rw-------"));
+        }
         Files.move(tmp, state.resolve(name), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     }
 
