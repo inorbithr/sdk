@@ -893,7 +893,7 @@ pub fn smoke(dir: &Path, state: &Path, name: &str, runner: Option<&Runner>) -> S
         if prog.contains('/') {
             Some(PathBuf::from(prog))
         } else {
-            crate::ask::find_on_path(prog, &path)
+            crate::paths::find_program(prog, &path)
         }
     };
     if let Some(Err(fail)) = your_env_step(
@@ -1424,7 +1424,7 @@ mod tests {
 
     /// The program a variant needs, on this machine's PATH?
     fn have(program: &str) -> bool {
-        crate::ask::find_on_path(program, &std::env::var_os("PATH").unwrap_or_default()).is_some()
+        crate::paths::find_program(program, &std::env::var_os("PATH").unwrap_or_default()).is_some()
     }
 
     #[test]

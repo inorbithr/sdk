@@ -79,7 +79,7 @@ pub fn on_path(program: &str) -> bool {
     if program.contains('/') {
         return Path::new(program).is_file();
     }
-    std::env::var_os("PATH").is_some_and(|p| crate::ask::find_on_path(program, &p).is_some())
+    std::env::var_os("PATH").is_some_and(|p| crate::paths::find_program(program, &p).is_some())
 }
 
 /// What the topics need to find in a memory to count as covered.

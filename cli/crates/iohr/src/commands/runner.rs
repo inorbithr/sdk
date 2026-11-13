@@ -1505,7 +1505,7 @@ fn check_auth(state: &AuthState, allowed: &LocalAuth) -> Result<(), Error> {
 fn local(g: &Global) -> Result<ClaudeExec, Error> {
     let parent: Vec<(OsString, OsString)> = std::env::vars_os().collect();
     let path = std::env::var_os("PATH");
-    let program = provider::find_on_path(claude_name(), path.as_ref()).ok_or_else(|| {
+    let program = path.as_deref().and_then(|p| crate::paths::find_program(claude_name(), p)).ok_or_else(|| {
         Error::Failed("claude was not found on PATH: install Claude Code and sign in with `claude`, then `/login`".into())
     })?;
     let claude_dir = claude::claude_dir(

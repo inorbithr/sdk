@@ -3,9 +3,6 @@
 //! reads `.credentials.json`, the keychain or `auth.json`: it runs `claude auth status`
 //! and reads what it prints. Which of the two a turn may run on is the [`AuthPolicy`].
 
-use std::ffi::OsString;
-use std::path::PathBuf;
-
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
@@ -227,12 +224,6 @@ pub(crate) fn parse_auth_status(text: &str) -> AuthState {
             "sign-in method \"{m}\" on provider \"{p}\" is neither an Anthropic API key nor a Claude plan"
         )),
     }
-}
-
-/// The first `name` file on `PATH`, as an absolute path: the binary as installed
-/// ([`crate::ask::find_on_path`]).
-pub(crate) fn find_on_path(name: &str, path: Option<&OsString>) -> Option<PathBuf> {
-    crate::ask::find_on_path(name, path?)
 }
 
 /// The canonical identity line of a subscription sign-in, from `claude auth status`:
@@ -570,33 +561,5 @@ mod tests {
         ] {
             assert_eq!(identity_line(&text), None, "{text}");
         }
-    }
-
-    #[test]
-    fn path_lookup_takes_absolute_entries_only() {
-        let dir = tempfile::tempdir().unwrap();
-        // Windows finds a program by its PATHEXT extension, so the file there is claude.exe.
-        let file = if cfg!(windows) {
-            "claude.exe"
-        } else {
-            "claude"
-        };
-        let bin = dir.path().join(file);
-        std::fs::write(&bin, "#!/bin/sh\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        let path =
-            std::env::join_paths([PathBuf::from("relative"), dir.path().to_owned()]).unwrap();
-        // The lookup returns the extension as PATHEXT spells it (`.EXE`); Windows paths
-        // ignore case, so the comparison does too.
-        let lower = |p: &std::path::Path| p.to_string_lossy().to_lowercase();
-        assert_eq!(
-            find_on_path("claude", Some(&path)).as_deref().map(lower),
-            Some(lower(&bin))
-        );
-        assert_eq!(find_on_path("claude", None), None);
     }
 }

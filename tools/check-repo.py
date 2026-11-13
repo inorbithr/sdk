@@ -5,10 +5,16 @@
 - No workflow uses `pull_request_target` or `workflow_run`.
 - Agent instruction files stay under the size that keeps them effective (200 lines).
 - Each language directory and cli/ has AGENTS.md, CLAUDE.md (importing it) and README.md.
+- Every member of the cli Cargo workspace is in the release-please config's `cli` package
+  (a `cli/Cargo.lock` version entry per crate) and carries the manifest's cli version, so a
+  release bump never leaves a crate behind in the lockfile (`cargo build --locked` fails).
 """
 
+import glob
+import json
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -18,8 +24,48 @@ LANGS = ("go", "rust", "typescript", "python", "java", "csharp", "dart", "cli")
 MAX_LINES = 200
 
 
+def cli_release_problems() -> list[str]:
+    """Every cli workspace member must be bumped by release-please with the cli version."""
+    cli = ROOT / "cli"
+    ws = tomllib.loads((cli / "Cargo.toml").read_text())["workspace"]
+    ws_version = ws["package"]["version"]
+    members: dict[str, str] = {}
+    for pattern in ws["members"]:
+        for d in sorted(glob.glob(str(cli / pattern))):
+            manifest = Path(d) / "Cargo.toml"
+            if not manifest.is_file():
+                continue
+            pkg = tomllib.loads(manifest.read_text())["package"]
+            version = pkg["version"]
+            members[pkg["name"]] = ws_version if isinstance(version, dict) else version
+
+    config = json.loads((ROOT / "release-please-config.json").read_text())
+    manifest_version = json.loads((ROOT / ".release-please-manifest.json").read_text())["cli"]
+    listed: set[str] = set()
+    for extra in config["packages"]["cli"]["extra-files"]:
+        if isinstance(extra, dict) and extra.get("path") == "Cargo.lock":
+            m = re.search(r"@\.name\.value==='([^']+)'", extra.get("jsonpath", ""))
+            if m:
+                listed.add(m.group(1))
+
+    problems = []
+    for name, version in sorted(members.items()):
+        if name not in listed:
+            problems.append(
+                f"release-please-config.json: cli workspace crate {name} has no Cargo.lock entry in "
+                f"packages.cli.extra-files; add {{ \"type\": \"toml\", \"path\": \"Cargo.lock\", "
+                f"\"jsonpath\": \"$.package[?(@.name.value==='{name}')].version\" }} "
+                f"or its version is not bumped and the locked release build fails"
+            )
+        if version != manifest_version:
+            problems.append(
+                f"cli crate {name} is at {version}, the release manifest's cli is {manifest_version}"
+            )
+    return problems
+
+
 def main() -> int:
-    problems: list[str] = []
+    problems: list[str] = cli_release_problems()
 
     for wf in sorted((ROOT / ".github/workflows").glob("*.y*ml")):
         text = wf.read_text()

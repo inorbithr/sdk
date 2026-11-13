@@ -61,7 +61,8 @@ pub(crate) fn add(args: &SdkAdd, out: Out) -> Result<(), Error> {
         .filter(|v| !v.is_empty())
         .map(PathBuf::from);
     let plan = plan(lang, &cwd, args.version.as_deref(), venv.as_deref())?;
-    let found = resolve(&plan.program);
+    let found =
+        crate::paths::find_program(&plan.program, &std::env::var_os("PATH").unwrap_or_default());
     let command: Vec<String> = std::iter::once(plan.program.to_string_lossy().into_owned())
         .chain(plan.args.iter().cloned())
         .collect();
@@ -417,16 +418,6 @@ pub(crate) fn run_program(
         }
         None => Err(Error::Failed(format!("{label} was stopped by a signal"))),
     }
-}
-
-/// The program's full path: itself when it is a path, otherwise the first match on `PATH`
-/// ([`crate::ask::find_on_path`]: relative entries skipped, `PATHEXT` on Windows).
-pub(crate) fn resolve(program: &Path) -> Option<PathBuf> {
-    if program.components().count() > 1 {
-        return program.is_file().then(|| program.to_path_buf());
-    }
-    let path = std::env::var_os("PATH")?;
-    crate::ask::find_on_path(program.to_str()?, &path)
 }
 
 /// Which tool is missing and where to get it.
