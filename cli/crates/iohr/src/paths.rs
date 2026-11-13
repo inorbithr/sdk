@@ -71,7 +71,18 @@ pub(crate) fn find_program(program: impl AsRef<Path>, path: &std::ffi::OsStr) ->
 
 #[cfg(windows)]
 fn candidates(dir: &Path, program: &Path) -> Vec<PathBuf> {
-    let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    let exts = std::env::var("PATHEXT").unwrap_or_else(|_| DEFAULT_PATHEXT.into());
+    pathext_candidates(dir, program, &exts)
+}
+
+/// Windows' own default when `PATHEXT` is unset.
+#[cfg(any(windows, test))]
+const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
+
+/// The files Windows tries for `program` in `dir`: `program` itself when it has an
+/// extension, then `program` with each extension in the `PATHEXT` value `exts`.
+#[cfg(any(windows, test))]
+fn pathext_candidates(dir: &Path, program: &Path, exts: &str) -> Vec<PathBuf> {
     let named = program.extension().map(|_| dir.join(program));
     named
         .into_iter()
@@ -139,6 +150,37 @@ mod tests {
         let bin = fake_program(dir.path(), "mvn");
         let path = std::env::join_paths([dir.path()]).unwrap();
         assert_eq!(find_program("mvn", &path), Some(bin));
+    }
+
+    #[test]
+    fn windows_tries_pathext_and_never_the_bare_script() {
+        let dir = Path::new("/bin");
+        // `mvn` is Maven's shell script; `mvn.cmd` is what Windows can start.
+        assert_eq!(
+            pathext_candidates(dir, Path::new("mvn"), DEFAULT_PATHEXT),
+            [".COM", ".EXE", ".BAT", ".CMD"].map(|e| dir.join(format!("mvn{e}")))
+        );
+        assert_eq!(
+            pathext_candidates(dir, Path::new("mvn.cmd"), ".EXE;;.CMD"),
+            ["mvn.cmd", "mvn.cmd.EXE", "mvn.cmd.CMD"].map(|n| dir.join(n))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_path_lookup_skips_unrunnable_files() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = tempfile::tempdir().unwrap();
+        let (plain, runs) = (tmp.path().join("a"), tmp.path().join("b"));
+        for d in [&plain, &runs] {
+            std::fs::create_dir(d).unwrap();
+            std::fs::write(d.join("tool"), "").unwrap();
+        }
+        std::fs::set_permissions(runs.join("tool"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        let path = std::env::join_paths([Path::new("."), &plain, &runs]).unwrap();
+        assert_eq!(find_program("tool", &path), Some(runs.join("tool")));
+        assert_eq!(find_program("missing", &path), None);
     }
 
     #[test]
