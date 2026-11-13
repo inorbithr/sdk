@@ -1004,6 +1004,118 @@ Until workload identity exists, a Kubernetes workload uses a key whose secret is
 from a Kubernetes Secret (`INORBIT_KEY_SECRET_FILE`), and GitHub Actions uses an API
 token or a key in a repository secret. [recipes.md](recipes.md) shows both.
 
+### 5.6 Person sign-in (`login`)
+
+**Status: the contract for RFC 0231, not built yet.** Today a person signs in through
+`iohr` only, and the SDK reads that login through the `cli` source (section 5.4). This
+section fixes what the SDK's own sign-in and its `login` source will do, so every
+language writes to one text. Nothing here is released until the SDK says so in its
+changelog; the conformance cases for it are `pending` until then. The Rust crate offers
+it behind the opt-in cargo feature `login` (off by default; a program that only uses keys
+compiles none of the store code).
+
+**The source.** `login` is a credential source named `login`, ranked between `file` (4)
+and `cli` (5) in the chain of section 5.1, so `cli` stays last, for a machine where only
+`iohr` can reach the store.
+
+| Source | Name | Present when | Credential |
+|---|---|---|---|
+| 4.5 | The stored session | `login` | the chosen profile has `kind = "person"` and the store holds an entry for it | The profile's session, refreshed by the SDK itself (below); no child process |
+
+- `credential_sources` accepts `login`. An SDK that does not know the name fails with the
+  unknown-name `ConfigError` of section 5.1; name `login` only with an SDK that has it.
+- A profile with `kind = "person"` and no store entry is not an error for this source:
+  it is skipped, "no stored session for profile <name>", and the chain moves on to `cli`.
+  A store that cannot be opened at all is skipped the same way, with the reason.
+- `scopes` is listed in `ignored` for this source, as for `cli`: a person's session carries
+  its own scopes.
+
+**The profile table.** The SDK reads the table `iohr login` writes and nothing more, and
+writes the same keys. The file is the one of section 4.1 and holds no secret:
+
+```toml
+default = "work"
+
+[profiles.work]
+kind = "person"
+account = "acc_8d2e"
+account_pinned = true               # only when the account was chosen
+storage = "keyring"                 # or "file"
+issuer = "https://auth.inorbit.hr"
+client_id = "iohr-cli"
+```
+
+- `kind` is `person` or `token`; the `login` source applies to `person`. `account` is the
+  account id the calls count against; `storage` says where the session is kept, `keyring`
+  (the operating system's store) or `file` (owner-only files, chosen by
+  `iohr login --insecure-storage`); `issuer` is the sign-in service the session refreshes
+  with (default `https://auth.inorbit.hr`); `client_id` is the OAuth client the session
+  belongs to.
+- A writer changes only these keys, `default` and the `[ext]` table, and keeps every other
+  key, table and comment, as `iohr` does (section 4.2).
+- A secret in the table is a `ConfigError`, as in section 4.2.
+
+**The client.** `client_id` defaults to `iohr-cli`: a public client (no secret), PKCE
+required, loopback redirects on any port, refresh tokens that rotate. It can be set in
+code (`client_id`), in the environment (`INORBIT_LOGIN_CLIENT_ID`) or in the profile
+table, in the precedence of section 2.1 (code, then environment, then the profile).
+A session belongs to the client that made it, and the profile's `client_id` names that
+client; a session refreshes with the client id the profile records, so a setting that
+disagrees with a stored session is reported, never used to sign the person out.
+
+**The store.** One entry per profile and account.
+
+| Store | Where | Entry |
+|---|---|---|
+| `keyring` | the operating system's store (macOS Keychain, Windows Credential Manager, the Linux Secret Service), service `hr.inorbit.iohr` | user `<profile>@<account>` |
+| `file` | `secrets/<profile>.<account>` in the config directory of section 4.1, mode 0600 in a directory of mode 0700 | the file's content |
+
+- The account id is 1 to 128 ASCII letters, digits, `-` or `_`; a profile name is 1 to 64
+  lower-case letters, digits, `-` or `_`, starting with a letter or digit.
+- The value is one JSON object, `{"refresh_token", "access_token", "expires_at"}`, where
+  `expires_at` is Unix seconds, so a new process can call without refreshing. It is a
+  secret: never logged, never in an error, not `Serialize` in a language that has the
+  idea, zeroed on drop where the language can.
+- When the operating system's store is not available (a headless Linux host with no
+  Secret Service), a profile whose `storage` is `file` still works; a profile whose
+  `storage` is `keyring` is skipped with the reason. The SDK never falls back from
+  `keyring` to `file` by itself: that is a choice a person makes at sign-in.
+
+**Refresh and rotation.**
+
+- The access token is used while more than 60 s of its life is left. With less, the SDK
+  refreshes before the call: `POST` to the token endpoint with `grant_type=refresh_token`,
+  the profile's `client_id` and the stored refresh token. Section 5.3's single flight
+  applies: one refresh at a time per session.
+- The refresh token rotates: each refresh returns a new one and the old one stops working.
+  The new refresh token is written to the store **before** the new access token is used.
+- Two processes (`iohr` and an app) share one entry. Before refreshing, the SDK re-reads
+  the entry and takes a newer one another process wrote. When the service refuses the
+  refresh (`invalid_grant`), it re-reads the entry once more and, if the refresh token
+  there is not the one it sent, retries once with it. Only then is it an `AuthError`
+  saying to sign in again. The SDK never signs the person out for a refresh it lost.
+- A 401 from the API invalidates the cached access token (section 5.3).
+
+**Signing in and out.**
+
+- Browser sign-in: authorization code with PKCE `S256` only, on a listener bound to the
+  loopback address, an OS-picked port, one `GET /callback`, five minutes, `state` compared
+  in constant time (RFC 8252). The SDK never opens a browser unless the caller asks it
+  to; the helper that does is off when `IOHR_NO_BROWSER` has any non-empty value, and the
+  caller shows the URL instead.
+- Device sign-in: RFC 8628. Show the user code and the verification link, never the
+  device code; poll no faster than the service's interval, 5 s more after each
+  `slow_down`, until the code expires.
+- Sign-out revokes the refresh token at the revocation endpoint when the service has one,
+  then deletes the entry; a revocation that fails still deletes locally and says so.
+  Because the entry is shared, signing out of an app signs `iohr` out too.
+- Discovery's issuer must equal the configured one and every endpoint must be on its
+  origin; anything else is refused. Answers from the service are read with a size cap.
+
+**Never printed.** No access token, refresh token, authorization code, device code or
+store value appears in a log record, a URL, a `describe()`, a `Debug` or `toString`, or an
+error, in any language.
+
 ## 6. Transport
 
 ### 6.1 Timeouts
