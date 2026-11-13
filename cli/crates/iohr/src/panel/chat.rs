@@ -344,10 +344,30 @@ impl Chat {
 
     /// Takes the keys, with an empty line (a click on the input, or the shell's `?`).
     pub(super) fn focus_input(&mut self) {
-        if !self.focus {
+        // A draft the person left (Esc, the switch key, a click away) is still there; a line
+        // already sent starts again.
+        if self.sent {
             self.reset_line();
         }
         self.focus = true;
+    }
+
+    /// The switch key (one key from either side): the box takes the keys, or gives them back to
+    /// the terminal, and the draft stays either way. Whether it did anything: it does not while
+    /// an answer runs or the shell is not at its prompt.
+    pub(super) fn switch(&mut self) -> bool {
+        if !self.open() {
+            return false;
+        }
+        if self.focus {
+            self.focus = false;
+            return true;
+        }
+        if self.run.is_some() || self.back || !self.at_prompt {
+            return false;
+        }
+        self.focus_input();
+        true
     }
 
     /// The next answer mode of the ring (Shift+Tab, a click on the chip).
@@ -492,6 +512,7 @@ impl Chat {
             None => (false, rest),
         };
         let rest = rest.strip_prefix(b" ")?;
+        self.reset_line();
         self.focus_input();
         self.deeper = deeper;
         self.paste = paste;
@@ -516,7 +537,13 @@ impl Chat {
                     self.send(now)
                 }
             }
-            ChatKey::Esc | ChatKey::CtrlC => {
+            // Esc hands the keys back to the terminal and keeps the draft; Ctrl-C throws it away
+            // (and, with nothing to throw away, hands the keys back as well).
+            ChatKey::Esc => {
+                self.focus = false;
+                Do::None
+            }
+            ChatKey::CtrlC => {
                 if self.text.is_empty() && !self.deeper {
                     self.focus = false;
                 } else {
@@ -624,13 +651,19 @@ impl Chat {
 
         // Title: the mark, the name and the chip.
         let chip = self.chip();
-        let title = vec![
+        let mut title = vec![
             sp("◆ ", ACC),
             bold("iohr", ACC),
             sp("  ", MUTE),
             bold(&chip, self.mode_color()),
         ];
-        let title_len = 2 + 4 + 2 + chip.chars().count();
+        let mut title_len = 2 + 4 + 2 + chip.chars().count();
+        // Where the keyboard is: the title says it, so a glance tells typing here from the shell.
+        if self.focus && title_len + 12 < inner {
+            title.push(sp("  ", MUTE));
+            title.push(bold("● typing here", GREEN));
+            title_len += 2 + 13;
+        }
         let right_text = format!("⌄ hide {HIDE_LABEL}");
         let right_text = right_text.as_str();
         let right = vec![sp(right_text, MUTE)];
@@ -641,7 +674,14 @@ impl Chat {
 
         // The input row: prompt, mark, the visible part of the line, the sent tag.
         let mark = if self.deeper { "?? " } else { "? " };
-        let tag = if self.sent { "sent ✓" } else { "" };
+        let drafting = !self.focus && !self.text.is_empty() && !self.sent;
+        let tag = if self.sent {
+            "sent ✓"
+        } else if drafting {
+            "draft"
+        } else {
+            ""
+        };
         let spans_room = width - 4;
         let prefix = 2 + mark.chars().count();
         let tag_room = if tag.is_empty() {
@@ -667,7 +707,7 @@ impl Chat {
                 FAINT,
             ));
         } else {
-            input.push(sp(&shown, TXT));
+            input.push(sp(&shown, if drafting { MUTE } else { TXT }));
         }
         let used: usize = input.iter().map(|s| s.text.chars().count()).sum();
         if !tag.is_empty() {
@@ -675,7 +715,7 @@ impl Chat {
                 &" ".repeat(spans_room.saturating_sub(used + tag_room)),
                 TXT,
             ));
-            input.push(sp(tag, GREEN));
+            input.push(sp(tag, if drafting { AMBER } else { GREEN }));
         }
         let cursor_col = (self.focus && !running).then(|| 3 + prefix + (self.cursor - from));
 
@@ -733,6 +773,8 @@ impl Chat {
                     key("↵"),
                     sp(" send  ", MUTE),
                     key("esc"),
+                    sp(" terminal  ", MUTE),
+                    key("^C"),
                     sp(" clear  ", MUTE),
                     key("⇧tab"),
                     sp(&format!(" mode: {}  ", self.mode_name()), MUTE),
@@ -745,6 +787,8 @@ impl Chat {
                     sp(" ask  ", MUTE),
                     key("??"),
                     sp(" deeper  ", MUTE),
+                    key(super::input::SWITCH_LABEL),
+                    sp(" chat  ", MUTE),
                     key("⇧tab"),
                     sp(&format!(" mode: {}  ", self.mode_name()), MUTE),
                     key(HIDE_LABEL),

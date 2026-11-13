@@ -22,6 +22,14 @@ pub(super) const HIDE_LABEL: &str = if cfg!(target_os = "macos") {
     "Alt+h"
 };
 
+/// The key that moves the keyboard between the chat box and the terminal, from either side:
+/// Ctrl-Space (the byte 0, also Ctrl-@) or its CSI-u form (`ESC [ 32 ; 5 u`). It needs no terminal
+/// setting, and zsh's only binding for it (set the mark) is not one anyone reaches for.
+const SWITCH_KEYS: [&[u8]; 2] = [b"\x00", b"\x1b[32;5u"];
+
+/// What the switch key is called on the box.
+pub(super) const SWITCH_LABEL: &str = "\u{2303}space";
+
 /// The byte Ctrl-G sends.
 const CTRL_G: &[u8] = b"\x07";
 
@@ -76,6 +84,11 @@ impl OpenKey {
     /// Whether this input is exactly the chat box's hide and show key, in any of its forms.
     pub(super) fn is_hide(bytes: &[u8]) -> bool {
         HIDE_KEYS.contains(&bytes)
+    }
+
+    /// Whether this input is exactly the chat box's switch key.
+    pub(super) fn is_switch(bytes: &[u8]) -> bool {
+        SWITCH_KEYS.contains(&bytes)
     }
 
     /// Whether this read is a lone Esc, which may be the first half of Option+h (a terminal
