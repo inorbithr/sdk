@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.1.0](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.39...iohr/v0.1.0) (2026-11-13)
+
+
+### Features
+
+* **cli:** auto-resolve switch in the panel's Incidents menu ([#508](https://github.com/inorbithr/sdk/issues/508)) ([8738814](https://github.com/inorbithr/sdk/commit/87388144ef904fa6a38b082f318b08ad1b738761))
+* **cli:** claims and evidence in the crawl store, one safe opener, the atlas proof crate ([#518](https://github.com/inorbithr/sdk/issues/518)) ([cce4b1e](https://github.com/inorbithr/sdk/commit/cce4b1ebb7f30155114f5ad12bf1d408cf021075))
+* **cli:** compact the handoff note across runs and add iohr handoff ([#480](https://github.com/inorbithr/sdk/issues/480)) ([c1a3f14](https://github.com/inorbithr/sdk/commit/c1a3f1414d9722f78db93ebf6007b66119340e74))
+* **cli:** evals and extension templates in every SDK language ([#536](https://github.com/inorbithr/sdk/issues/536)) ([5845f1e](https://github.com/inorbithr/sdk/commit/5845f1efb1ddcef61c75c9bf10a527a789d65d10))
+* **cli:** framed chat box for ? and ?? in the panel ([#483](https://github.com/inorbithr/sdk/issues/483)) ([04a6f10](https://github.com/inorbithr/sdk/commit/04a6f10ad83ef143ee62069cb1a99f4d52793c45))
+* **cli:** host actions from signed extensions, schema v1 and a build volume with no default ([#469](https://github.com/inorbithr/sdk/issues/469)) ([27e3266](https://github.com/inorbithr/sdk/commit/27e3266a521041ba5f1b788621cfa1b861808fa3))
+* **cli:** init asks where to keep project data and the project's shape (PRD 0210) ([#510](https://github.com/inorbithr/sdk/issues/510)) ([5c7b73d](https://github.com/inorbithr/sdk/commit/5c7b73d3169e114e1754f2f8e4077b94fa2afb35))
+* **cli:** init templates with an enterprise floor (blank, service, mcp-server, agent, evals, cli, extension) ([#516](https://github.com/inorbithr/sdk/issues/516)) ([738b24d](https://github.com/inorbithr/sdk/commit/738b24dca1e9ca43ff7d2a88de1a26d7ffe19860))
+* **cli:** iohr doctor, a local check with an opt-in safe fix, shown under ? and ?? ([#509](https://github.com/inorbithr/sdk/issues/509)) ([344728d](https://github.com/inorbithr/sdk/commit/344728d518f01c3f16a8fbb7e43d84666d101a61))
+* **cli:** iohr runner revoke ([#377](https://github.com/inorbithr/sdk/issues/377)) ([04db077](https://github.com/inorbithr/sdk/commit/04db0770fcb568021578f2f60c6d7732c084ecbc))
+* **cli:** iohr ui gets the Mac app's welcome, frame, settings and sign-in (RFC 0217) ([#515](https://github.com/inorbithr/sdk/issues/515)) ([fdc21c5](https://github.com/inorbithr/sdk/commit/fdc21c59bba54a4a10cb5d930b46d53f77b5c3e5))
+* **cli:** iohr ui serve on loopback (RFC 0217 C1) ([#485](https://github.com/inorbithr/sdk/issues/485)) ([037fd3d](https://github.com/inorbithr/sdk/commit/037fd3d9d1ab42582e6372e8919a004f9c44fc89))
+* **cli:** iohr ui serve takes writes and streams; apiSend, apiStream, useLive ([#526](https://github.com/inorbithr/sdk/issues/526)) ([3126983](https://github.com/inorbithr/sdk/commit/3126983a0bac1becb2385488d735d8e5e599afca))
+* **cli:** iohr upgrade also upgrades installed extensions ([#412](https://github.com/inorbithr/sdk/issues/412)) ([190062a](https://github.com/inorbithr/sdk/commit/190062abc9459617f008106548955ac4e9364902))
+* **cli:** Java, C#, Dart, Swift for service, cli, blank; TypeScript for cli ([#535](https://github.com/inorbithr/sdk/issues/535)) ([8c8ea51](https://github.com/inorbithr/sdk/commit/8c8ea51358c8d8416ba52f86c72947b8d7722843))
+* **cli:** mcp-server and agent templates in every SDK language; the picker lists the live languages ([#530](https://github.com/inorbithr/sdk/issues/530)) ([f4f39f8](https://github.com/inorbithr/sdk/commit/f4f39f87214914c58927a00aff74528f7ce287fa))
+* **cli:** one ask template for every terminal ask; no escape leaks in cards ([#533](https://github.com/inorbithr/sdk/issues/533)) ([95053e5](https://github.com/inorbithr/sdk/commit/95053e5ffb34a2286b50a83dd4c865803877af1d))
+* **cli:** share the panel's terminal to the phone ([#506](https://github.com/inorbithr/sdk/issues/506)) ([dc4925b](https://github.com/inorbithr/sdk/commit/dc4925b75df375823e2e02a6a86f8ef69d9216c2))
+* **iohr:** init asks where to keep project data and the project's shape (PRD 0210) ([5c7b73d](https://github.com/inorbithr/sdk/commit/5c7b73d3169e114e1754f2f8e4077b94fa2afb35))
+
+
+### Bug fixes
+
+* **ci:** bounded apt retry, Go 1.26.11/1.27.4, and the Python service template race ([#542](https://github.com/inorbithr/sdk/issues/542)) ([3193878](https://github.com/inorbithr/sdk/commit/3193878e28beed2a9f0b7212efc84c701e53f134))
+* **cli:** ask dock stacks copies when a scroll-region reset slips past the proxy ([#531](https://github.com/inorbithr/sdk/issues/531)) ([7470311](https://github.com/inorbithr/sdk/commit/7470311959464d931fe76bfefd6e955aaf91665e))
+* **cli:** ask every init question before Create ([#534](https://github.com/inorbithr/sdk/issues/534)) ([c39a8a3](https://github.com/inorbithr/sdk/commit/c39a8a3801af541a547dc1a7dfe9446c31c1babd))
+* **cli:** ask place and crawl notice once, add a custom place and --keep-in, make the plan before the shape item ([#514](https://github.com/inorbithr/sdk/issues/514)) ([6cc98d1](https://github.com/inorbithr/sdk/commit/6cc98d1ddaa7d4aebddf19350c794b5b408b738a))
+* **cli:** build cleanly on Windows and retry timing-bound pty tests on macOS ([#545](https://github.com/inorbithr/sdk/issues/545)) ([e7a3731](https://github.com/inorbithr/sdk/commit/e7a3731b15ecc2332bc529e4f1ee1719b1ce5c10))
+* **cli:** evals and extension templates build on macOS and C# CI, tests build on Windows ([#555](https://github.com/inorbithr/sdk/issues/555)) ([c432efd](https://github.com/inorbithr/sdk/commit/c432efde9a502c4653077a028be926804d4bd128))
+* **cli:** name the chat box hide key ⌥h in every terminal ([#517](https://github.com/inorbithr/sdk/issues/517)) ([1cfe754](https://github.com/inorbithr/sdk/commit/1cfe754dee91a889ed3cc7d97ac2aaa53f9c9422))
+* **cli:** one PATH lookup that tries PATHEXT on Windows, so the smoke step starts mvn.cmd ([#561](https://github.com/inorbithr/sdk/issues/561)) ([ae5ed62](https://github.com/inorbithr/sdk/commit/ae5ed626c59ba95c06434f3d010eb0efcffd56e7))
+* **cli:** put back what the panel covered when the terminal is resized ([#529](https://github.com/inorbithr/sdk/issues/529)) ([44c4def](https://github.com/inorbithr/sdk/commit/44c4def96ab74a5de928f2c9cdcfc03adc625cc8))
+* **cli:** resolve named folders on Windows verbatim paths and kill the ([5bd46f8](https://github.com/inorbithr/sdk/commit/5bd46f8610e8fc1c476d6ee65a05da1e4f363ea3))
+* **cli:** Role cards carry the answer, name their Role, and only Roles in lane are asked ([#532](https://github.com/inorbithr/sdk/issues/532)) ([572b73b](https://github.com/inorbithr/sdk/commit/572b73bfa39fcd5a494622332ab18b7f5036358f))
+* **cli:** Role cards carry the Role's answer, are named, and only Roles in the question's lane are asked ([572b73b](https://github.com/inorbithr/sdk/commit/572b73bfa39fcd5a494622332ab18b7f5036358f))
+* **cli:** share child environment scrubbing between ext run and dev and pin runner git config ([#465](https://github.com/inorbithr/sdk/issues/465)) ([51cf890](https://github.com/inorbithr/sdk/commit/51cf89080851968141562b394ce180474d28869a))
+* **cli:** templates and settings test hold on Windows ([#556](https://github.com/inorbithr/sdk/issues/556)) ([db9bc47](https://github.com/inorbithr/sdk/commit/db9bc4789738df7e66e4b8d7d8501827c6cb88e6))
+* **cli:** the demo child keeps the Program Files folders on Windows so NuGet restores ([#558](https://github.com/inorbithr/sdk/issues/558)) ([5153d07](https://github.com/inorbithr/sdk/commit/5153d07025a973b370c33268796ad241a87c52e6))
+* **cli:** the Down key in the panel menu moves the selection instead of closing it ([#505](https://github.com/inorbithr/sdk/issues/505)) ([9988400](https://github.com/inorbithr/sdk/commit/9988400d0bc335a5adfeb92e06ba98aabe71cf7b))
+* **cli:** the java cli template's test compares output with \n line ends on Windows ([#560](https://github.com/inorbithr/sdk/issues/560)) ([05a464f](https://github.com/inorbithr/sdk/commit/05a464f633d8bfc901ccbaf1b0d2996cfc521ce9))
+* **cli:** the runner trusts the job's own checkout for mise, so checks and builds run ([#410](https://github.com/inorbithr/sdk/issues/410)) ([c578c77](https://github.com/inorbithr/sdk/commit/c578c77d6ad672efd5dfe713e0c35b57031682d0))
+* **cli:** the Windows cli leg passes the PATH test and the Rust extension template ([#562](https://github.com/inorbithr/sdk/issues/562)) ([f1daa11](https://github.com/inorbithr/sdk/commit/f1daa11c96003bb6a932d395c0084c326265c23d))
+* **deps:** rustix 1.1.6 for RUSTSEC-2026-0486 ([#537](https://github.com/inorbithr/sdk/issues/537)) ([92464e8](https://github.com/inorbithr/sdk/commit/92464e851c0b1b139db2ab382ca242e53222b982))
+* **iohr:** a dead key beside other input is not the panel menu key ([9988400](https://github.com/inorbithr/sdk/commit/9988400d0bc335a5adfeb92e06ba98aabe71cf7b))
+
+
+### Dependencies
+
+* **rust:** bump the rust group across 4 directories with 5 updates ([#540](https://github.com/inorbithr/sdk/issues/540)) ([3f1951e](https://github.com/inorbithr/sdk/commit/3f1951e8fdafc01a1d2a728ac7c66c7419dafe49))
+* **rust:** bump vt100 from 0.16.2 to 0.18.1 in /cli in the rust-major group across 1 directory ([#501](https://github.com/inorbithr/sdk/issues/501)) ([821e06d](https://github.com/inorbithr/sdk/commit/821e06d46081a8163f1201421cff438c6c68a9b5))
+
 ## [0.1.0-alpha.39](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.38...iohr/v0.1.0-alpha.39) (2026-11-09)
 
 
