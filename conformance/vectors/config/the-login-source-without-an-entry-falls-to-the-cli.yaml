@@ -1,0 +1,20 @@
+name: the-login-source-without-an-entry-falls-to-the-cli
+kind: config
+summary: A person's profile with no entry in the store is skipped by the login source, with the reason, and the chain ends at cli.
+pending: [go, rust, ts, py, java, csharp, swift]
+notes: "RFC 0231, docs/config.md section 5.6. Pending until each language ships its login source (Rust, slice 4)."
+input:
+  cli: present
+  login: []
+  config_file: |
+    default = "dev"
+    [profiles.dev]
+    kind = "person"
+    account = "acc_1"
+    storage = "keyring"
+expect:
+  credential:
+    source: cli
+    kind: cli
+    tried:
+      - { source: login, result: "skipped, no stored session for profile dev" }
