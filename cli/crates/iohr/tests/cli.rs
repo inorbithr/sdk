@@ -2960,6 +2960,76 @@ fn ui_open_finds_the_running_serve_and_forgets_a_dead_one() {
     assert!(!record.exists(), "the stale record is removed");
 }
 
+/// `serve` from a folder with no checkout finds the copy `ui install` put in the data
+/// folder; with none installed it fails (exit 1, not a usage error) naming where it looked
+/// and how to fix it, with no examples and no "Stuck?" line.
+#[cfg(unix)]
+#[test]
+fn ui_serve_works_from_any_folder_once_the_ui_is_installed() {
+    let checkout = project(&[]);
+    let dist = checkout.path().join("ui/dist");
+    std::fs::create_dir_all(&dist).unwrap();
+    std::fs::write(dist.join("index.html"), "<!doctype html>").unwrap();
+    let home = project(&[]);
+    let data = home.path().join("data");
+
+    // Nothing installed, no checkout above: a failure that says how to fix it.
+    let o = iohr_ui(home.path(), &data, &["serve"], &[]);
+    let said = text(&o);
+    assert_eq!(code(&o), 1, "{said}");
+    for part in [
+        "no built UI found",
+        "cli:preview-install",
+        "iohr ui install",
+        "--dir",
+    ] {
+        assert!(said.contains(part), "{part}: {said}");
+    }
+    for not in ["Usage:", "Stuck?", "whoami", "iohr ask"] {
+        assert!(!said.contains(not), "{not}: {said}");
+    }
+
+    // Install from the checkout (its nearest ui/dist), then serve from the other folder.
+    let o = iohr_ui(checkout.path(), &data, &["install"], &[]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(data.join("ui/dist/index.html").is_file());
+    let mut serve = Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .args(["ui", "serve"])
+        .current_dir(home.path())
+        .env_clear()
+        .envs(kept_env())
+        .env("IOHR_CONFIG_DIR", data.join("config"))
+        .env("IOHR_DATA_DIR", &data)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let record = data.join("ui/serving.json");
+    let start = std::time::Instant::now();
+    while !record.exists() && start.elapsed() < std::time::Duration::from_secs(20) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let served = std::fs::read_to_string(&record).unwrap_or_default();
+    let _ = serve.kill();
+    let _ = serve.wait();
+    let want = std::fs::canonicalize(data.join("ui/dist")).unwrap();
+    assert!(
+        served.contains(&want.display().to_string()),
+        "serve did not use the installed copy: {served}"
+    );
+}
+
+/// `ui install` with no built UI above and no --dir is a plain failure that says what to run.
+#[test]
+fn ui_install_without_a_built_ui_fails_and_says_to_build() {
+    let p = project(&[]);
+    let o = iohr_ui(p.path(), &p.path().join("data"), &["install"], &[]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("iohr ui build"), "{}", text(&o));
+    assert!(!p.path().join("data/ui/dist").exists());
+}
+
 // `iohr decisions` (platform RFC 0065, core ADR 0056): the Decisions API through the
 // SDK's Decisions operations.
 

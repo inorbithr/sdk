@@ -370,7 +370,7 @@ run = "python3 tools/terminal-themes.py --check"
 
 [tasks."cli:preview-install"]
 shell = "bash -e -o pipefail -c"
-description = "Command line, macOS: build iohr and install it as iohr-preview signed like the release (Apple Development, hr.inorbit.iohr), so the Keychain trusts every rebuild"
+description = "Command line, macOS: build iohr and install it as iohr-preview signed like the release (Apple Development, hr.inorbit.iohr), so the Keychain trusts every rebuild; also builds and installs the web UI so `iohr-preview ui serve` works from any folder"
 run = "tools/preview-install.sh"
 
 [tasks."cli:fmt"]
