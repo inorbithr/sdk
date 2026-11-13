@@ -2,9 +2,10 @@
 //! docs/config.md section 5.6).
 //!
 //! These tests need the `login` feature and `inorbithr::login`, which slice 2 of
-//! RFC 0231 adds by moving `iohr-auth`'s profile reader into this crate. Until then
-//! `cargo test --features login` fails to compile, on purpose: `inorbithr::login` does not exist
-//! yet. On the default features the file is empty, so `cargo test` stays green.
+//! RFC 0231 adds by moving `iohr-auth`'s profile reader into this crate. Until then the file
+//! sits in `tests/pending/`, which Cargo does not build, so main stays green under
+//! `--all-features`. Slice 2 moves it to `tests/login_profile.rs` with the feature and the
+//! module; it fails to compile before that change and passes after it.
 #![cfg(feature = "login")]
 
 use std::path::Path;

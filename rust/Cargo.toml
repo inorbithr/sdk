@@ -24,10 +24,6 @@ tracing = ["dep:tracing"]
 otel = ["dep:opentelemetry"]
 # A client key encrypted with a password (`client_key_password`, PKCS#8 PBES2).
 encrypted-key = ["rustls", "dep:pkcs8"]
-# Person sign-in (RFC 0231, docs/config.md section 5.6): the stored session, the profile
-# table and the sign-in flows. Empty until slice 2 moves the code in; it exists now so the
-# contract tests (`tests/login_profile.rs`) compile and fail for the right reason.
-login = []
 
 [dependencies]
 # HTTP; TLS is chosen by the features above, so no TLS backend is a hard dependency.

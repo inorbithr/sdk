@@ -1010,7 +1010,7 @@ token or a key in a repository secret. [recipes.md](recipes.md) shows both.
 `iohr` only, and the SDK reads that login through the `cli` source (section 5.4). This
 section fixes what the SDK's own sign-in and its `login` source will do, so every
 language writes to one text. Nothing here is released until the SDK says so in its
-changelog; the conformance cases for it are `pending` until then. The Rust crate offers
+changelog; the conformance cases for it are `pending` until then. The Rust crate will offer
 it behind the opt-in cargo feature `login` (off by default; a program that only uses keys
 compiles none of the store code).
 
