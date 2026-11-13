@@ -1,0 +1,21 @@
+name: the-login-source-is-used-before-the-cli
+kind: config
+summary: A person's profile with a stored session uses the login source even when iohr is present; scopes are listed as ignored.
+pending: [go, rust, ts, py, java, csharp, swift]
+notes: "RFC 0231, docs/config.md sections 5.1 and 5.6. Pending until each language ships its login source (Rust, slice 4 of RFC 0231). Beside the-cli-source-uses-a-login-profile, which stays the vector for a profile with no stored session."
+input:
+  cli: present
+  login: [dev]
+  env: { INORBIT_SCOPES: identity:read }
+  config_file: |
+    default = "dev"
+    [profiles.dev]
+    kind = "person"
+    account = "acc_1"
+    storage = "keyring"
+    issuer = "https://auth.inorbit.hr"
+    client_id = "iohr-cli"
+expect:
+  credential: { source: login, kind: login }
+  ignored:
+    - { key: scopes, source: env INORBIT_SCOPES, reason: not used by this credential }
