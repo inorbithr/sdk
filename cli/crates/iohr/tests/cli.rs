@@ -640,10 +640,9 @@ async fn verbose_output_never_shows_the_token() {
         vec!["ext", "search", "--all"],
         vec!["ext", "show", "inorbit/agent"],
         vec!["runner", "status"],
-        vec!["p2p", "status"],
     ];
-    // `iohr p2p` calls no API: its other verbs need an agent or exit 1 until slice 2, and
-    // `p2p_*` below and in src/p2p/tests.rs prove they print no token and no subject.
+    // `iohr p2p` is postponed and calls no API: every verb exits 1, and
+    // `p2p_is_postponed_and_every_verb_says_so` below proves it prints no token.
     // `runner run-key` keeps its key in the profile's store, which a bare token has not:
     // `run_key_is_made_once_and_enrolled_with_a_proof_of_possession` (tests/runner.rs) runs it.
     // `runner api-key` keeps the key in the same store:
@@ -4558,91 +4557,33 @@ fn p2p(config: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
+/// P2P is postponed (owner, 2026-11-13): every verb, the hidden agent too, exits 1 with
+/// one line that names the reports API, and starts nothing.
 #[test]
-fn p2p_refuses_a_missing_or_plain_bootstrap_and_says_what_is_not_built() {
+fn p2p_is_postponed_and_every_verb_says_so() {
     let dir = tempfile::tempdir().unwrap();
-    let o = p2p(dir.path(), &["register"]);
-    assert_eq!(code(&o), 2, "no bootstrap: {}", text(&o));
-    for bad in [
-        "http://example.com",
-        "https://user@example.com",
-        "https://example.com/path",
-        "ftp://example.com",
+    for args in [
+        vec!["register"],
+        vec!["register", "--bootstrap", "https://example.com"],
+        vec!["status"],
+        vec!["status", "--json"],
+        vec!["unregister"],
+        vec!["peers"],
+        vec!["publish"],
+        vec!["subscribe"],
+        vec!["retract"],
+        vec!["agent", "--bootstrap", "https://example.com"],
     ] {
-        let o = p2p(dir.path(), &["register", "--bootstrap", bad]);
-        assert_eq!(code(&o), 2, "{bad}: {}", text(&o));
+        let o = p2p(dir.path(), &args);
+        assert_eq!(code(&o), 1, "{args:?}: {}", text(&o));
+        assert!(
+            text(&o).contains(
+                "P2P is postponed; reports go through the InOrbit reports API (eye ADR 0006)"
+            ),
+            "{args:?}: {}",
+            text(&o)
+        );
+        assert!(o.stdout.is_empty(), "{args:?}: nothing on stdout");
     }
-    assert!(!dir.path().join("p2p").exists(), "a refusal starts nothing");
-    for verb in ["peers", "publish", "subscribe", "retract"] {
-        let o = p2p(dir.path(), &[verb]);
-        assert_eq!(code(&o), 1, "{verb}: {}", text(&o));
-        assert!(text(&o).contains("not implemented"), "{verb}: {}", text(&o));
-    }
-    let o = p2p(dir.path(), &["status"]);
-    assert_eq!(code(&o), 0, "{}", text(&o));
-    assert!(text(&o).contains("not registered"), "{}", text(&o));
-    let o = p2p(dir.path(), &["status", "--json"]);
-    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
-    assert_eq!(v["registered"], false);
-    let o = p2p(dir.path(), &["unregister"]);
-    assert_eq!(code(&o), 0, "nothing to stop: {}", text(&o));
-}
-
-/// Asks a p2p agent to stop when a test ends, so a failed assertion leaves none running.
-struct StopOnDrop(std::path::PathBuf);
-
-impl Drop for StopOnDrop {
-    fn drop(&mut self) {
-        if self.0.exists() {
-            let _ = std::fs::write(self.0.join("stop"), "stop\n");
-        }
-    }
-}
-
-/// The whole life of the agent against a node on loopback: `register` returns at once,
-/// the agent reaches the node, `status` says so, `unregister` stops it and removes its folder.
-#[test]
-fn p2p_register_status_unregister_against_a_loopback_node() {
-    let dir = tempfile::tempdir().unwrap();
-    let node = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://127.0.0.1:{}", node.local_addr().unwrap().port());
-    let _stop = StopOnDrop(dir.path().join("p2p"));
-    let o = p2p(dir.path(), &["register", "--bootstrap", &url]);
-    assert_eq!(code(&o), 0, "{}", text(&o));
-    let o = p2p(dir.path(), &["register", "--bootstrap", &url]);
-    assert_eq!(
-        code(&o),
-        0,
-        "a second register changes nothing: {}",
-        text(&o)
-    );
-    assert!(text(&o).contains("already running"), "{}", text(&o));
-
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    let status = loop {
-        let o = p2p(dir.path(), &["status", "--json"]);
-        assert_eq!(code(&o), 0, "{}", text(&o));
-        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
-        if !v["last_contact_at"].is_null() || std::time::Instant::now() > deadline {
-            break v;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-    };
-    assert_eq!(status["running"], true, "{status}");
-    assert!(
-        !status["last_contact_at"].is_null(),
-        "the node was reached: {status}"
-    );
-    assert_eq!(
-        status["bootstrap"],
-        format!("{url}/"),
-        "the address, normalised"
-    );
-
-    let o = p2p(dir.path(), &["unregister"]);
-    assert_eq!(code(&o), 0, "{}", text(&o));
-    assert!(text(&o).contains("stopped"), "{}", text(&o));
-    assert!(!dir.path().join("p2p").exists(), "the folder is removed");
-    let o = p2p(dir.path(), &["status"]);
-    assert!(text(&o).contains("not registered"), "{}", text(&o));
+    assert!(!dir.path().join("p2p").exists(), "nothing is started");
 }

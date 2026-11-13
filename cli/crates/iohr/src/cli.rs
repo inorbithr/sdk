@@ -3456,31 +3456,29 @@ pub enum AsksCommand {
     },
 }
 
-/// `iohr p2p`: signed scam reports shared between machines (RFC 0230).
+/// `iohr p2p`: signed scam reports shared between machines (RFC 0230). Postponed
+/// (2026-11-13): every verb exits 1; reports go through the InOrbit reports API.
 #[derive(Debug, Subcommand)]
 pub enum P2pCommand {
-    /// Start the background agent that keeps this machine in touch with the bootstrap node.
-    ///
-    /// Returns at once; `iohr p2p status` shows whether the node answers. Running it again
-    /// while the agent runs changes nothing.
+    /// Join this machine to the report network. Postponed.
     Register {
         /// The bootstrap node: `https://HOST[:PORT]` (plain http only on loopback).
         #[arg(long, env = "IOHR_P2P_BOOTSTRAP", value_name = "URL")]
         bootstrap: Option<String>,
     },
-    /// Whether the agent runs, and when it last reached the bootstrap node.
+    /// Whether this machine is in the report network. Postponed.
     Status,
-    /// Stop the agent and remove what it kept on this machine.
+    /// Leave the report network. Postponed.
     Unregister,
-    /// The peers this machine knows. Not implemented yet (RFC 0230 slice 2).
+    /// The peers this machine knows. Postponed.
     Peers,
-    /// Sign and share a report about a domain or a handle. Not implemented yet (slice 2).
+    /// Sign and share a report about a domain or a handle. Postponed.
     Publish,
-    /// Follow the reports and live warnings peers share. Not implemented yet (slice 2).
+    /// Follow the reports and live warnings peers share. Postponed.
     Subscribe,
-    /// Take back a report you signed. Not implemented yet (slice 2).
+    /// Take back a report you signed. Postponed.
     Retract,
-    /// The agent itself, as `register` starts it.
+    /// The background agent. Postponed.
     #[command(hide = true)]
     Agent {
         #[arg(long, value_name = "URL")]

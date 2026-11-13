@@ -1,6 +1,9 @@
 # 0018. `iohr p2p`: signed scam reports between people, a named bootstrap host
 
-Status: proposed, 2026-11-13
+Status: postponed, 2026-11-13. The platform's owner chose an InOrbit reports API, reached
+over WSS for live warnings, the same day (the eye app's ADR 0006). Every `iohr p2p` verb
+exits 1 and says so; the report record and its guard stay in `iohr`, because the reports
+API reuses them. The text below is the design as it stood when it was postponed.
 
 The platform documents behind this ADR are PRD 0219 (what is asked), RFC 0230 (the
 design) and ADR 0242 (the transport), in the platform's Decisions space. This ADR records

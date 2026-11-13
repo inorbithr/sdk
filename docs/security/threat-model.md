@@ -5,7 +5,7 @@ Method: STRIDE (spoofing, tampering, repudiation, information disclosure, denial
 service, elevation of privilege) over each part of the system. Reviewed on every change
 that adds a transport, an option, a dependency or a release step, and at least once a
 year. Last review: 2026-11-13: `iohr p2p` signed reports and its bootstrap host added
-(ADR 0018). Before that, 2026-10-03: command-line extensions added (ADR 0012), and
+(ADR 0018), then postponed the same day: every verb exits 1 and reaches no host. Before that, 2026-10-03: command-line extensions added (ADR 0012), and
 2026-10-02: the command line added (ADR 0009).
 
 ## What we protect
@@ -161,8 +161,9 @@ Boundary: `iohr` to the package manager it runs in the person's project (SR-31).
 ### `iohr p2p`
 
 Boundary: `iohr` to the bootstrap node the person names, and to other people's machines
-through it (SR-37, ADR 0018). Peers are strangers. Slice 1 ships the record, the guard and
-the agent; the exchange with peers is slice 2, after a Security review.
+through it (SR-37, ADR 0018). Peers are strangers. Postponed on 2026-11-13: every verb
+exits 1 and reaches no host, so this boundary is closed. The rows below stay for the
+record and the guard, which the reports API reuses.
 
 | STRIDE | Threat | Mitigation |
 |---|---|---|

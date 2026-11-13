@@ -6,15 +6,20 @@ list, nothing else. The first user is the eye app. The decision is
 [ADR 0018](../../docs/adr/0018-p2p-transport.md); the security requirement is
 [SR-37](../../docs/security/requirements.md). Back to the [iohr overview](../README.md).
 
-Status, 2026-11-13: slice 1 of 4. `register`, `status` and `unregister` work, and the
-report record and its flood and smear guard are built and tested. `peers`, `publish`,
-`subscribe` and `retract` exit 1 with "not implemented yet" until the peer exchange
-(slice 2) lands.
+**Postponed, 2026-11-13.** The platform's owner postponed peer to peer the same day and
+chose an InOrbit reports API, reached over WSS for live warnings, instead (the eye app's
+ADR 0006). Every `iohr p2p` verb now exits 1 with one line:
+
+```
+P2P is postponed; reports go through the InOrbit reports API (eye ADR 0006)
+```
+
+The signed report record and its flood and smear guard stay in `iohr` (`src/p2p/`),
+because the reports API reuses them. The rest of this page describes the design as it
+stood when it was postponed.
 
 ```sh
-iohr p2p register --bootstrap https://node.example:7443   # starts the agent and returns
-iohr p2p status                                           # is it running, when it last reached the node
-iohr p2p unregister                                       # stops it and removes its folder
+iohr p2p register --bootstrap https://node.example:7443   # postponed: exits 1
 ```
 
 ## The commands

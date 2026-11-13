@@ -18,7 +18,7 @@ The rules behind this page are SR-10 to SR-37 in
 | The runner's turns | `runner/coordinate` in the config directory, with the job checkouts in `checkouts/<job_id>`; Claude Code keeps the session itself, in its own directory. Mirrors are in `runner/mirrors` and the shared build directories in `runner/target` ([Runner](runner.md#github-access)) |
 | Approved run asks | `runner/approvals/<account>` in the config directory, owner-only: the pinned device keys and the record of decisions carried out. The run key is in the credential store |
 | Session hosts | `session/<project hash>/` below the data directory: the queue, the socket and the log ([Sessions and the panel](session-and-panel.md#the-queue)) |
-| The p2p agent | `p2p/state.json` in the config directory, mode 0600: the bootstrap address, times and counts, never a report or a subject; `p2p/stop` while it is asked to stop. `iohr p2p unregister` removes the folder ([P2P](p2p.md)) |
+| The p2p agent | `p2p/state.json` in the config directory, mode 0600: the bootstrap address, times and counts, never a report or a subject; `p2p/stop` while it is asked to stop. `iohr p2p unregister` removed the folder; postponed on 2026-11-13, so nothing writes it now ([P2P](p2p.md)) |
 | A project's own files | `.inorbit/` and `atlas/` in the project: memory, permissions, handoff notes ([Projects](projects.md), [Roles and memory](roles-and-memory.md)) |
 
 The SDKs read the same `config.toml` ([docs/config.md](../../docs/config.md), section 4):
@@ -42,7 +42,7 @@ reaches, and when:
 | A template's repository | `iohr project init --template gh:...` or `git:...`, a shallow clone ([Projects](projects.md)) |
 | Your package manager's registry | `iohr sdk add`, which runs your project's package manager (SR-31) |
 | Your AI provider | `iohr ask` and `iohr runner`, through your own `claude` or `codex` and your own sign-in ([Ask](ask.md#what-goes-to-your-provider)) |
-| The bootstrap node you name | `iohr p2p register` and its background agent only: the host given with `--bootstrap` or `IOHR_P2P_BOOTSTRAP`, `https://` (plain `http://` on loopback only). The one exception to "the API host only" ([ADR 0018](../../docs/adr/0018-p2p-transport.md)) |
+| The bootstrap node you name | `iohr p2p register` and its background agent only: the host given with `--bootstrap` or `IOHR_P2P_BOOTSTRAP`, `https://` (plain `http://` on loopback only). The one exception to "the API host only" ([ADR 0018](../../docs/adr/0018-p2p-transport.md)); postponed on 2026-11-13, so `iohr` reaches no such host now |
 
 ## Dependencies
 

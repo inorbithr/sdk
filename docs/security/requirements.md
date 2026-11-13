@@ -418,7 +418,8 @@ one turn at a time and refuses a turn someone else assigned.
 - Refs: CRA I.2(d), I.2(e); least privilege.
 
 **SR-37. A p2p report is signed by a device key, checked before it costs anything, and
-never repeated.** `iohr p2p` reports (ADR 0018) carry one domain or one handle and a
+never repeated.** Postponed with `iohr p2p` on 2026-11-13; it binds the record and the
+guard, which stay in `iohr` for the reports API. `iohr p2p` reports (ADR 0018) carry one domain or one handle and a
 reason from a fixed list, no free text, at most 1024 bytes, refused with any unknown field.
 Each is signed with a device key (`mac_sign::DeviceSigner`) that the person's sign-in
 vouches for; a token is never the signature. A node checks shape, time and the signature

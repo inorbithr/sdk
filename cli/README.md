@@ -66,7 +66,7 @@ Operate), and every command ends its `--help` with real examples.
 | [Sessions and the panel](docs/session-and-panel.md) | `iohr session`, `iohr stop`, bare `iohr` and the floating panel |
 | [The terminal theme](docs/terminal-theme.md) | `iohr theme`: the Mac app's terminal themes as a Terminal.app profile and a zsh prompt |
 | [Runner](docs/runner.md) | This machine as a coordinator runner on an Anthropic API key (your own plan for personal use only): capacity, upgrades, gate reports, approved run asks |
-| [Peer to peer](docs/p2p.md) | `iohr p2p`: the background agent, its bootstrap node, signed scam reports and the flood and smear guard (slice 1 of 4) |
+| [Peer to peer](docs/p2p.md) | `iohr p2p`: the background agent, its bootstrap node, signed scam reports and the flood and smear guard; postponed on 2026-11-13, every verb exits 1 |
 | [Files, network and dependencies](docs/files-and-dependencies.md) | Where `iohr` keeps things, which hosts it talks to, and every runtime dependency with its reason |
 
 Guides with captured output are also on the developer site:

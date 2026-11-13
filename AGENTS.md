@@ -80,8 +80,8 @@ A task for a language whose package does not exist yet prints a skip line and ex
 - **Stubs and unfinished paths are labelled.** Code that is not implemented returns an
   explicit "not implemented" error, never a fake value.
 - **The SDK talks only to the public API and the token endpoint.** No other host, no
-  telemetry sent anywhere. One named exception: `iohr p2p` reaches the bootstrap node
-  the person names (ADR 0018, SR-37), until that node moves behind the API edge.
+  telemetry sent anywhere. `iohr p2p` (ADR 0018, SR-37) would have reached a bootstrap
+  node the person names; it is postponed since 2026-11-13 and reaches no host.
 
 ## Security and compliance
 

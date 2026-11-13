@@ -154,7 +154,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::SignBinary { path } => upgrade::sign_binary(&env, &path),
         Command::Ask(args) => ask::run(g, &env, *args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
-        Command::P2p(cmd) => p2p::run(g, &env, cmd, out).await,
+        Command::P2p(_) => p2p::run(),
         Command::Shell(cmd) => shell::run(g, &cmd),
         Command::Theme(cmd) => theme::run(cmd, out),
         Command::Panel(args) => crate::panel::run(g, env, args).await,
