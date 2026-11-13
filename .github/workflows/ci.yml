@@ -3,6 +3,7 @@ name: ci
 # Where each check runs (ADR 0014):
 # - pull requests and pushes to main: Linux, the oldest and newest supported version of
 #   each language, only the languages a change touches;
+#   The command line also runs on Windows and macOS when it is touched;
 # - nightly (and by hand): every language, every supported version, Linux, Windows and
 #   macOS; a failure opens or updates an issue;
 # - release-please pull requests: the same as nightly, so no release ships untested.
@@ -545,7 +546,12 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         rust: ["1.94", "1.99.0"]
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || '[]') }}
+        # Windows and macOS run wherever the job runs (cli/**, rust/**, spec/**, mise.toml or this
+        # workflow changed, or a full run), so a platform break fails the pull request, not the
+        # merge queue. The init smoke test of every template (tests/templates.rs) is in cli:check.
+        include:
+          - { os: windows-latest, rust: "1.99.0" }
+          - { os: macos-latest, rust: "1.99.0" }
     env:
       MISE_RUST_VERSION: ${{ matrix.rust }}
       # macOS and Windows runners have a credential store: its test must run, not skip

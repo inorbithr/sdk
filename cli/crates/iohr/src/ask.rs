@@ -2,7 +2,7 @@
 //! current folder with the question. The question and the answer are never logged, traced or
 //! written by iohr; they go to the agent's argv and the agent's own terminal, nothing else.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::runner::claude;
 
@@ -314,57 +314,6 @@ pub(crate) fn shell_line(program: &str, args: &[String]) -> String {
         .join(" ")
 }
 
-/// The executable `name` on the `PATH` value `path`, if any: the one lookup every caller
-/// uses. A relative entry (`.`, an empty one) is skipped, so a program of that name in the
-/// project directory is never run. On Windows the name is tried with each `PATHEXT`
-/// extension (`mvn` finds `mvn.cmd`, never Maven's extensionless shell script, which
-/// `CreateProcess` cannot start), and as written first when it already has an extension.
-#[must_use]
-pub(crate) fn find_on_path(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
-    #[cfg(windows)]
-    let exts = std::env::var("PATHEXT").unwrap_or_else(|_| DEFAULT_PATHEXT.into());
-    std::env::split_paths(path)
-        .filter(|dir| dir.is_absolute())
-        .find_map(|dir| {
-            #[cfg(windows)]
-            let found = path_candidates(&dir, name, &exts);
-            #[cfg(not(windows))]
-            let found = vec![dir.join(name)];
-            found.into_iter().find(|p| is_executable(p))
-        })
-}
-
-/// Windows' own default when `PATHEXT` is unset.
-#[cfg(any(windows, test))]
-const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
-
-/// The files Windows would try for `name` in `dir`: `name` itself when it has an
-/// extension, then `name` with each extension in the `PATHEXT` value `exts`.
-#[cfg(any(windows, test))]
-fn path_candidates(dir: &Path, name: &str, exts: &str) -> Vec<PathBuf> {
-    let as_written = Path::new(name).extension().map(|_| dir.join(name));
-    as_written
-        .into_iter()
-        .chain(
-            exts.split(';')
-                .filter(|e| !e.is_empty())
-                .map(|e| dir.join(format!("{name}{e}"))),
-        )
-        .collect()
-}
-
-#[cfg(unix)]
-fn is_executable(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt as _;
-    p.metadata()
-        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_executable(p: &Path) -> bool {
-    p.is_file()
-}
-
 /// The agent to start without being told which (`iohr project init`): the one the config
 /// names, if any, else `claude`, then `codex`, whichever is on `path`. `Ok(None)`: none found.
 ///
@@ -376,11 +325,11 @@ pub(crate) fn detect_agent(
 ) -> Result<Option<(Agent, PathBuf)>, String> {
     if configured.is_some_and(|c| !c.trim().is_empty()) {
         let agent = choose_agent(None, configured)?;
-        return Ok(find_on_path(agent.name(), path).map(|b| (agent, b)));
+        return Ok(crate::paths::find_program(agent.name(), path).map(|b| (agent, b)));
     }
     Ok([Agent::Claude, Agent::Codex]
         .into_iter()
-        .find_map(|a| find_on_path(a.name(), path).map(|b| (a, b))))
+        .find_map(|a| crate::paths::find_program(a.name(), path).map(|b| (a, b))))
 }
 
 /// Where the question goes, said on every surface that shows an answer.
@@ -410,37 +359,6 @@ pub(crate) fn label_for(command: &str, what: &str, agent: Agent) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn windows_tries_pathext_and_never_the_bare_script() {
-        let dir = Path::new("/bin");
-        // `mvn` is Maven's shell script; `mvn.cmd` is what Windows can start.
-        assert_eq!(
-            path_candidates(dir, "mvn", DEFAULT_PATHEXT),
-            [".COM", ".EXE", ".BAT", ".CMD"].map(|e| dir.join(format!("mvn{e}")))
-        );
-        assert_eq!(
-            path_candidates(dir, "mvn.cmd", ".EXE;;.CMD"),
-            ["mvn.cmd", "mvn.cmd.EXE", "mvn.cmd.CMD"].map(|n| dir.join(n))
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn the_path_lookup_skips_relative_entries_and_unrunnable_files() {
-        use std::os::unix::fs::PermissionsExt as _;
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let (plain, runs) = (tmp.path().join("a"), tmp.path().join("b"));
-        for d in [&plain, &runs] {
-            std::fs::create_dir(d).expect("dir");
-            std::fs::write(d.join("tool"), "").expect("write");
-        }
-        std::fs::set_permissions(runs.join("tool"), std::fs::Permissions::from_mode(0o755))
-            .expect("chmod");
-        let path = std::env::join_paths([Path::new("."), &plain, &runs]).expect("join");
-        assert_eq!(find_on_path("tool", &path), Some(runs.join("tool")));
-        assert_eq!(find_on_path("missing", &path), None);
-    }
 
     #[test]
     fn flag_then_config_then_default() {

@@ -83,7 +83,6 @@
       "release-type": "simple",
       "component": "iohr",
       "package-name": "iohr",
-      "release-as": "0.1.0",
       "extra-files": [
         { "type": "toml", "path": "Cargo.toml", "jsonpath": "$.workspace.package.version" },
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='iohr')].version" },

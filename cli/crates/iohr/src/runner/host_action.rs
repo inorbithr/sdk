@@ -80,7 +80,6 @@ use serde_json::{Map, Value};
 
 use super::env;
 use super::exec::GroupGuard;
-use super::provider;
 
 mod disk_prune;
 mod edge_site;
@@ -1538,7 +1537,10 @@ impl HostRunner {
                 .ok_or_else(|| {
                     "this runner's host has no ~/.inorbit/roll/remote-roll.sh".to_owned()
                 }),
-            _ => provider::find_on_path(tool.name(), self.path.as_ref())
+            _ => self
+                .path
+                .as_deref()
+                .and_then(|p| crate::paths::find_program(tool.name(), p))
                 .ok_or_else(|| format!("{} is not on this runner's PATH", tool.name())),
         }
     }
