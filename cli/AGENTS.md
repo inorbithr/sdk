@@ -74,7 +74,9 @@ cli/
 - A refused refresh ends the session only after re-reading the store: another `iohr`
   process may have rotated the token.
 - Only the API host: paths are checked to stay on it, base URLs are HTTPS (loopback
-  excepted), redirects are not followed. No telemetry, no update check.
+  excepted), redirects are not followed. No telemetry, no update check. The one
+  exception is `iohr p2p`, which reaches only the bootstrap node the person names
+  (`p2p::agent::Bootstrap`, ADR 0018); it gets no token.
 - The HTTP client is the Rust SDK (`inorbithr`, by path): retries, the error envelope,
   the user agent and the body cap are its; the command line adds the credential, the
   `--verbose` hook and the exit codes. Do not grow a transport layer here again.

@@ -66,6 +66,7 @@ Operate), and every command ends its `--help` with real examples.
 | [Sessions and the panel](docs/session-and-panel.md) | `iohr session`, `iohr stop`, bare `iohr` and the floating panel |
 | [The terminal theme](docs/terminal-theme.md) | `iohr theme`: the Mac app's terminal themes as a Terminal.app profile and a zsh prompt |
 | [Runner](docs/runner.md) | This machine as a coordinator runner on an Anthropic API key (your own plan for personal use only): capacity, upgrades, gate reports, approved run asks |
+| [Peer to peer](docs/p2p.md) | `iohr p2p`: the background agent, its bootstrap node, signed scam reports and the flood and smear guard (slice 1 of 4) |
 | [Files, network and dependencies](docs/files-and-dependencies.md) | Where `iohr` keeps things, which hosts it talks to, and every runtime dependency with its reason |
 
 Guides with captured output are also on the developer site:
@@ -79,7 +80,7 @@ the reference they link back to.
 ## More
 
 - Configuration shared with the SDKs: [docs/config.md](../docs/config.md)
-- Security requirements for the command line (SR-10 to SR-34): [docs/security/requirements.md](../docs/security/requirements.md)
+- Security requirements for the command line (SR-10 to SR-37): [docs/security/requirements.md](../docs/security/requirements.md)
 - Reporting a vulnerability: [SECURITY.md](../SECURITY.md)
 - Why the command line is built this way: [ADR 0009](../docs/adr/0009-the-command-line.md)
 

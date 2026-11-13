@@ -417,6 +417,27 @@ one turn at a time and refuses a turn someone else assigned.
   given as an argument is refused before anything runs.
 - Refs: CRA I.2(d), I.2(e); least privilege.
 
+**SR-37. A p2p report is signed by a device key, checked before it costs anything, and
+never repeated.** `iohr p2p` reports (ADR 0018) carry one domain or one handle and a
+reason from a fixed list, no free text, at most 1024 bytes, refused with any unknown field.
+Each is signed with a device key (`mac_sign::DeviceSigner`) that the person's sign-in
+vouches for; a token is never the signature. A node checks shape, time and the signature
+(`DeviceKeys::verifies`) before anything that changes state, then holds each key to 10
+reports an hour and each reporter to 30 a day, refuses a replayed id or nonce, and lists
+a subject only when 3 distinct reporters reported it within 7 days. Errors, refusals
+and the agent's state file never contain a subject; the agent writes no log. The only
+host besides the API is the bootstrap node the person names, `https://` (plain
+`http://` on loopback only), with no user, path, query or fragment.
+- Why: peers are strangers; without these one person could flood the network, smear a
+  shop, or spend another person's quota with forged reports, and a report about someone
+  in a log would leak it.
+- Verify: unit tests that any change to a signed report breaks its signature, that the
+  parser never panics (property tests), that forged reports spend nothing, that one key,
+  one reporter with many keys and one person alone each hit their limit, that replays and
+  stale or future reports are refused, that retraction refunds nothing, and that no
+  error or refusal repeats the subject; tests of every bootstrap address rule.
+- Refs: CRA I.2(d), I.2(f); data minimisation (GDPR Art. 5(1)(c)).
+
 ## Reliability and traceability
 
 **SR-17. Request ids both ways.** Every request carries a client-generated request id

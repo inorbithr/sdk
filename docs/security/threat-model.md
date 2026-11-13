@@ -4,7 +4,8 @@ What could go wrong with the SDKs, who could make it go wrong, and what stops th
 Method: STRIDE (spoofing, tampering, repudiation, information disclosure, denial of
 service, elevation of privilege) over each part of the system. Reviewed on every change
 that adds a transport, an option, a dependency or a release step, and at least once a
-year. Last review: 2026-10-03: command-line extensions added (ADR 0012). Before that,
+year. Last review: 2026-11-13: `iohr p2p` signed reports and its bootstrap host added
+(ADR 0018). Before that, 2026-10-03: command-line extensions added (ADR 0012), and
 2026-10-02: the command line added (ADR 0009).
 
 ## What we protect
@@ -157,6 +158,25 @@ Boundary: `iohr` to the package manager it runs in the person's project (SR-31).
 | T | A version argument smuggles an option or a different package | Package names are fixed; a version is digits, letters, `.`, `-`, `+` only, starting with a digit |
 | E | pip installs into the system Python | pip only through the active virtualenv's python; otherwise refused with the uv and venv commands |
 
+### `iohr p2p`
+
+Boundary: `iohr` to the bootstrap node the person names, and to other people's machines
+through it (SR-37, ADR 0018). Peers are strangers. Slice 1 ships the record, the guard and
+the agent; the exchange with peers is slice 2, after a Security review.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| S | A report signed in someone else's name | SR-37: verified with the device key its key id names (`DeviceKeys::verifies`); the sign-in vouches for the key, a token is never the signature |
+| D | A forged report spends a real key's quota or takes its nonce | SR-37: the guard checks shape, time and signature before it changes any state |
+| D | One person floods the network | SR-37: 10 reports per key per hour, 30 per reporter per day across all their keys, 100,000 reports per node, records of at most 1024 bytes |
+| T | One person, or several keys of one person, smears a shop | SR-37: a subject is listed only when 3 distinct reporters reported it within 7 days; a reporter is the pseudonym in the vouch, never the key |
+| R | A report is replayed or sent twice to count twice | SR-37: its id is the hash of the signed message and a key's nonce is used once; live reports within 600 s of the node's clock |
+| T | Sign, count, retract and sign again to dodge the limits | SR-37: a retraction gives no quota back, and only the signing key may retract |
+| I | A subject (a report about someone) lands in a log or an error | SR-37: no free text travels; errors, refusals and the state file never repeat a subject; the agent writes no log |
+| S | A machine in the middle poses as the bootstrap node | SR-37: `https://` only (plain `http://` on loopback), no user, path or query; slice 2 adds Noise IK with the node's pinned key inside TLS |
+| E | `--bootstrap` points `iohr` at a host other than the API | SR-37: the one named exception, reached only by `iohr p2p`, only the host the person names |
+| D | The bootstrap node is down or overloaded | The agent backs off to 30 s and says `unreachable` in `iohr p2p status`; the platform watches the node with a monitor (RFC 0230 section 6) |
+
 ### Network path
 
 | STRIDE | Threat | Mitigation |
@@ -212,6 +232,12 @@ Boundary: `iohr` to the package manager it runs in the person's project (SR-31).
   leaves a key whose secret is gone, visible in the account's keys as
   `iohr-ext-<time>`. A key or token profile hands out its own token when it holds the
   scopes (ADR 0012, point 6).
+- **The p2p bootstrap node is trusted for delivery, not for truth.** Until the node
+  moves behind the API edge (RFC 0230 slice 4) it is one machine: it can drop or delay
+  reports but cannot forge one, since every report is checked against its signer's
+  device key. Which keys a sign-in vouches for is the platform's; a reporter who controls
+  several accounts counts as several reporters. The peer exchange (slice 2) waits for an
+  independent Security review.
 - **The embedded Sigstore root ages.** A Sigstore key rotation makes installs fail
   closed until an `iohr` release carries the new root.
 - **crates.io provenance.** crates.io has no native signatures yet; we attest crates

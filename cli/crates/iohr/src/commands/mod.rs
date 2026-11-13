@@ -29,6 +29,7 @@ mod lab;
 mod login;
 mod memory;
 mod openapi;
+mod p2p;
 mod permissions;
 mod profile;
 mod project;
@@ -68,6 +69,7 @@ fn calls_no_api(command: Option<&Command>) -> bool {
         command,
         Some(
             Command::Tunnel(_)
+                | Command::P2p(_)
                 | Command::Ui(_)
                 | Command::Permissions(_)
                 | Command::PermissionServer { .. }
@@ -152,6 +154,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::SignBinary { path } => upgrade::sign_binary(&env, &path),
         Command::Ask(args) => ask::run(g, &env, *args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
+        Command::P2p(cmd) => p2p::run(g, &env, cmd, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
         Command::Theme(cmd) => theme::run(cmd, out),
         Command::Panel(args) => crate::panel::run(g, env, args).await,
@@ -177,12 +180,17 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ui(args) => web_ui::run(g, &env, args, out).await,
         Command::External(argv) => ext::external(g, &env, argv).await,
         Command::Completion { shell } => {
-            let mut buf = Vec::new();
-            clap_complete::generate(shell, &mut Cli::command(), "iohr", &mut buf);
-            Out::raw(&buf);
+            completion(shell);
             Ok(())
         }
     }
+}
+
+/// `iohr completion SHELL`: the completion script on stdout.
+fn completion(shell: clap_complete::Shell) {
+    let mut buf = Vec::new();
+    clap_complete::generate(shell, &mut Cli::command(), "iohr", &mut buf);
+    Out::raw(&buf);
 }
 
 /// `2026-10-09` from an RFC 3339 timestamp; `""` (unset) and unreadable values stay as

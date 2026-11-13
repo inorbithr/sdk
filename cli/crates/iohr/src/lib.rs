@@ -40,6 +40,7 @@ mod iomd;
 mod lock;
 mod mac_sign;
 mod output;
+mod p2p;
 mod panel;
 mod paths;
 mod permissions;

@@ -417,6 +417,13 @@ pub enum Command {
     /// key, so `approve` says so and waits for it.
     #[command(subcommand)]
     Asks(AsksCommand),
+    /// Share signed scam reports with other machines: register, status, unregister.
+    ///
+    /// `register` starts a background agent that keeps this machine in touch with the
+    /// bootstrap node. Reports are one domain or one handle and a reason, signed by your
+    /// device key; peers, publish, subscribe and retract follow in the next release.
+    #[command(subcommand)]
+    P2p(P2pCommand),
     /// Keep what a project knows as files, check it, and sync it when you choose.
     ///
     /// Memory is local first: one Markdown file per memory in `.inorbit/memory/` (committed with
@@ -3446,6 +3453,38 @@ pub enum AsksCommand {
     Key {
         #[command(subcommand)]
         command: AsksKeyCommand,
+    },
+}
+
+/// `iohr p2p`: signed scam reports shared between machines (RFC 0230).
+#[derive(Debug, Subcommand)]
+pub enum P2pCommand {
+    /// Start the background agent that keeps this machine in touch with the bootstrap node.
+    ///
+    /// Returns at once; `iohr p2p status` shows whether the node answers. Running it again
+    /// while the agent runs changes nothing.
+    Register {
+        /// The bootstrap node: `https://HOST[:PORT]` (plain http only on loopback).
+        #[arg(long, env = "IOHR_P2P_BOOTSTRAP", value_name = "URL")]
+        bootstrap: Option<String>,
+    },
+    /// Whether the agent runs, and when it last reached the bootstrap node.
+    Status,
+    /// Stop the agent and remove what it kept on this machine.
+    Unregister,
+    /// The peers this machine knows. Not implemented yet (RFC 0230 slice 2).
+    Peers,
+    /// Sign and share a report about a domain or a handle. Not implemented yet (slice 2).
+    Publish,
+    /// Follow the reports and live warnings peers share. Not implemented yet (slice 2).
+    Subscribe,
+    /// Take back a report you signed. Not implemented yet (slice 2).
+    Retract,
+    /// The agent itself, as `register` starts it.
+    #[command(hide = true)]
+    Agent {
+        #[arg(long, value_name = "URL")]
+        bootstrap: String,
     },
 }
 

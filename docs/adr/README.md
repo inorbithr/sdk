@@ -24,3 +24,4 @@ Format: Status, Context, Decision, Consequences, Sources. Keep each under a page
 | [0015](0015-configuration-and-middleware.md) | Configuration, credentials and the middleware pipeline | accepted |
 | [0016](0016-swift.md) | Swift: the package at the repository root, a runtime ahead of its parity | proposed |
 | [0017](0017-c.md) | C: a pull transport the caller can replace, our own JSON reader, one arena per answer | proposed |
+| [0018](0018-p2p-transport.md) | `iohr p2p`: signed scam reports between people, a named bootstrap host | proposed |

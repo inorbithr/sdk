@@ -65,6 +65,7 @@ rustix.workspace = true
 duckdb.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
 wiremock.workspace = true
