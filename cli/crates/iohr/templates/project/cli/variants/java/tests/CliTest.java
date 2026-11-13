@@ -21,7 +21,12 @@ public final class CliTest {
         ByteArrayOutputStream e = new ByteArrayOutputStream();
         int code = Cli.run(args, new PrintStream(o, true, StandardCharsets.UTF_8),
                 new PrintStream(e, true, StandardCharsets.UTF_8), commit);
-        return new Result(o.toString(StandardCharsets.UTF_8), e.toString(StandardCharsets.UTF_8), code);
+        // println ends lines with the platform separator (\r\n on Windows); the golden files use \n.
+        return new Result(lf(o.toString(StandardCharsets.UTF_8)), lf(e.toString(StandardCharsets.UTF_8)), code);
+    }
+
+    private static String lf(String s) {
+        return s.replace("\r\n", "\n");
     }
 
     private static Result call(String... args) {
@@ -37,7 +42,7 @@ public final class CliTest {
 
     private static void golden(String file, String... args) throws Exception {
         Result r = call(args);
-        String want = Files.readString(Path.of("golden", file));
+        String want = lf(Files.readString(Path.of("golden", file)));
         check(r.code() == 0 && r.out().equals(want),
                 String.join(" ", args) + ": exit " + r.code() + ", output " + r.out() + " differs from golden/" + file);
     }
