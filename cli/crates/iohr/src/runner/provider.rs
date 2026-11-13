@@ -575,7 +575,13 @@ mod tests {
     #[test]
     fn path_lookup_takes_absolute_entries_only() {
         let dir = tempfile::tempdir().unwrap();
-        let bin = dir.path().join("claude");
+        // Windows finds a program by its PATHEXT extension, so the file there is claude.exe.
+        let file = if cfg!(windows) {
+            "claude.exe"
+        } else {
+            "claude"
+        };
+        let bin = dir.path().join(file);
         std::fs::write(&bin, "#!/bin/sh\n").unwrap();
         #[cfg(unix)]
         {
@@ -584,7 +590,13 @@ mod tests {
         }
         let path =
             std::env::join_paths([PathBuf::from("relative"), dir.path().to_owned()]).unwrap();
-        assert_eq!(find_on_path("claude", Some(&path)), Some(bin));
+        // The lookup returns the extension as PATHEXT spells it (`.EXE`); Windows paths
+        // ignore case, so the comparison does too.
+        let lower = |p: &std::path::Path| p.to_string_lossy().to_lowercase();
+        assert_eq!(
+            find_on_path("claude", Some(&path)).as_deref().map(lower),
+            Some(lower(&bin))
+        );
         assert_eq!(find_on_path("claude", None), None);
     }
 }
