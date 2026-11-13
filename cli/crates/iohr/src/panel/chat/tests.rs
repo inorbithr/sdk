@@ -159,15 +159,63 @@ fn nothing_is_sent_while_the_shell_is_busy_or_the_line_is_empty() {
 }
 
 #[test]
-fn esc_clears_the_line_then_leaves_the_box() {
+fn esc_leaves_the_box_with_the_draft_and_ctrl_c_throws_it_away() {
     let mut chat = Chat::new(true, false);
     idle(&mut chat);
     chat.message(Msg::Focus, now());
     typed(&mut chat, "abc");
     typed(&mut chat, "\x1b");
-    assert!(chat.focus && chat.text.is_empty());
-    typed(&mut chat, "\x1b");
     assert!(!chat.focus);
+    assert_eq!(chat.text.iter().collect::<String>(), "abc");
+    // The shell's `?` (or a click) brings the keys back to the same draft.
+    chat.message(Msg::Focus, now());
+    assert!(chat.focus);
+    typed(&mut chat, "d");
+    assert_eq!(chat.text.iter().collect::<String>(), "abcd");
+    typed(&mut chat, "\x03");
+    assert!(chat.focus && chat.text.is_empty());
+    typed(&mut chat, "\x03");
+    assert!(!chat.focus);
+}
+
+#[test]
+fn the_switch_key_moves_the_keys_both_ways_and_keeps_the_draft() {
+    let mut chat = Chat::new(true, false);
+    idle(&mut chat);
+    assert!(chat.switch() && chat.focus);
+    typed(&mut chat, "half a question");
+    assert!(chat.switch() && !chat.focus);
+    let laid = chat.layout(80, 20, now());
+    let input = row_text(&laid, 1);
+    assert!(
+        input.contains("half a question") && input.contains("draft"),
+        "{input}"
+    );
+    assert!(
+        row_text(&laid, 2).contains("chat"),
+        "{}",
+        row_text(&laid, 2)
+    );
+    assert!(chat.switch() && chat.focus);
+    assert_eq!(chat.text.iter().collect::<String>(), "half a question");
+    assert!(row_text(&chat.layout(80, 20, now()), 0).contains("typing here"));
+    // A sent line starts again on the next focus.
+    typed(&mut chat, "\r");
+    idle(&mut chat);
+    assert!(chat.switch());
+    assert_eq!(chat.text, Vec::<char>::new());
+}
+
+#[test]
+fn the_switch_key_waits_while_an_answer_runs_or_the_shell_is_busy() {
+    let mut chat = Chat::new(true, false);
+    assert!(!chat.switch(), "no hook yet");
+    idle(&mut chat);
+    chat.message(Msg::Begin, now());
+    assert!(!chat.switch() && !chat.focus);
+    chat.message(Msg::End, now());
+    chat.message(Msg::Busy, now());
+    assert!(!chat.switch());
 }
 
 #[test]
@@ -343,7 +391,10 @@ fn the_rest_box_is_four_rows_with_the_hint_row() {
     assert!(row_text(&laid, 1).contains("❯ ? why is the roll slow"));
     let status = row_text(&laid, 2);
     assert!(
-        status.contains("↵ send") && status.contains("esc clear") && status.contains("mode: auto")
+        status.contains("↵ send")
+            && status.contains("esc terminal")
+            && status.contains("^C clear")
+            && status.contains("mode: auto")
     );
     assert!(status.contains("↑ last question"));
 }
@@ -540,9 +591,10 @@ fn a_key_cut_between_two_reads_is_held_not_eaten_or_typed() {
     chat.feed(&"é".as_bytes()[..1], now());
     chat.feed(&"é".as_bytes()[1..], now());
     assert_eq!(chat.text, vec!['é']);
-    // A lone Esc is the Esc key, not a key waiting for more.
+    // A lone Esc is the Esc key, not a key waiting for more: it hands the keys back, keeping the draft.
     chat.feed(b"\x1b", now());
-    assert_eq!(chat.text, Vec::<char>::new());
+    assert!(!chat.focus);
+    assert_eq!(chat.text, vec!['é']);
 }
 
 #[test]

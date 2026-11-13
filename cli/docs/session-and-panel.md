@@ -199,12 +199,20 @@ deeper; one Enter sends either (the question goes to your shell as if you had ty
 your history). While Io answers, the status row shows a spinner, what it is doing ("reading 3
 files"), a moving bar with the count and the time (the number of steps is not known, so it is not a
 percentage), and a `■ Stop esc` button; Esc or a click on it stops the answer, and Ctrl-C still
-does. Shift+Tab changes the answer mode (manual, plan, auto), Up recalls the last question, Esc
-clears the line, and a click on the mode chip changes the mode. Option+h (`⌥h`; Alt+h on Linux)
-folds the box to a corner chip and brings it back, in every terminal, and the box names it so. So
-do `^G` then `c` and a click on `hide`; the chip is a click away, and `[panel] chat = "hidden"` or
-`"off"` (or `IOHR_PANEL_CHAT`) sets the start. `Ctrl-]` does the same, for a keyboard layout where
-Option+h types another character; it is rebound only inside the panel. A full-screen program has the whole
+does. Shift+Tab changes the answer mode (manual, plan, auto), Up recalls the last question, and a
+click on the mode chip changes the mode.
+
+Moving between the chat and the terminal is one key, `Ctrl-Space`, from either side. The title
+says `● typing here` while the box has the keys, and the shell has them when it does not. The
+draft stays when the keys leave: Esc hands them back to the terminal with the half-written
+question kept (it shows dimmed, tagged `draft`), `Ctrl-C` throws the draft away, and `Ctrl-Space`,
+`?` or a click on the input bring you back to it. A sent question starts the next line empty. The
+switch waits while an answer runs or a command is running (the box does not hold keys the shell
+would need). Option+h (`⌥h`; Alt+h on Linux) folds the box to a corner chip and brings it back,
+in every terminal, and the box names it so. So do `^G` then `c` and a click on `hide`; the chip is
+a click away, and `[panel] chat = "hidden"` or `"off"` (or `IOHR_PANEL_CHAT`) sets the start.
+`Ctrl-]` does the same, for a keyboard layout where Option+h types another character; it is
+rebound only inside the panel. A full-screen program has the whole
 screen: the box steps aside and comes back after it. While the box shows, the panel takes the
 mouse for its buttons, so select text with Option or Shift held.
 

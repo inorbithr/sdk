@@ -59,7 +59,7 @@ use tokio::sync::Semaphore;
 use tokio::time::timeout;
 
 use crate::Env;
-use crate::cli::{Global, UiArgs, UiCommand, UiPackage, UiServe};
+use crate::cli::{Global, UiArgs, UiCommand, UiInstall, UiPackage, UiServe};
 use crate::commands::sdk_add::{resolve, run_program};
 use crate::commands::session::data_dir;
 use crate::error::Error;
@@ -102,6 +102,7 @@ pub(crate) async fn run(g: &Global, env: &Env, args: UiArgs, out: Out) -> Result
             serve_until_stopped(g, env, &serve, out).await
         }
         Some(UiCommand::Serve(serve)) => serve_until_stopped(g, env, &serve, out).await,
+        Some(UiCommand::Install(install)) => install_ui(g, &install, out),
         Some(UiCommand::Build(package)) => script(&package, "build", out),
         Some(UiCommand::Dev(package)) => script(&package, "dev", out),
         Some(UiCommand::Check(package)) => script(&package, "check", out),
@@ -170,9 +171,19 @@ fn canonical(dir: &Path) -> Result<PathBuf, Error> {
         .map_err(|e| Error::Failed(format!("{}: {}", dir.display(), e.kind())))
 }
 
+/// The data folder's `ui/`: where `serve` records its address and `install` keeps `dist/`.
+fn ui_folder(g: &Global) -> Result<PathBuf, Error> {
+    data_dir(g).map(|d| d.join("ui"))
+}
+
+/// The installed built UI: `<data folder>/ui/dist`.
+fn installed_ui(g: &Global) -> Result<PathBuf, Error> {
+    ui_folder(g).map(|f| f.join("dist"))
+}
+
 /// Opens the UI the running `serve` recorded, when it is a loopback address that answers.
 async fn open(g: &Global, out: Out) -> Result<(), Error> {
-    let folder = data_dir(g)?.join("ui");
+    let folder = ui_folder(g)?;
     let path = folder.join(SERVING);
     let file = crate::runner::private::open_trusted(&path, false)
         .map_err(Error::Failed)?
@@ -260,7 +271,12 @@ fn forget(folder: &Path, url: &str) {
 }
 
 async fn serve_until_stopped(g: &Global, env: &Env, args: &UiServe, out: Out) -> Result<(), Error> {
-    let root = ui_root(args.dir.as_deref(), &working_folder()?)?;
+    let installed = installed_ui(g).ok();
+    let root = ui_root(
+        args.dir.as_deref(),
+        &working_folder()?,
+        installed.as_deref(),
+    )?;
     let port = args.port.unwrap_or(0);
     let panels = Panels::new(g.clone(), env.clone())
         .map_err(|e| Error::Failed(format!("the start token: {}", e.kind())))?;
@@ -276,7 +292,7 @@ async fn serve_until_stopped(g: &Global, env: &Env, args: &UiServe, out: Out) ->
         ui.info(&format!("Serving {} at {url}", root.display()));
         ui.info("Ctrl-C stops it.");
     }
-    let folder = data_dir(g).map(|d| d.join("ui"));
+    let folder = ui_folder(g);
     let recorded = match &folder {
         Ok(f) => remember(f, &url, &root, &server.launch())
             .map(|()| server.keep_record(f.clone(), url.clone(), root.clone()))
@@ -313,23 +329,127 @@ fn listen_error(port: u16, e: &io::Error) -> Error {
     Error::Failed(format!("listen on loopback: {}", e.kind()))
 }
 
-/// The built UI folder: `dir` when given (it must hold `index.html`), else the nearest
-/// `ui/dist` with an `index.html` at or above `from`.
-fn ui_root(dir: Option<&Path>, from: &Path) -> Result<PathBuf, Error> {
+/// The built UI folder you point at or are in: `dir` when given (it must hold
+/// `index.html`), else the nearest `ui/dist` with an `index.html` at or above `from`; none
+/// when there is neither.
+fn given_or_nearby_ui(dir: Option<&Path>, from: &Path) -> Result<Option<PathBuf>, Error> {
     if let Some(dir) = dir {
         if dir.join("index.html").is_file() {
-            return canonical(dir);
+            return canonical(dir).map(Some);
         }
         return Err(Error::Usage(format!(
             "{} holds no index.html; point --dir (IOHR_UI_DIR) at a built UI",
             dir.display()
         )));
     }
-    nearest(from, &["ui", "dist"], "index.html").ok_or_else(|| {
-        Error::Usage(
-            "no built UI here: run `iohr ui build` in the sdk checkout, or pass --dir".into(),
-        )
-    })
+    Ok(nearest(from, &["ui", "dist"], "index.html"))
+}
+
+/// The built UI `serve` serves: the one `given_or_nearby_ui` finds (a checkout's own
+/// build), else the `installed` copy (`iohr ui install`), so it works from any folder. A
+/// UI found nowhere is a failure, not a usage error: the command was used right.
+fn ui_root(dir: Option<&Path>, from: &Path, installed: Option<&Path>) -> Result<PathBuf, Error> {
+    if let Some(found) = given_or_nearby_ui(dir, from)? {
+        return Ok(found);
+    }
+    if let Some(installed) = installed.filter(|i| i.join("index.html").is_file()) {
+        return canonical(installed);
+    }
+    let copy = installed.map_or_else(
+        || "the installed copy (the data folder is unknown: set IOHR_DATA_DIR)".to_owned(),
+        |i| format!("{}", i.join("index.html").display()),
+    );
+    Err(Error::Failed(format!(
+        "no built UI found. Looked for ui/dist/index.html at or above {} and for {copy}. \
+         Install one with `mise run cli:preview-install` (builds and installs iohr-preview \
+         and its UI), or run `iohr ui build` then `iohr ui install` in an sdk checkout, or \
+         point --dir (IOHR_UI_DIR) at a built UI",
+        from.display()
+    )))
+}
+
+/// `iohr ui install`: puts a built UI where `serve` finds it from any folder.
+fn install_ui(g: &Global, args: &UiInstall, out: Out) -> Result<(), Error> {
+    let from = working_folder()?;
+    let source = given_or_nearby_ui(args.dir.as_deref(), &from)?.ok_or_else(|| {
+        Error::Failed(format!(
+            "no built UI to install: found no ui/dist/index.html at or above {}. Run \
+             `iohr ui build` in an sdk checkout first, or point --dir (IOHR_UI_DIR) at a built UI",
+            from.display()
+        ))
+    })?;
+    let dest = installed_ui(g)?;
+    install_tree(&source, &dest).map_err(|e| {
+        Error::Failed(format!(
+            "install the UI into {}: {}",
+            dest.display(),
+            e.kind()
+        ))
+    })?;
+    if out.json {
+        Out::print_json(&serde_json::json!({
+            "installed": dest.display().to_string(),
+            "from": source.display().to_string(),
+        }));
+    } else {
+        Out::note(&format!(
+            "Installed the UI from {} into {}",
+            source.display(),
+            dest.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Copies the folder `source` to `dest` in two renames: it is copied beside `dest`, then
+/// the old `dest` is moved aside and the copy takes its place, so a failed copy leaves the
+/// installed UI as it was and a reader never sees half a UI. Links are not copied (`serve`
+/// never follows one).
+fn install_tree(source: &Path, dest: &Path) -> io::Result<()> {
+    let parent = dest
+        .parent()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    std::fs::create_dir_all(parent)?;
+    let tag = std::process::id();
+    let staged = parent.join(format!(".dist.new.{tag}"));
+    let aside = parent.join(format!(".dist.old.{tag}"));
+    let _ = std::fs::remove_dir_all(&staged);
+    let _ = std::fs::remove_dir_all(&aside);
+    if let Err(e) = copy_tree(source, &staged) {
+        let _ = std::fs::remove_dir_all(&staged);
+        return Err(e);
+    }
+    let had_old = std::fs::symlink_metadata(dest).is_ok();
+    if had_old {
+        std::fs::rename(dest, &aside).inspect_err(|_| {
+            let _ = std::fs::remove_dir_all(&staged);
+        })?;
+    }
+    if let Err(e) = std::fs::rename(&staged, dest) {
+        if had_old {
+            let _ = std::fs::rename(&aside, dest);
+        }
+        let _ = std::fs::remove_dir_all(&staged);
+        return Err(e);
+    }
+    let _ = std::fs::remove_dir_all(&aside);
+    Ok(())
+}
+
+/// Copies the files and folders below `from` into the new folder `to`.
+fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::create_dir(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let target = to.join(entry.file_name());
+        if kind.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
 }
 
 /// The UI listener: a loopback socket and what every answer reads.
@@ -1359,9 +1479,10 @@ mod tests {
     use tokio::net::TcpStream;
 
     use super::{
-        Outside, Server, file_for, forget, host_allowed, listen_error, percent_decode,
-        recorded_url, remember, resolve_inside, ui_package, ui_root,
+        Outside, Server, file_for, forget, host_allowed, install_tree, listen_error,
+        percent_decode, recorded_url, remember, resolve_inside, ui_package, ui_root,
     };
+    use crate::error::Error;
     use crate::ext::install::Store;
     use crate::ext::lock::{Entry, Lock};
     use crate::ext::oci::Digest;
@@ -1588,21 +1709,157 @@ mod tests {
         assert!(r.starts_with("HTTP/1.1 404") && !r.contains("secret\n") && !r.ends_with("secret"));
     }
 
+    /// A built UI folder (`index.html` inside) at `dir`.
+    fn put_built_ui(dir: &Path, marker: &str) {
+        std::fs::create_dir_all(dir).expect("dist");
+        std::fs::write(dir.join("index.html"), marker).expect("index");
+    }
+
     #[test]
     fn the_root_is_the_flag_or_the_nearest_built_ui() {
         let repo = tempfile::tempdir().expect("repo");
         let dist = repo.path().join("ui/dist");
-        std::fs::create_dir_all(&dist).expect("dist");
-        std::fs::write(dist.join("index.html"), "x").expect("index");
+        put_built_ui(&dist, "x");
         let deep = repo.path().join("cli/crates");
         std::fs::create_dir_all(&deep).expect("deep");
-        let found = ui_root(None, &deep).expect("found");
+        let found = ui_root(None, &deep, None).expect("found");
         assert_eq!(found, std::fs::canonicalize(&dist).expect("canon"));
         assert!(
-            ui_root(Some(&deep), &deep).is_err(),
+            ui_root(Some(&deep), &deep, None).is_err(),
             "a folder without index.html"
         );
-        assert_eq!(ui_root(Some(&dist), Path::new("/")).expect("flag"), found);
+        assert_eq!(
+            ui_root(Some(&dist), Path::new("/"), None).expect("flag"),
+            found
+        );
+    }
+
+    #[test]
+    fn the_root_falls_back_flag_then_nearest_then_installed() {
+        let data = tempfile::tempdir().expect("data");
+        let installed = data.path().join("ui/dist");
+        put_built_ui(&installed, "installed");
+        let installed_canon = std::fs::canonicalize(&installed).expect("canon");
+        // From a folder with no checkout around it: the installed copy.
+        let home = tempfile::tempdir().expect("home");
+        assert_eq!(
+            ui_root(None, home.path(), Some(&installed)).expect("installed"),
+            installed_canon
+        );
+        // A checkout's own build beats the installed copy.
+        let repo = tempfile::tempdir().expect("repo");
+        let own = repo.path().join("ui/dist");
+        put_built_ui(&own, "own");
+        let deep = repo.path().join("cli");
+        std::fs::create_dir_all(&deep).expect("deep");
+        assert_eq!(
+            ui_root(None, &deep, Some(&installed)).expect("nearest"),
+            std::fs::canonicalize(&own).expect("canon")
+        );
+        // --dir beats both.
+        let flag = tempfile::tempdir().expect("flag");
+        put_built_ui(flag.path(), "flag");
+        assert_eq!(
+            ui_root(Some(flag.path()), &deep, Some(&installed)).expect("flag"),
+            std::fs::canonicalize(flag.path()).expect("canon")
+        );
+        // A bad --dir does not fall back: it is the person's mistake to fix.
+        let empty = tempfile::tempdir().expect("empty");
+        assert!(matches!(
+            ui_root(Some(empty.path()), home.path(), Some(&installed)),
+            Err(Error::Usage(_))
+        ));
+        // An installed folder without index.html is no copy.
+        let hollow = data.path().join("hollow");
+        std::fs::create_dir_all(&hollow).expect("hollow");
+        assert!(ui_root(None, home.path(), Some(&hollow)).is_err());
+    }
+
+    #[test]
+    fn no_built_ui_anywhere_fails_and_says_where_it_looked_and_how_to_fix_it() {
+        let home = tempfile::tempdir().expect("home");
+        let data = tempfile::tempdir().expect("data");
+        let installed = data.path().join("ui/dist");
+        let e = ui_root(None, home.path(), Some(&installed)).expect_err("nothing");
+        assert!(
+            matches!(e, Error::Failed(_)),
+            "not a usage error (exit 2, examples, a Stuck line): {e:?}"
+        );
+        let text = e.to_string();
+        assert!(text.contains(&home.path().display().to_string()), "{text}");
+        assert!(
+            text.contains(&installed.join("index.html").display().to_string()),
+            "{text}"
+        );
+        for fix in [
+            "mise run cli:preview-install",
+            "iohr ui build",
+            "iohr ui install",
+            "--dir",
+        ] {
+            assert!(text.contains(fix), "{fix}: {text}");
+        }
+        // With no data folder it says how to name one.
+        let e = ui_root(None, home.path(), None).expect_err("nothing");
+        assert!(matches!(e, Error::Failed(_)));
+        assert!(e.to_string().contains("IOHR_DATA_DIR"), "{e}");
+    }
+
+    #[test]
+    fn install_copies_the_tree_over_an_older_copy_and_leaves_nothing_beside_it() {
+        let src = built_ui();
+        let data = tempfile::tempdir().expect("data");
+        let dest = data.path().join("ui/dist");
+        // An older copy with a file the new build no longer has.
+        std::fs::create_dir_all(dest.join("assets")).expect("old");
+        std::fs::write(dest.join("index.html"), "old").expect("old index");
+        std::fs::write(dest.join("assets/gone.js"), "old").expect("old js");
+        install_tree(src.path(), &dest).expect("install");
+        assert_eq!(
+            std::fs::read_to_string(dest.join("index.html")).expect("index"),
+            "<!doctype html><p>ui</p>"
+        );
+        assert!(dest.join("assets/app-1.js").is_file());
+        assert!(
+            !dest.join("assets/gone.js").exists(),
+            "replaced, not merged"
+        );
+        let beside: Vec<_> = std::fs::read_dir(data.path().join("ui"))
+            .expect("ui")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        assert_eq!(beside, ["dist"], "no staging folder is left");
+        // And the installed copy is one `serve` takes.
+        let home = tempfile::tempdir().expect("home");
+        assert!(ui_root(None, home.path(), Some(&dest)).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_install_leaves_the_installed_copy_as_it_was() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let src = built_ui();
+        let hidden = src.path().join("assets/app-1.js");
+        std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+        // Root reads anything: the failure this makes would not happen.
+        if std::fs::File::open(&hidden).is_ok() {
+            return;
+        }
+        let data = tempfile::tempdir().expect("data");
+        let dest = data.path().join("ui/dist");
+        put_built_ui(&dest, "kept");
+        assert!(install_tree(src.path(), &dest).is_err());
+        assert_eq!(
+            std::fs::read_to_string(dest.join("index.html")).expect("index"),
+            "kept"
+        );
+        assert_eq!(
+            std::fs::read_dir(data.path().join("ui"))
+                .expect("ui")
+                .count(),
+            1,
+            "the staged copy is removed"
+        );
     }
 
     #[test]
