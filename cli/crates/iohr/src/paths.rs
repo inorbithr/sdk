@@ -132,13 +132,24 @@ mod tests {
         file
     }
 
+    /// `found` names `want`. Windows file names ignore case, and `PATHEXT` spells the
+    /// extension its own way (`claude.CMD` for the `claude.cmd` on disk), so there the
+    /// comparison ignores case too.
+    fn names(found: Option<PathBuf>, want: &Path) -> bool {
+        let key = |p: &Path| {
+            let s = p.to_string_lossy().into_owned();
+            if cfg!(windows) { s.to_lowercase() } else { s }
+        };
+        found.is_some_and(|f| key(&f) == key(want))
+    }
+
     #[test]
     fn a_program_is_found_in_absolute_path_entries_only() {
         let dir = tempfile::tempdir().unwrap();
         let bin = fake_program(dir.path(), "claude");
         let path =
             std::env::join_paths([PathBuf::from("relative"), dir.path().to_owned()]).unwrap();
-        assert_eq!(find_program("claude", &path), Some(bin));
+        assert!(names(find_program("claude", &path), &bin));
         assert_eq!(find_program("claude", std::ffi::OsStr::new("")), None);
         assert_eq!(find_program("absent", &path), None);
     }
@@ -149,7 +160,7 @@ mod tests {
         std::fs::write(dir.path().join("mvn"), "#!/bin/sh\n").unwrap();
         let bin = fake_program(dir.path(), "mvn");
         let path = std::env::join_paths([dir.path()]).unwrap();
-        assert_eq!(find_program("mvn", &path), Some(bin));
+        assert!(names(find_program("mvn", &path), &bin));
     }
 
     #[test]
