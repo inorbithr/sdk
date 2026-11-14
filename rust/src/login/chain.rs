@@ -65,6 +65,14 @@ impl StoredSession {
         })
     }
 
+    pub(crate) fn attach(
+        &self,
+        logger: &crate::middleware::log::Logger,
+        exchanged: Option<crate::auth::Exchanged>,
+    ) {
+        self.inner.attach(logger, exchanged);
+    }
+
     fn from_source(source: Source) -> Self {
         Self {
             inner: CachedToken::new(source),

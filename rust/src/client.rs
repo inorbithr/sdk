@@ -1590,7 +1590,9 @@ impl<P: Profile> ClientBuilder<P> {
                 p.attach(&logger, exchanged);
                 (Arc::new(p), None)
             }
-            Credential::Login(target) => (login_provider(&target, options)?, None),
+            Credential::Login(target) => {
+                (login_provider(&target, options, &logger, exchanged)?, None)
+            }
         };
         let capacity = self.retry_budget_capacity.unwrap_or(RETRY_BUDGET);
         let shared = Arc::new(Shared {
@@ -1760,12 +1762,15 @@ impl<P: Profile> ClientBuilder<P> {
 fn login_provider(
     target: &crate::config::LoginTarget,
     options: &LoadOptions,
+    logger: &Logger,
+    exchanged: Option<crate::auth::Exchanged>,
 ) -> Result<Arc<dyn DynProvider>, Error> {
     let session = crate::login::StoredSession::from_target(target, options.login_store_ref())
         .map_err(|reason| ConfigError::Missing {
             what: "login",
             env: reason,
         })?;
+    session.attach(logger, exchanged);
     Ok(Arc::new(session))
 }
 
@@ -1775,6 +1780,8 @@ fn login_provider(
 fn login_provider(
     _: &crate::config::LoginTarget,
     _: &LoadOptions,
+    _: &Logger,
+    _: Option<crate::auth::Exchanged>,
 ) -> Result<Arc<dyn DynProvider>, Error> {
     Err(ConfigError::Missing {
         what: "login",

@@ -310,3 +310,60 @@ async fn invalidate_makes_the_next_call_get_a_fresh_token() {
         "the rotated refresh token is written back"
     );
 }
+
+#[tokio::test]
+async fn a_failed_refresh_is_logged_like_any_credential_and_names_no_token() {
+    use std::sync::Mutex;
+
+    let issuer = MockServer::start().await;
+    let base = issuer.uri();
+    Mock::given(method("GET"))
+        .and(path("/.well-known/openid-configuration"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "issuer": base,
+            "authorization_endpoint": format!("{base}/oauth2/auth"),
+            "token_endpoint": format!("{base}/oauth2/token"),
+        })))
+        .mount(&issuer)
+        .await;
+    // The first refresh hands out a token that lives two seconds; the next is refused.
+    let short = jwt("short");
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": short, "refresh_token": "rt-2",
+            "token_type": "bearer", "expires_in": 2
+        })))
+        .up_to_n_times(1)
+        .mount(&issuer)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({ "error": "invalid_grant" })))
+        .mount(&issuer)
+        .await;
+    let api = api_expecting(&short).await;
+    let machine = Machine::new(&api.uri(), &base);
+    // 30 s left: the stored token is not usable, so the first call refreshes.
+    let store = signed_in(ACCESS, REFRESH, 30);
+
+    let records = Arc::new(Mutex::new(Vec::<String>::new()));
+    let sink = Arc::clone(&records);
+    let client = Client::<Public>::builder()
+        .config_file(machine.file())
+        .log(inorbithr::LogLevel::Warn)
+        .logger(move |r| sink.lock().unwrap().push(format!("{r:?}")))
+        .load_options(machine.options(store))
+        .load()
+        .expect("the client loads");
+    client.me().await.expect("the refreshed token works");
+    // Past the point where the cache wants a refresh, still before the token expires.
+    tokio::time::sleep(std::time::Duration::from_millis(1700)).await;
+    client.me().await.expect("the still-valid token is kept");
+
+    let seen = records.lock().unwrap().join("\n");
+    assert!(seen.contains("token_refresh_failed"), "no record: {seen}");
+    for token in [ACCESS, REFRESH, "rt-2", short.as_str()] {
+        assert!(!seen.contains(token), "a token is in a log record: {seen}");
+    }
+}
