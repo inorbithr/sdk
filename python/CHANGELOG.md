@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.3](https://github.com/inorbithr/sdk/compare/python/v0.3.2...python/v0.3.3) (2026-11-14)
+
+
+### Bug fixes
+
+* keep tokens and key secrets out of JSON and structured logs in every SDK ([#466](https://github.com/inorbithr/sdk/issues/466)) ([d85ea3c](https://github.com/inorbithr/sdk/commit/d85ea3ced0fe8165ed159af32f3c133493cad5ea))
+
+
+### Dependencies
+
+* **py:** bump pydantic ([4a057c9](https://github.com/inorbithr/sdk/commit/4a057c90de39ae618270afc8fa9e4cc11c315212))
+* **py:** bump pydantic from 2.14.2 to 2.14.3 in /examples/python in the py group across 1 directory ([#550](https://github.com/inorbithr/sdk/issues/550)) ([4a057c9](https://github.com/inorbithr/sdk/commit/4a057c90de39ae618270afc8fa9e4cc11c315212))
+* **py:** bump the py group across 1 directory with 3 updates ([#340](https://github.com/inorbithr/sdk/issues/340)) ([f69926a](https://github.com/inorbithr/sdk/commit/f69926aadd676a4612a0754eeb746c01eda78b31))
+* **py:** bump the py group across 1 directory with 7 updates ([#498](https://github.com/inorbithr/sdk/issues/498)) ([a55b590](https://github.com/inorbithr/sdk/commit/a55b5909d2781eb1be2a8362ab5c292a98f8653f))
+* **py:** bump types-pyyaml from 6.0.12.20260906 to 6.0.12.20261030 in /python ([#499](https://github.com/inorbithr/sdk/issues/499)) ([4612c1a](https://github.com/inorbithr/sdk/commit/4612c1a40af71202c0ea3b49f781d579f278ff12))
+* **py:** bump types-pyyaml from 6.0.12.20261030 to 6.0.12.20261103 in /python ([#551](https://github.com/inorbithr/sdk/issues/551)) ([af09bb7](https://github.com/inorbithr/sdk/commit/af09bb71c3889e8efa73a45095a8c47aa5bba018))
+* **py:** bump types-pyyaml in /python ([af09bb7](https://github.com/inorbithr/sdk/commit/af09bb71c3889e8efa73a45095a8c47aa5bba018))
+* **py:** bump types-pyyaml in /python ([4612c1a](https://github.com/inorbithr/sdk/commit/4612c1a40af71202c0ea3b49f781d579f278ff12))
+* **py:** update uv-build requirement from &lt;0.13,&gt;=0.7 to &gt;=0.7,&lt;0.14 in /python ([#277](https://github.com/inorbithr/sdk/issues/277)) ([7494dba](https://github.com/inorbithr/sdk/commit/7494dbafb29096057dc9985bda4eb75cefced71d))
+* **py:** update uv-build requirement in /python ([7494dba](https://github.com/inorbithr/sdk/commit/7494dbafb29096057dc9985bda4eb75cefced71d))
+
 ## [0.3.2](https://github.com/inorbithr/sdk/compare/python/v0.3.1...python/v0.3.2) (2026-10-31)
 
 
