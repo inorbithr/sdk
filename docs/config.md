@@ -1056,8 +1056,9 @@ next call get a fresh one). The `login` source in the chain (section 5.1) uses i
 `DefaultCredential` picks it up unchanged, and a signed-in profile works with no `iohr`
 on the machine. In a build without the `login` feature the source is skipped with the
 reason above. `LoadOptions::login_store` injects a store for tests. A newer, still fresh
-access token that another process wrote is taken as is, not refreshed again. The source
-emits no auth log records yet (the cached token has no `attach` hook).
+access token that another process wrote is taken as is, not refreshed again. A failed refresh
+with a still-valid token is logged as `token_refresh_failed`, like every other credential,
+and names no token.
 
 **The source.** `login` is a credential source named `login`, ranked between `file` (4)
 and `cli` (5) in the chain of section 5.1, so `cli` stays last, for a machine where only
