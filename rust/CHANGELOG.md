@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.4.1](https://github.com/inorbithr/sdk/compare/rust/v0.4.0...rust/v0.4.1) (2026-11-14)
+
+
+### Features
+
+* **rust:** login primitives in inorbithr behind the login feature (RFC 0231 slice 2) ([#566](https://github.com/inorbithr/sdk/issues/566)) ([454e82c](https://github.com/inorbithr/sdk/commit/454e82c3f36a47eb9e421723e3a3afbdcd40a952))
+* **rust:** person sign-in contract and failing tests (RFC 0231 slice 1) ([#565](https://github.com/inorbithr/sdk/issues/565)) ([1d55801](https://github.com/inorbithr/sdk/commit/1d55801c0257ac72a302bf0f32af9d4a8b6cd8ff))
+* **rust:** sign-in flows in inorbithr behind the login feature (RFC 0231 slice 3) ([#569](https://github.com/inorbithr/sdk/issues/569)) ([302cdcf](https://github.com/inorbithr/sdk/commit/302cdcf76a55fac77c970c61e8d40ab859b6cc1c))
+
+
+### Bug fixes
+
+* **deps:** rustix 1.1.6 for RUSTSEC-2026-0486 ([#537](https://github.com/inorbithr/sdk/issues/537)) ([92464e8](https://github.com/inorbithr/sdk/commit/92464e851c0b1b139db2ab382ca242e53222b982))
+* keep tokens and key secrets out of JSON and structured logs in every SDK ([#466](https://github.com/inorbithr/sdk/issues/466)) ([d85ea3c](https://github.com/inorbithr/sdk/commit/d85ea3ced0fe8165ed159af32f3c133493cad5ea))
+
+
+### Documentation
+
+* **docs:** READMEs match today's SDKs and CLI ([#323](https://github.com/inorbithr/sdk/issues/323)) ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+* **sdk:** READMEs match today's SDKs and CLI ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+
+
+### Dependencies
+
+* **rust:** bump serde-saphyr ([20347d7](https://github.com/inorbithr/sdk/commit/20347d7227ed1e9c6ee64c097701aebc14c15150))
+* **rust:** bump serde-saphyr from 1.3.0 to 2.0.0 in /rust in the rust-major group across 1 directory ([#286](https://github.com/inorbithr/sdk/issues/286)) ([20347d7](https://github.com/inorbithr/sdk/commit/20347d7227ed1e9c6ee64c097701aebc14c15150))
+* **rust:** bump the rust group across 4 directories with 5 updates ([#540](https://github.com/inorbithr/sdk/issues/540)) ([3f1951e](https://github.com/inorbithr/sdk/commit/3f1951e8fdafc01a1d2a728ac7c66c7419dafe49))
+
 ## [0.4.0](https://github.com/inorbithr/sdk/compare/rust/v0.3.0...rust/v0.4.0) (2026-10-24)
 
 
