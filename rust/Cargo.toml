@@ -115,6 +115,8 @@ unsafe_code = "forbid"
 missing_docs = "warn"
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
+# `fuzzing` is set by cargo-fuzz; the loopback request reader is reached through it.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

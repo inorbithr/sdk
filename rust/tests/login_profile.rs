@@ -8,16 +8,16 @@
 
 use std::path::Path;
 
-/// The exact text `iohr_auth::Config::to_toml` writes for a person signed in with the
+/// The exact text `iohr::auth::Config::to_toml` writes for a person signed in with the
 /// operating system's store (`work`, an account chosen with `--account`) and a profile
 /// made with `--with-token --insecure-storage` (`ci`).
 ///
-/// Generated, not written by hand: a throwaway example in `cli/crates/iohr-auth` built the
+/// Generated, not written by hand: a throwaway example in `cli/crates/iohr` built the
 /// `Config` with `Profile::person("acc_8d2e", Storage::Keyring,
 /// "https://auth.inorbit.hr", "iohr-cli")` (with `account_pinned = true`), and
 /// `Profile::new(Kind::Token, "acc_ci01", Storage::File)`, set `default` to `work`, and
 /// printed `to_toml()`, at the commit this test was written on. The test below guards
-/// that the SDK reads what iohr writes; `cli/crates/iohr-auth/src/config.rs` is the
+/// that the SDK reads what iohr writes; `cli/crates/iohr/src/auth/config.rs` is the
 /// source of the shape.
 const IOHR_WRITES: &str = r#"default = "work"
 

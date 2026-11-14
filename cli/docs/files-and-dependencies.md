@@ -52,13 +52,13 @@ not `iohr` itself.
 | clap, clap_complete | Arguments, help and shell completions |
 | tokio | The runtime for HTTP; current-thread only |
 | inorbithr | The Rust SDK's runtime: the client every command calls through, with its retries, errors and user agent ([ADR 0009](../../docs/adr/0009-the-command-line.md), [ADR 0011](../../docs/adr/0011-runtime-and-surface.md)) |
-| reqwest (rustls) | HTTPS with the platform's trust store, no OpenSSL; the sign-in flows in iohr-auth |
+| reqwest (rustls) | HTTPS with the platform's trust store, no OpenSSL; the sign-in flows in inorbithr (`login` feature) |
 | serde, serde_json, toml | The config file and the API's JSON |
 | toml_edit | Rewriting `config.toml` without dropping the SDKs' keys or anyone's comments |
 | thiserror | Typed errors in the libraries |
 | time, url | RFC 3339 timestamps; URL checks (HTTPS only, the path stays on the API host) |
-| keyring-core and one store per OS (iohr-auth) | The OS credential store: apple-native-keyring-store, windows-native-keyring-store, zbus-secret-service-keyring-store (pure Rust D-Bus, no libdbus) |
-| security-framework (iohr-auth, macOS) | The version apple-native-keyring-store already uses; the quiet store turns the Keychain's dialogs off through it |
+| keyring-core and one store per OS (inorbithr `login`) | The OS credential store: apple-native-keyring-store, windows-native-keyring-store, zbus-secret-service-keyring-store (pure Rust D-Bus, no libdbus) |
+| security-framework (inorbithr `login`, macOS) | The version apple-native-keyring-store already uses; the quiet store turns the Keychain's dialogs off through it |
 | zeroize | Secrets are wiped from memory when dropped |
 | rpassword | `iohr connections add` and `reconnect`: a secret typed on the terminal without echo (Unix and Windows consoles) |
 | etcetera | The platform's config and data directories |

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/iohr", "crates/iohr-auth", "crates/iohr-openapi", "crates/iohr-codegen", "crates/iohr-lab", "crates/iohr-atlas-core"]
+members = ["crates/iohr", "crates/iohr-openapi", "crates/iohr-codegen", "crates/iohr-lab", "crates/iohr-atlas-core"]
 # Built with nightly by `mise run cli:fuzz`.
 exclude = ["fuzz"]
 
@@ -15,7 +15,6 @@ publish = false
 
 [workspace.dependencies]
 iohr-atlas-core = { path = "crates/iohr-atlas-core", version = "0.1.0-alpha.39" }
-iohr-auth = { path = "crates/iohr-auth" }
 iohr-codegen = { path = "crates/iohr-codegen" }
 iohr-lab = { path = "crates/iohr-lab" }
 iohr-openapi = { path = "crates/iohr-openapi" }

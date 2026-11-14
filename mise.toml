@@ -477,7 +477,7 @@ for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-
   cargo cyclonedx --format json --manifest-path crates/iohr/Cargo.toml --target "$target" --override-filename "iohr-$version-$target.cdx"
   mv "crates/iohr/iohr-$version-$target.cdx.json" ../dist/cli/
   # cargo-cyclonedx writes one for every workspace member; only the binary's is released.
-  rm -f crates/iohr-auth/*.cdx.json crates/iohr-openapi/*.cdx.json crates/iohr-codegen/*.cdx.json
+  rm -f crates/iohr-openapi/*.cdx.json crates/iohr-codegen/*.cdx.json
   cyclonedx validate --input-file "../dist/cli/iohr-$version-$target.cdx.json" --input-format json --fail-on-errors
 done
 """
@@ -565,7 +565,7 @@ run = "bash cli/release/winget.sh"
 [tasks."cli:sbom"]
 dir = "cli"
 shell = "bash -e -o pipefail -c"
-run = "mkdir -p ../dist/sbom && cargo cyclonedx --format json --manifest-path crates/iohr/Cargo.toml --override-filename cli.cdx && mv crates/iohr/cli.cdx.json ../dist/sbom/ && rm -f crates/iohr-auth/*.cdx.json crates/iohr-openapi/*.cdx.json crates/iohr-codegen/*.cdx.json"
+run = "mkdir -p ../dist/sbom && cargo cyclonedx --format json --manifest-path crates/iohr/Cargo.toml --override-filename cli.cdx && mv crates/iohr/cli.cdx.json ../dist/sbom/ && rm -f crates/iohr-openapi/*.cdx.json crates/iohr-codegen/*.cdx.json"
 
 # ---------------------------------------------------------------- TypeScript
 

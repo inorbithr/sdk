@@ -246,7 +246,7 @@ fn remember(folder: &Path, url: &str, root: &Path, launch: &str) -> io::Result<(
         "pid": std::process::id(),
         "launch": launch,
     });
-    iohr_auth::write_private(folder, SERVING, body.to_string().as_bytes())
+    inorbithr::login::write_private(folder, SERVING, body.to_string().as_bytes())
 }
 
 /// Removes the record when it still names `url`: a later `serve` may have replaced it.

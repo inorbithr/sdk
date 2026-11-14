@@ -3,10 +3,29 @@ use std::io::{IsTerminal as _, Read as _};
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use iohr_auth::{
-    AuthError, Claims, EntryKey, Kind, Login as SignIn, Profile, ProfileName, Provider, Redacted,
-    Session, SignOut, Storage,
-};
+use crate::auth::AuthError;
+
+use inorbithr::login::Claims;
+
+use inorbithr::login::EntryKey;
+
+use inorbithr::login::Kind;
+
+use inorbithr::login::Login as SignIn;
+
+use inorbithr::login::Profile;
+
+use inorbithr::login::ProfileName;
+
+use inorbithr::login::Provider;
+
+use inorbithr::Secret;
+
+use crate::auth::Session;
+
+use inorbithr::login::SignOut;
+
+use inorbithr::login::Storage;
 use time::OffsetDateTime;
 use zeroize::Zeroizing;
 
@@ -293,7 +312,7 @@ async fn settle_account(
 async fn check_store(ctx: &Ctx, name: &ProfileName, storage: Storage) -> Result<(), Error> {
     let probe = EntryKey::new(name.clone(), "iohr-store-check")?;
     blocking(ctx.store(storage, Prompts::Allowed)?, move |s| {
-        s.set(&probe, &Redacted::new("check".to_owned()))?;
+        s.set(&probe, &Secret::new("check".to_owned()))?;
         s.delete(&probe).map(drop)
     })
     .await
@@ -402,7 +421,7 @@ pub(crate) async fn logout(g: &Global, out: Out) -> Result<(), Error> {
     Ok(())
 }
 
-fn read_token() -> Result<Redacted<String>, Error> {
+fn read_token() -> Result<Secret<String>, Error> {
     let stdin = std::io::stdin();
     if stdin.is_terminal() {
         return Err(Error::Usage(
@@ -421,7 +440,7 @@ fn read_token() -> Result<Redacted<String>, Error> {
             "standard input was empty: pipe a token into `iohr login --with-token`".into(),
         ));
     }
-    Ok(Redacted::new(token.to_owned()))
+    Ok(Secret::new(token.to_owned()))
 }
 
 pub(crate) fn storage_name(s: Storage) -> &'static str {

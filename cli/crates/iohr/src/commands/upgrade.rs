@@ -698,7 +698,7 @@ pub(crate) fn sign_binary(env: &Env, path: &Path) -> Result<(), Error> {
 /// profile's `[profiles.<name>.runner]`, then `[runner]`. A config file that cannot be
 /// read leaves signing off: it never stops an upgrade.
 fn sign_setting(g: &Global, env: &Env) -> crate::runner::settings::Setting<SignWith> {
-    let none = iohr_auth::RunnerConfig::default();
+    let none = crate::auth::RunnerConfig::default();
     let ctx = Ctx::load(g).ok();
     let profile = ctx.as_ref().and_then(|c| {
         let name = run_profile(g, env, c)?;
@@ -885,7 +885,7 @@ fn replace_with(
         .parent()
         .ok_or_else(|| Error::Failed("the install path has no directory".into()))?;
     // A random name, made new on each write: never a file or link that was there.
-    let tmp = iohr_auth::temp_path(dir, "iohr.upgrade");
+    let tmp = inorbithr::login::temp_path(dir, "iohr.upgrade");
     let result = (|| -> Result<(), Error> {
         let fail = |what: &str, e: &dyn std::fmt::Display| {
             Error::Failed(format!(
@@ -901,7 +901,7 @@ fn replace_with(
                 }
                 _ => {}
             }
-            iohr_auth::create_new_private(&tmp, 0o700)
+            inorbithr::login::create_new_private(&tmp, 0o700)
                 .and_then(|mut f| f.write_all(program).and_then(|()| f.sync_all()))
                 .map_err(|e| fail("cannot write", &e))?;
             #[cfg(unix)]

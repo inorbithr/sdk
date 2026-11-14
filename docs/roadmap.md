@@ -117,8 +117,14 @@ store. Slices, each its own PR:
       even when the revoke fails, and says so (it used to keep it and exit 1). The RFC
       names `Session::save`; the code also has `Session::access_token()` in place of a
       `Credential` impl, which the `login` source will use in slice 4.
-- [ ] 4. The `login` credential source in the chain (config.md section 5.1)
-- [ ] 5. Delete `iohr-auth`
+- [x] 4. The `login` credential source in the chain (config.md section 5.1)
+- [x] 5. Delete `iohr-auth`: `iohr` imports `inorbithr::login` directly and keeps its own
+      `auth` module for what is the command line's (the `[runner]`, `[ask]`, `[panel]`
+      tables, the `Credential` wrapper). No re-export shim remains, because `iohr` was the
+      only user. Also: `INORBIT_LOGIN_CLIENT_ID`, a serial guard on the store tests that
+      share the macOS Keychain's process-wide prompt flag, a conformance store that no
+      longer depends on read order, and the `login-device` example (a check against the
+      replay server). SDK 0.4.1 is proposed by release-please from these commits.
 
 Open: the RFC's Keychain hypothesis (one signed binary, one "Always Allow") is checked on
 a Mac, not here; slice 2 was built and tested on Linux.

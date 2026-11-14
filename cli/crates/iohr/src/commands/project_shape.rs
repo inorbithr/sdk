@@ -247,7 +247,9 @@ async fn settle(
 mod tests {
     use std::sync::Arc;
 
-    use iohr_auth::{Redacted, StaticToken};
+    use inorbithr::Secret;
+
+    use crate::auth::StaticToken;
     use serde_json::json;
     use wiremock::matchers::{body_partial_json, method, path, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -256,7 +258,7 @@ mod tests {
     use crate::context::{AnyCredential, Api};
 
     fn api(server: &MockServer) -> Api {
-        let cred = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+        let cred = Arc::new(AnyCredential::Token(StaticToken::new(Secret::new(
             "t".to_owned(),
         ))));
         Api::new(&server.uri(), cred, false).unwrap()

@@ -1,16 +1,16 @@
 use std::future::Future;
 
-use crate::Redacted;
-use crate::error::AuthError;
+use super::error::AuthError;
+use inorbithr::Secret;
 
 /// The value of an `Authorization: Bearer` header for one request.
 #[derive(Debug, Clone)]
-pub struct Bearer(Redacted<String>);
+pub struct Bearer(Secret<String>);
 
 impl Bearer {
     /// Wraps an access token.
     #[must_use]
-    pub fn new(token: Redacted<String>) -> Self {
+    pub fn new(token: Secret<String>) -> Self {
         Self(token)
     }
 
@@ -39,13 +39,13 @@ pub trait Credential: Send + Sync {
 /// An API token used as it is: from `IOHR_TOKEN`, or kept for a profile.
 #[derive(Debug, Clone)]
 pub struct StaticToken {
-    token: Redacted<String>,
+    token: Secret<String>,
 }
 
 impl StaticToken {
     /// Uses `token` for every request.
     #[must_use]
-    pub fn new(token: Redacted<String>) -> Self {
+    pub fn new(token: Secret<String>) -> Self {
         Self { token }
     }
 }

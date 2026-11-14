@@ -49,7 +49,7 @@ fn production_is_the_default_and_uses_the_built_in_address() {
     }
     let g = parse(&[]).global;
     assert_eq!(g.base_url(), DEFAULT_BASE_URL);
-    assert_eq!(g.issuer(), iohr_auth::DEFAULT_ISSUER);
+    assert_eq!(g.issuer(), inorbithr::login::DEFAULT_ISSUER);
     assert!(g.check_environment().is_ok());
     let g = parse(&["--env", "production"]).global;
     assert_eq!(g.base_url(), DEFAULT_BASE_URL);

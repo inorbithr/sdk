@@ -34,6 +34,14 @@ pub use config::{
 pub use error::LoginError;
 pub use flow::{Authorization, Browser, Device, Granted, Login};
 pub use loopback::{MAX_HEAD, READ_WINDOW, bind_loopback};
+
+/// Reads one loopback request head, for the command line's fuzz target (built only by
+/// `cargo fuzz`, which sets `--cfg fuzzing`); never part of a release build.
+#[cfg(fuzzing)]
+#[doc(hidden)]
+pub fn fuzz_parse_request(head: &[u8]) {
+    let _ = loopback::parse_request(head);
+}
 pub use pkce::{Pkce, RandomError, challenge, constant_time_eq, random_token};
 pub use provider::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER, Provider};
 pub use session::{Session, SignOut};

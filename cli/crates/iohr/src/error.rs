@@ -1,7 +1,15 @@
 use std::fmt;
 use std::process::ExitCode;
 
-use iohr_auth::{AuthError, ClaimsError, ConfigError, LoginError, StoreError};
+use crate::auth::AuthError;
+
+use inorbithr::login::ClaimsError;
+
+use inorbithr::login::ConfigError;
+
+use inorbithr::login::LoginError;
+
+use inorbithr::login::StoreError;
 
 use inorbithr::Code;
 

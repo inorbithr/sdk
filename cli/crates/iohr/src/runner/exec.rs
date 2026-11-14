@@ -77,7 +77,7 @@ pub(crate) struct ClaudeExec {
     pub(crate) runner_id: String,
     pub(crate) user: String,
     /// The sign-in `claude` gets from iohr: an API key from the credential store, or
-    /// none (its own sign-in). Redacted in `Debug`.
+    /// none (its own sign-in). Secret in `Debug`.
     auth: claude::Auth,
     /// What this machine allows, as config.toml says now (SIGHUP reloads it).
     local: watch::Receiver<LocalAuth>,
@@ -888,9 +888,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
     async fn a_stored_key_reaches_claude_alone_and_never_prints() {
         let dir = tempfile::tempdir().unwrap();
         let e = exec(dir.path(), API_KEY)
-            .with_auth(claude::Auth::ApiKey(iohr_auth::Redacted::new(
-                STORED.into(),
-            )))
+            .with_auth(claude::Auth::ApiKey(inorbithr::Secret::new(STORED.into())))
             .with_local(watch::channel(LocalAuth::default()).1);
         assert!(matches!(e.auth, claude::Auth::ApiKey(_)));
         assert!(e.env_is_clean());
@@ -919,9 +917,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         // Under `plan` the stored key stays out: claude runs on its own sign-in.
         let dir = tempfile::tempdir().unwrap();
         let e = exec(dir.path(), SUB)
-            .with_auth(claude::Auth::ApiKey(iohr_auth::Redacted::new(
-                STORED.into(),
-            )))
+            .with_auth(claude::Auth::ApiKey(inorbithr::Secret::new(STORED.into())))
             .with_local(
                 watch::channel(LocalAuth {
                     claude: provider::AuthPolicy::Plan,
