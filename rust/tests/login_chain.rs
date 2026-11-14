@@ -367,3 +367,76 @@ async fn a_failed_refresh_is_logged_like_any_credential_and_names_no_token() {
         assert!(!seen.contains(token), "a token is in a log record: {seen}");
     }
 }
+
+/// Mounts a discovery document and a token endpoint that only answers a refresh
+/// carrying `client_id`, and returns the issuer.
+async fn issuer_wanting_client(client_id: &str, access: &str) -> MockServer {
+    use wiremock::matchers::body_string_contains;
+    let issuer = MockServer::start().await;
+    let base = issuer.uri();
+    Mock::given(method("GET"))
+        .and(path("/.well-known/openid-configuration"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "issuer": base,
+            "authorization_endpoint": format!("{base}/oauth2/auth"),
+            "token_endpoint": format!("{base}/oauth2/token"),
+        })))
+        .mount(&issuer)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .and(body_string_contains(format!("client_id={client_id}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": access, "refresh_token": "rt-2",
+            "token_type": "bearer", "expires_in": 900
+        })))
+        .expect(1)
+        .mount(&issuer)
+        .await;
+    issuer
+}
+
+#[tokio::test]
+async fn the_login_client_id_comes_from_the_environment_when_the_profile_has_none() {
+    let renewed = jwt("env-client");
+    let issuer = issuer_wanting_client("env-app", &renewed).await;
+    let api = api_expecting(&renewed).await;
+    let mut machine = Machine::new(&api.uri(), &issuer.uri());
+    let cfg = std::fs::read_to_string(machine.file()).unwrap();
+    std::fs::write(
+        machine.file(),
+        cfg.replace("client_id = \"iohr-cli\"\n", ""),
+    )
+    .unwrap();
+    machine
+        .env
+        .insert("INORBIT_LOGIN_CLIENT_ID".to_owned(), "env-app".to_owned());
+    // The stored token is already expired, so the first call refreshes it.
+    let client = machine
+        .client(signed_in(ACCESS, REFRESH, -60))
+        .expect("loads");
+
+    client
+        .me()
+        .await
+        .expect("signed in through the env client id");
+}
+
+#[tokio::test]
+async fn a_client_id_the_profile_records_wins_over_the_environment() {
+    let renewed = jwt("profile-client");
+    let issuer = issuer_wanting_client("iohr-cli", &renewed).await;
+    let api = api_expecting(&renewed).await;
+    let mut machine = Machine::new(&api.uri(), &issuer.uri());
+    machine
+        .env
+        .insert("INORBIT_LOGIN_CLIENT_ID".to_owned(), "env-app".to_owned());
+    let client = machine
+        .client(signed_in(ACCESS, REFRESH, -60))
+        .expect("loads");
+
+    client
+        .me()
+        .await
+        .expect("signed in through the profile's client id");
+}
