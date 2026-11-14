@@ -70,6 +70,8 @@ jobs:
       rust_tag: ${{ steps.rp.outputs['rust--tag_name'] }}
       ts: ${{ steps.rp.outputs['typescript--release_created'] }}
       ts_tag: ${{ steps.rp.outputs['typescript--tag_name'] }}
+      ui: ${{ steps.rp.outputs['ui--release_created'] }}
+      ui_tag: ${{ steps.rp.outputs['ui--tag_name'] }}
       py: ${{ steps.rp.outputs['python--release_created'] }}
       py_tag: ${{ steps.rp.outputs['python--tag_name'] }}
       iohr: ${{ steps.rp.outputs['cli--release_created'] }}
@@ -105,6 +107,7 @@ jobs:
       ${{ !cancelled() && (needs.release-please.outputs.go == 'true'
       || needs.release-please.outputs.rust == 'true' || needs.release-please.outputs.ts == 'true'
       || needs.release-please.outputs.py == 'true' || needs.release-please.outputs.iohr == 'true'
+      || needs.release-please.outputs.ui == 'true'
       || (github.event_name == 'workflow_dispatch'
       && (inputs.python_tag != '' || inputs.typescript_tag != ''))) }}
     runs-on: macos-15
@@ -158,6 +161,7 @@ jobs:
       && (needs.release-please.outputs.go == 'true'
       || needs.release-please.outputs.rust == 'true' || needs.release-please.outputs.ts == 'true'
       || needs.release-please.outputs.py == 'true' || needs.release-please.outputs.iohr == 'true'
+      || needs.release-please.outputs.ui == 'true'
       || (github.event_name == 'workflow_dispatch'
       && (inputs.python_tag != '' || inputs.typescript_tag != ''))) }}
     runs-on: ubuntu-latest
@@ -316,6 +320,57 @@ jobs:
       - if: ${{ !github.event.repository.private }}
         working-directory: typescript
         run: pnpm dlx jsr@0.14.3 publish
+
+  # @inorbithr/ui, the frame layer iohr-mac imports (RFC 0217, open question 4): the same
+  # steps, environment and npm trusted publisher as the ts job, from ui/. The steps are
+  # copied, not shared, for the reason the ts job gives: the job checks out the tag, and a
+  # shared task or action from the tag's tree would differ between releases.
+  ui:
+    name: publish ui
+    needs: [release-please, examples-gate]
+    if: >-
+      ${{ !cancelled() && needs.examples-gate.result == 'success'
+      && needs.release-please.outputs.ui == 'true' }}
+    runs-on: ubuntu-latest
+    environment: release-npm
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.ui_tag }}
+      - name: Check the tag
+        env:
+          TAG: ${{ needs.release-please.outputs.ui_tag }}
+        run: '[[ "$TAG" =~ ^ui/v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] || { echo "not a ui release tag: $TAG" >&2; exit 1; }'
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          install_args: "node pnpm cyclonedx"
+          cache: false
+      - working-directory: ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run lib
+          mkdir -p ../dist
+          npm pack --pack-destination ../dist
+          # Stage-only, like @inorbithr/sdk: a maintainer approves the version with 2FA.
+          npm --version | awk -F. '{ exit !($1 > 11 || ($1 == 11 && $2 >= 15)) }' || { echo "npm too old for staged publishing" >&2; exit 1; }
+          npm stage publish
+      - working-directory: ui
+        run: mkdir -p ../dist/sbom && pnpm sbom --sbom-format cyclonedx --prod > ../dist/sbom/ui.cdx.json
+      - run: mise run sbom:validate
+      - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: dist/*.tgz
+          sbom-path: dist/sbom/ui.cdx.json
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.ui_tag }}
+        run: gh release upload "$TAG" dist/*.tgz dist/sbom/ui.cdx.json --repo "$GITHUB_REPOSITORY" --clobber
 
   # Python: build with read permissions only, then attest, attach and publish in one job
   # that waits for a maintainer in release-pypi (as `iohr-build` and `iohr` do).

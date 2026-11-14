@@ -51,6 +51,11 @@
         "src/version.ts"
       ]
     },
+    "ui": {
+      "release-type": "node",
+      "component": "ui",
+      "package-name": "@inorbithr/ui"
+    },
     "python": {
       "release-type": "python",
       "component": "python",
