@@ -140,6 +140,7 @@ pub const RESERVED: &[&str] = &[
     "logout",
     "memory",
     "openapi",
+    "p2p",
     "packages",
     "panel",
     "permission-server",

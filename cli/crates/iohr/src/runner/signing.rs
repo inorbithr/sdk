@@ -206,6 +206,22 @@ impl RunKey {
     }
 }
 
+/// A software device key: what signs a P2P report on a machine without a Secure Enclave,
+/// and in tests. It asks nobody, so `reason` is not shown.
+impl crate::mac_sign::DeviceSigner for RunKey {
+    fn ensure(&self) -> Result<String, String> {
+        Ok(RunKey::public_key(self))
+    }
+
+    fn public_key(&self) -> Result<String, String> {
+        Ok(RunKey::public_key(self))
+    }
+
+    fn sign(&self, message: &str, _reason: &str) -> Result<String, String> {
+        RunKey::sign(self, message.as_bytes())
+    }
+}
+
 /// The first line of what the run key signs to enrol through an approved
 /// `runner_enrollment` ask (core `approval_messages::runner_enrollment::POSSESSION_TAG`).
 pub(crate) const RUNNER_ENROLLMENT_TAG: &str = "iohr-runner-enrollment-v1";

@@ -85,3 +85,8 @@ receives fixes.
   its requests to Anthropic directly; InOrbit does not proxy, read or store them. The
   Anthropic API key the runner uses stays in your OS credential store and reaches only
   the `claude` process it starts, never a log, an argument or InOrbit's servers.
+- `iohr p2p` (ADR 0018) is postponed since 2026-11-13: every verb exits 1 and talks to
+  no host. As designed, it would talk to one host besides the API: the bootstrap node
+  you name, over `https://` only. Its reports carry a domain or a
+  handle and a reason from a fixed list, are signed with a key on your device (never your
+  token), and are never written to a log ([SR-37](docs/security/requirements.md)).

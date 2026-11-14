@@ -1880,6 +1880,7 @@ dependencies = [
  "iohr-lab",
  "iohr-openapi",
  "markup5ever_rcdom",
+ "proptest",
  "regex",
  "reqwest",
  "rpassword",

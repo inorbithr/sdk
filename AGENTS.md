@@ -80,11 +80,12 @@ A task for a language whose package does not exist yet prints a skip line and ex
 - **Stubs and unfinished paths are labelled.** Code that is not implemented returns an
   explicit "not implemented" error, never a fake value.
 - **The SDK talks only to the public API and the token endpoint.** No other host, no
-  telemetry sent anywhere.
+  telemetry sent anywhere. `iohr p2p` (ADR 0018, SR-37) would have reached a bootstrap
+  node the person names; it is postponed since 2026-11-13 and reaches no host.
 
 ## Security and compliance
 
-- The security requirements in `docs/security/requirements.md` (SR-01 to SR-36) are as
+- The security requirements in `docs/security/requirements.md` (SR-01 to SR-37) are as
   binding as `docs/design.md`; code review rejects a change that breaks one.
 - Never put a key secret, token, health data (PHI), personal data or card number in a
   log line, error message, URL, test fixture or example output.

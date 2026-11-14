@@ -417,6 +417,10 @@ pub enum Command {
     /// key, so `approve` says so and waits for it.
     #[command(subcommand)]
     Asks(AsksCommand),
+    /// Share signed scam reports with other machines. Postponed (2026-11-13): hidden from
+    /// help, and every verb exits 1; reports go through the InOrbit reports API.
+    #[command(subcommand, hide = true)]
+    P2p(P2pCommand),
     /// Keep what a project knows as files, check it, and sync it when you choose.
     ///
     /// Memory is local first: one Markdown file per memory in `.inorbit/memory/` (committed with
@@ -3446,6 +3450,36 @@ pub enum AsksCommand {
     Key {
         #[command(subcommand)]
         command: AsksKeyCommand,
+    },
+}
+
+/// `iohr p2p`: signed scam reports shared between machines (RFC 0230). Postponed
+/// (2026-11-13): every verb exits 1; reports go through the InOrbit reports API.
+#[derive(Debug, Subcommand)]
+pub enum P2pCommand {
+    /// Join this machine to the report network. Postponed.
+    Register {
+        /// The bootstrap node: `https://HOST[:PORT]` (plain http only on loopback).
+        #[arg(long, env = "IOHR_P2P_BOOTSTRAP", value_name = "URL")]
+        bootstrap: Option<String>,
+    },
+    /// Whether this machine is in the report network. Postponed.
+    Status,
+    /// Leave the report network. Postponed.
+    Unregister,
+    /// The peers this machine knows. Postponed.
+    Peers,
+    /// Sign and share a report about a domain or a handle. Postponed.
+    Publish,
+    /// Follow the reports and live warnings peers share. Postponed.
+    Subscribe,
+    /// Take back a report you signed. Postponed.
+    Retract,
+    /// The background agent. Postponed.
+    #[command(hide = true)]
+    Agent {
+        #[arg(long, value_name = "URL")]
+        bootstrap: String,
     },
 }
 

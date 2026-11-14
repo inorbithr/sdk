@@ -641,6 +641,8 @@ async fn verbose_output_never_shows_the_token() {
         vec!["ext", "show", "inorbit/agent"],
         vec!["runner", "status"],
     ];
+    // `iohr p2p` is postponed and calls no API: every verb exits 1, and
+    // `p2p_is_postponed_and_every_verb_says_so` below proves it prints no token.
     // `runner run-key` keeps its key in the profile's store, which a bare token has not:
     // `run_key_is_made_once_and_enrolled_with_a_proof_of_possession` (tests/runner.rs) runs it.
     // `runner api-key` keeps the key in the same store:
@@ -4540,4 +4542,48 @@ async fn coordinator_asks_create_sends_the_kind() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(out.contains("ask_1") && out.contains("bug"), "{out}");
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+/// `iohr p2p` with only a config directory: no token, no API (ADR 0018).
+fn p2p(config: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .arg("p2p")
+        .args(args)
+        .env_clear()
+        .envs(kept_env())
+        .env("IOHR_CONFIG_DIR", config)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+/// P2P is postponed (owner, 2026-11-13): every verb, the hidden agent too, exits 1 with
+/// one line that names the reports API, and starts nothing.
+#[test]
+fn p2p_is_postponed_and_every_verb_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    for args in [
+        vec!["register"],
+        vec!["register", "--bootstrap", "https://example.com"],
+        vec!["status"],
+        vec!["status", "--json"],
+        vec!["unregister"],
+        vec!["peers"],
+        vec!["publish"],
+        vec!["subscribe"],
+        vec!["retract"],
+        vec!["agent", "--bootstrap", "https://example.com"],
+    ] {
+        let o = p2p(dir.path(), &args);
+        assert_eq!(code(&o), 1, "{args:?}: {}", text(&o));
+        assert!(
+            text(&o).contains(
+                "P2P is postponed; reports go through the InOrbit reports API (eye ADR 0006)"
+            ),
+            "{args:?}: {}",
+            text(&o)
+        );
+        assert!(o.stdout.is_empty(), "{args:?}: nothing on stdout");
+    }
+    assert!(!dir.path().join("p2p").exists(), "nothing is started");
 }

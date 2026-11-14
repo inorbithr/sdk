@@ -3,7 +3,7 @@
 Where `iohr` keeps what it writes, which hosts it talks to and when, and every runtime
 dependency with the reason it is there. Back to the [iohr overview](../README.md).
 
-The rules behind this page are SR-10 to SR-34 in
+The rules behind this page are SR-10 to SR-37 in
 [docs/security/requirements.md](../../docs/security/requirements.md); the layout is
 [ADR 0009](../../docs/adr/0009-the-command-line.md).
 
@@ -18,6 +18,7 @@ The rules behind this page are SR-10 to SR-34 in
 | The runner's turns | `runner/coordinate` in the config directory, with the job checkouts in `checkouts/<job_id>`; Claude Code keeps the session itself, in its own directory. Mirrors are in `runner/mirrors` and the shared build directories in `runner/target` ([Runner](runner.md#github-access)) |
 | Approved run asks | `runner/approvals/<account>` in the config directory, owner-only: the pinned device keys and the record of decisions carried out. The run key is in the credential store |
 | Session hosts | `session/<project hash>/` below the data directory: the queue, the socket and the log ([Sessions and the panel](session-and-panel.md#the-queue)) |
+| The p2p agent | `p2p/state.json` in the config directory, mode 0600: the bootstrap address, times and counts, never a report or a subject; `p2p/stop` while it is asked to stop. `iohr p2p unregister` removed the folder; postponed on 2026-11-13, so nothing writes it now ([P2P](p2p.md)) |
 | A project's own files | `.inorbit/` and `atlas/` in the project: memory, permissions, handoff notes ([Projects](projects.md), [Roles and memory](roles-and-memory.md)) |
 
 The SDKs read the same `config.toml` ([docs/config.md](../../docs/config.md), section 4):
@@ -41,6 +42,7 @@ reaches, and when:
 | A template's repository | `iohr project init --template gh:...` or `git:...`, a shallow clone ([Projects](projects.md)) |
 | Your package manager's registry | `iohr sdk add`, which runs your project's package manager (SR-31) |
 | Your AI provider | `iohr ask` and `iohr runner`, through your own `claude` or `codex` and your own sign-in ([Ask](ask.md#what-goes-to-your-provider)) |
+| The bootstrap node you name | `iohr p2p register` and its background agent only: the host given with `--bootstrap` or `IOHR_P2P_BOOTSTRAP`, `https://` (plain `http://` on loopback only). The one exception to "the API host only" ([ADR 0018](../../docs/adr/0018-p2p-transport.md)); postponed on 2026-11-13, so `iohr` reaches no such host now |
 
 ## Dependencies
 
@@ -76,6 +78,9 @@ not `iohr` itself.
 | flate2 (pure Rust backend) | Extensions: the gzip of an extension's layer; the tar inside is read by `iohr` itself, one regular file only |
 | semver | Extensions: the newest release among a registry's tags; the version checks of `iohr upgrade`, the runner and the toolchain check |
 | regex (no Unicode tables but the Perl classes; iohr and iohr-lab) | `iohr lab check`: the redaction rules are regular expressions published as data (`spec/lab/rules.json`); also template answers and the memory text checks |
+
+Test only: proptest (`iohr`'s tests), for the p2p record's property tests: any change to a
+signed report breaks its signature, and the parser never panics on any input.
 
 The OCI registry client is written here over reqwest ([ADR 0012](../../docs/adr/0012-extensions.md)):
 the published crates added a licence outside `deny.toml` and about 30 crates for four
