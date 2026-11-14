@@ -216,6 +216,7 @@ section 12](../docs/design.md#12-runtime-and-surface)).
 | `rustls` | on | HTTPS through rustls with the platform's trust roots; without it, plain-HTTP loopback only |
 | `tracing` | on | log records as `tracing` events, target `inorbithr` |
 | `otel` | off | OpenTelemetry spans and metrics through the `opentelemetry` API crate, from the global providers or `tracer_provider` / `meter_provider` |
+| `login` | off | `inorbithr::login`: the profile table of the `iohr` config file, PKCE, token claims, and the credential store (OS keychain, owner-only file, memory); pulls in the OS keychain crates, which the default build never compiles |
 | `encrypted-key` | off | a client key encrypted with `client_key_password` (PKCS#8) |
 
 ## Not here yet

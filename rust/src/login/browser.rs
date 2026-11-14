@@ -4,8 +4,10 @@
 use std::process::{Command, Stdio};
 
 /// Whether a browser on this machine can be opened for the person at the keyboard.
+///
 /// No over SSH, in CI, in a container, on Linux without a display, or with `IOHR_NO_BROWSER`.
-pub(crate) fn available() -> bool {
+#[must_use]
+pub fn available() -> bool {
     available_with(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()))
 }
 
@@ -26,8 +28,10 @@ fn available_with(set: impl Fn(&str) -> bool) -> bool {
     !container && (set("DISPLAY") || set("WAYLAND_DISPLAY"))
 }
 
-/// Opens `url` in the default browser, without a shell: the URL is one argument.
-pub(crate) fn open(url: &str) -> bool {
+/// Opens `url` in the default browser, without a shell: the URL is one argument. `false`
+/// when none could be started or `IOHR_NO_BROWSER` is set.
+#[must_use]
+pub fn open(url: &str) -> bool {
     if std::env::var_os("IOHR_NO_BROWSER").is_some_and(|v| !v.is_empty()) {
         return false;
     }

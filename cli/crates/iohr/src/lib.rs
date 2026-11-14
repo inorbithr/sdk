@@ -24,7 +24,6 @@ mod ask;
 mod ask_template;
 mod askback;
 mod attach;
-mod browser;
 mod card;
 mod commands;
 mod context;

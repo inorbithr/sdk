@@ -205,7 +205,7 @@ async fn open(g: &Global, out: Out) -> Result<(), Error> {
     if out.json {
         Out::print_json(&serde_json::json!({ "url": url }));
     }
-    if !crate::browser::open(&first) {
+    if !inorbithr::login::browser::open(&first) {
         if !out.json {
             Out::raw(format!("{first}\n").as_bytes());
         }
@@ -290,7 +290,7 @@ async fn serve_until_stopped(g: &Global, env: &Env, args: &UiServe, out: Out) ->
             "`iohr ui open` will not find this server ({why})."
         ));
     }
-    if args.open && !crate::browser::open(&format!("{url}?launch={}", server.launch())) {
+    if args.open && !inorbithr::login::browser::open(&format!("{url}?launch={}", server.launch())) {
         Out::note("Run `iohr ui open` to open it in a browser, signed in.");
     }
     server

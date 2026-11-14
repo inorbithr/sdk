@@ -1012,12 +1012,7 @@ fn effective(
     profile: Option<&ProfileName>,
     flags: &Flags,
 ) -> Result<Effective, Error> {
-    let own = profile.and_then(|p| {
-        config
-            .profile(p)
-            .and_then(|pr| pr.runner.as_ref())
-            .map(|r| (p.as_str(), r))
-    });
+    let own = profile.and_then(|p| config.profile_runner(p).map(|r| (p.as_str(), r)));
     settings::resolve(&config.runner, own, flags).map_err(Error::Failed)
 }
 

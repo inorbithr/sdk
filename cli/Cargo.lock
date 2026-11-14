@@ -1824,24 +1824,31 @@ dependencies = [
 name = "inorbithr"
 version = "0.4.0"
 dependencies = [
+ "apple-native-keyring-store",
  "base64 0.23.1",
  "futures-core",
  "futures-util",
  "getrandom 0.4.3",
+ "keyring-core",
  "reqwest",
  "rustls",
  "rustls-platform-verifier",
  "rustls-webpki",
+ "security-framework",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "time",
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
  "toml",
+ "toml_edit",
  "tracing",
  "url",
+ "windows-native-keyring-store",
+ "zbus-secret-service-keyring-store",
  "zeroize",
 ]
 
@@ -1920,13 +1927,9 @@ dependencies = [
 name = "iohr-auth"
 version = "0.1.0"
 dependencies = [
- "apple-native-keyring-store",
  "base64 0.23.1",
- "etcetera",
- "getrandom 0.4.3",
- "keyring-core",
+ "inorbithr",
  "reqwest",
- "security-framework",
  "serde",
  "serde_json",
  "sha2",
@@ -1937,9 +1940,7 @@ dependencies = [
  "toml",
  "toml_edit",
  "url",
- "windows-native-keyring-store",
  "wiremock",
- "zbus-secret-service-keyring-store",
  "zeroize",
 ]
 

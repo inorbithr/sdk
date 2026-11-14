@@ -24,6 +24,19 @@ tracing = ["dep:tracing"]
 otel = ["dep:opentelemetry"]
 # A client key encrypted with a password (`client_key_password`, PKCS#8 PBES2).
 encrypted-key = ["rustls", "dep:pkcs8"]
+# Person sign-in (RFC 0231, docs/config.md section 5.6): the profile table `iohr login`
+# writes, the credential store (the operating system's keychain or owner-only files), PKCE
+# and the access-token claims, as `inorbithr::login`. Off by default: a program that only
+# uses keys compiles none of the store code (tests/login_features.rs proves it).
+login = [
+  "dep:keyring-core",
+  "dep:sha2",
+  "dep:toml_edit",
+  "dep:apple-native-keyring-store",
+  "dep:security-framework",
+  "dep:windows-native-keyring-store",
+  "dep:zbus-secret-service-keyring-store",
+]
 
 [dependencies]
 # HTTP; TLS is chosen by the features above, so no TLS backend is a hard dependency.
@@ -67,6 +80,24 @@ tracing = { version = "0.1", default-features = false, features = ["std"], optio
 opentelemetry = { version = "0.33", default-features = false, features = ["trace", "metrics"], optional = true }
 # An encrypted client key (feature `encrypted-key`).
 pkcs8 = { version = "0.11", features = ["encryption", "pem", "std"], optional = true }
+
+# Person sign-in (feature `login`): the credential store and the config writer. The
+# operating system's store crates are per platform, as the command line has always had them.
+keyring-core = { version = "1", optional = true }
+sha2 = { version = "0.11", optional = true }
+toml_edit = { version = "0.25", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"], optional = true }
+# The version apple-native-keyring-store already uses: `QuietStore` switches the Keychain's
+# dialogs off through it.
+security-framework = { version = "3.7", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = { version = "1", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "test-util"] }

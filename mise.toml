@@ -358,6 +358,11 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo nextest run --locked --all-features
 cargo test --locked --doc --all-features
 cargo deny check
+# The credential store lives in the Rust SDK's login feature (RFC 0231). Where a real store
+# must be tested (IOHR_TEST_REQUIRE_STORE: macOS and Windows CI, SR-24), run it there.
+if [ -n "${IOHR_TEST_REQUIRE_STORE:-}" ]; then
+  (cd ../rust && cargo nextest run --locked --features login -E 'test(os_credential_store)')
+fi
 """
 
 [tasks."cli:themes"]
@@ -385,8 +390,8 @@ run = "cargo deny check advisories"
 
 [tasks."cli:keyring"]
 shell = "bash -e -o pipefail -c"
-description = "Command line, Linux: the credential-store test against a real Secret Service in a private D-Bus session"
-dir = "cli"
+description = "Command line, Linux: the credential-store test (Rust SDK, login feature) against a real Secret Service in a private D-Bus session"
+dir = "rust"
 run = """
 command -v dbus-run-session >/dev/null && command -v gnome-keyring-daemon >/dev/null || {
   echo "cli:keyring: needs dbus-run-session and gnome-keyring-daemon" >&2; exit 1; }
@@ -395,7 +400,7 @@ keyrings=$(mktemp -d)
 trap 'rm -rf "$keyrings"' EXIT
 dbus-run-session -- bash -e -o pipefail -c "
   printf iohr-test | XDG_DATA_HOME='$keyrings' gnome-keyring-daemon --unlock --components=secrets >/dev/null
-  IOHR_TEST_REQUIRE_STORE=1 cargo nextest run --locked -p iohr-auth -E 'test(os_credential_store)'
+  IOHR_TEST_REQUIRE_STORE=1 cargo nextest run --locked --features login -E 'test(os_credential_store)'
 "
 """
 

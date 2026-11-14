@@ -1,6 +1,4 @@
-use crate::claims::ClaimsError;
-use crate::config::ConfigError;
-use crate::store::StoreError;
+use inorbithr::login::{ClaimsError, ConfigError, RandomError, StoreError};
 
 /// Why a credential could not be produced or kept.
 #[derive(Debug, thiserror::Error)]
@@ -71,4 +69,10 @@ pub enum AuthError {
     /// The system could not produce random bytes.
     #[error("the system has no randomness available: {0}")]
     Random(String),
+}
+
+impl From<RandomError> for AuthError {
+    fn from(e: RandomError) -> Self {
+        Self::Random(e.to_string())
+    }
 }

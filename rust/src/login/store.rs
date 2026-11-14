@@ -8,8 +8,8 @@ use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use keyring_core::{CredentialStore, Entry};
 
-use crate::config::{ProfileName, write_private};
-use crate::secret::Redacted;
+use super::config::{ProfileName, write_private};
+use crate::secret::Secret;
 
 /// The service name every `iohr` entry carries in the OS credential store.
 const SERVICE: &str = "hr.inorbit.iohr";
@@ -101,14 +101,14 @@ pub trait Store: Send + Sync {
     /// # Errors
     ///
     /// [`StoreError`] when the store cannot be read.
-    fn get(&self, key: &EntryKey) -> Result<Option<Redacted<String>>, StoreError>;
+    fn get(&self, key: &EntryKey) -> Result<Option<Secret<String>>, StoreError>;
 
     /// Keeps `secret` at `key`, replacing what was there.
     ///
     /// # Errors
     ///
     /// [`StoreError`] when the store cannot be written.
-    fn set(&self, key: &EntryKey, secret: &Redacted<String>) -> Result<(), StoreError>;
+    fn set(&self, key: &EntryKey, secret: &Secret<String>) -> Result<(), StoreError>;
 
     /// Removes the secret at `key`; `true` when there was one.
     ///
@@ -171,10 +171,10 @@ impl KeyringStore {
         &self,
         service: &str,
         account: &str,
-    ) -> Result<Option<Redacted<String>>, StoreError> {
+    ) -> Result<Option<Secret<String>>, StoreError> {
         let entry = self.inner.build(service, account, None).map_err(failed)?;
         match entry.get_password() {
-            Ok(s) => Ok(Some(Redacted::new(s))),
+            Ok(s) => Ok(Some(Secret::new(s))),
             Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(e) => Err(failed(e)),
         }
@@ -222,15 +222,15 @@ fn would_ask(_: &(dyn std::error::Error + 'static)) -> bool {
 }
 
 impl Store for KeyringStore {
-    fn get(&self, key: &EntryKey) -> Result<Option<Redacted<String>>, StoreError> {
+    fn get(&self, key: &EntryKey) -> Result<Option<Secret<String>>, StoreError> {
         match self.entry(key)?.get_password() {
-            Ok(s) => Ok(Some(Redacted::new(s))),
+            Ok(s) => Ok(Some(Secret::new(s))),
             Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(e) => Err(failed(e)),
         }
     }
 
-    fn set(&self, key: &EntryKey, secret: &Redacted<String>) -> Result<(), StoreError> {
+    fn set(&self, key: &EntryKey, secret: &Secret<String>) -> Result<(), StoreError> {
         self.entry(key)?
             .set_password(secret.expose())
             .map_err(failed)
@@ -266,10 +266,10 @@ impl FileStore {
 }
 
 impl Store for FileStore {
-    fn get(&self, key: &EntryKey) -> Result<Option<Redacted<String>>, StoreError> {
+    fn get(&self, key: &EntryKey) -> Result<Option<Secret<String>>, StoreError> {
         let path = self.dir.join(Self::file(key));
         match fs::read_to_string(&path) {
-            Ok(s) => Ok(Some(Redacted::new(s))),
+            Ok(s) => Ok(Some(Secret::new(s))),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(source) => Err(StoreError::Io {
                 action: "read",
@@ -279,7 +279,7 @@ impl Store for FileStore {
         }
     }
 
-    fn set(&self, key: &EntryKey, secret: &Redacted<String>) -> Result<(), StoreError> {
+    fn set(&self, key: &EntryKey, secret: &Secret<String>) -> Result<(), StoreError> {
         let name = Self::file(key);
         write_private(&self.dir, &name, secret.expose().as_bytes()).map_err(|source| {
             StoreError::Io {
@@ -307,11 +307,11 @@ impl Store for FileStore {
 /// Secrets in process memory only, for tests.
 #[derive(Debug, Default)]
 pub struct MemoryStore {
-    entries: Mutex<HashMap<EntryKey, Redacted<String>>>,
+    entries: Mutex<HashMap<EntryKey, Secret<String>>>,
 }
 
 impl Store for MemoryStore {
-    fn get(&self, key: &EntryKey) -> Result<Option<Redacted<String>>, StoreError> {
+    fn get(&self, key: &EntryKey) -> Result<Option<Secret<String>>, StoreError> {
         Ok(self
             .entries
             .lock()
@@ -320,7 +320,7 @@ impl Store for MemoryStore {
             .cloned())
     }
 
-    fn set(&self, key: &EntryKey, secret: &Redacted<String>) -> Result<(), StoreError> {
+    fn set(&self, key: &EntryKey, secret: &Secret<String>) -> Result<(), StoreError> {
         self.entries
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -511,12 +511,12 @@ impl QuietStore {
 }
 
 impl Store for QuietStore {
-    fn get(&self, key: &EntryKey) -> Result<Option<Redacted<String>>, StoreError> {
+    fn get(&self, key: &EntryKey) -> Result<Option<Secret<String>>, StoreError> {
         let key = key.clone();
         self.within(self.budget, move |s| s.get(&key))
     }
 
-    fn set(&self, key: &EntryKey, secret: &Redacted<String>) -> Result<(), StoreError> {
+    fn set(&self, key: &EntryKey, secret: &Secret<String>) -> Result<(), StoreError> {
         let (key, secret) = (key.clone(), secret.clone());
         self.within(self.write_budget, move |s| s.set(&key, &secret))
     }
@@ -531,7 +531,7 @@ impl Store for QuietStore {
 const SLOW_STORE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Runs a credential-store call off the async threads (every store call blocks). A call
-/// still running after [`SLOW_STORE`] prints one line on stderr: on a Mac the Keychain is
+/// still running after five seconds prints one line on stderr: on a Mac the Keychain is
 /// most likely asking whether this `iohr` build may read its item, and a runner under
 /// launchd otherwise waits there with nothing in its log (Study 0094.15).
 ///
@@ -574,7 +574,7 @@ mod tests {
         EntryKey, FileStore, KeyringStore, MemoryStore, QuietStore, Store, StoreError,
         off_thread_noting,
     };
-    use crate::Redacted;
+    use crate::Secret;
 
     fn key(profile: &str, account: &str) -> EntryKey {
         EntryKey::new(profile.parse().unwrap(), account).unwrap()
@@ -584,8 +584,8 @@ mod tests {
         let a = key("work", "acc_1");
         let b = key("work", "acc_2");
         assert!(store.get(&a).unwrap().is_none());
-        store.set(&a, &Redacted::new("one".into())).unwrap();
-        store.set(&b, &Redacted::new("two".into())).unwrap();
+        store.set(&a, &Secret::new("one".into())).unwrap();
+        store.set(&b, &Secret::new("two".into())).unwrap();
         assert_eq!(store.get(&a).unwrap().unwrap().expose(), "one");
         assert_eq!(
             store.get(&b).unwrap().unwrap().expose(),
@@ -623,7 +623,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = FileStore::new(dir.path().join("secrets"));
         store
-            .set(&key("p", "acc"), &Redacted::new("s".into()))
+            .set(&key("p", "acc"), &Secret::new("s".into()))
             .unwrap();
         let mode = std::fs::metadata(dir.path().join("secrets/p.acc"))
             .unwrap()
@@ -634,11 +634,11 @@ mod tests {
     }
 
     /// Runs against the real OS store, and only where `IOHR_TEST_REQUIRE_STORE` is set: CI
-    /// on macOS and Windows, and `mise run cli:keyring` on Linux. There a missing or
-    /// locked store is a failure. Without the variable the test says so and returns,
-    /// because on a developer's Mac the login Keychain can wait on an access prompt
-    /// nobody sees and hold the Keychain lock, which stalls every other `iohr` that
-    /// reads its credentials, sign-in included.
+    /// on macOS and Windows (`mise run cli:check`), and `mise run cli:keyring` on Linux.
+    /// There a missing or locked store is a failure. Without the variable the test says
+    /// so and returns, because on a developer's Mac the login Keychain can wait on an
+    /// access prompt nobody sees and hold the Keychain lock, which stalls every other
+    /// `iohr` that reads its credentials, sign-in included.
     #[test]
     fn os_credential_store() {
         let required = std::env::var("IOHR_TEST_REQUIRE_STORE").is_ok_and(|v| !v.is_empty());
@@ -653,7 +653,7 @@ mod tests {
             KeyringStore::open().unwrap_or_else(|e| panic!("credential store required: {e}"));
         let k = key("iohr-test", &format!("t{}", std::process::id()));
         let _ = store.delete(&k);
-        match store.set(&k, &Redacted::new("probe".into())) {
+        match store.set(&k, &Secret::new("probe".into())) {
             Err(StoreError::Unavailable(why)) => {
                 panic!("credential store required: store locked or absent: {why}")
             }
@@ -697,11 +697,11 @@ mod tests {
     }
 
     impl Store for Slow {
-        fn get(&self, _: &EntryKey) -> Result<Option<Redacted<String>>, StoreError> {
+        fn get(&self, _: &EntryKey) -> Result<Option<Secret<String>>, StoreError> {
             std::thread::sleep(self.delay);
-            Ok(Some(Redacted::new("late".into())))
+            Ok(Some(Secret::new("late".into())))
         }
-        fn set(&self, _: &EntryKey, _: &Redacted<String>) -> Result<(), StoreError> {
+        fn set(&self, _: &EntryKey, _: &Secret<String>) -> Result<(), StoreError> {
             std::thread::sleep(self.delay);
             Ok(())
         }
@@ -748,7 +748,7 @@ mod tests {
         let store = quiet(0, 1_000);
         let k = key("work", "acc_1");
         assert_eq!(store.get(&k).unwrap().unwrap().expose(), "late");
-        store.set(&k, &Redacted::new("x".into())).unwrap();
+        store.set(&k, &Secret::new("x".into())).unwrap();
         assert!(store.delete(&k).unwrap());
     }
 
@@ -760,12 +760,12 @@ mod tests {
     }
 
     impl Store for StuckRead {
-        fn get(&self, _: &EntryKey) -> Result<Option<Redacted<String>>, StoreError> {
+        fn get(&self, _: &EntryKey) -> Result<Option<Secret<String>>, StoreError> {
             // Dropping the sender lets the call go.
             let _ = self.release.lock().unwrap().recv();
             Ok(None)
         }
-        fn set(&self, _: &EntryKey, _: &Redacted<String>) -> Result<(), StoreError> {
+        fn set(&self, _: &EntryKey, _: &Secret<String>) -> Result<(), StoreError> {
             std::thread::sleep(self.write_delay);
             Ok(())
         }
@@ -793,7 +793,7 @@ mod tests {
         );
         let k = key("work", "acc_1");
         assert!(matches!(store.get(&k), Err(StoreError::WouldAsk)));
-        store.set(&k, &Redacted::new("x".into())).unwrap();
+        store.set(&k, &Secret::new("x".into())).unwrap();
         drop(release);
     }
 
@@ -814,11 +814,11 @@ mod tests {
     }
 
     impl Store for Held {
-        fn get(&self, _: &EntryKey) -> Result<Option<Redacted<String>>, StoreError> {
+        fn get(&self, _: &EntryKey) -> Result<Option<Secret<String>>, StoreError> {
             self.wait();
-            Ok(Some(Redacted::new("held".into())))
+            Ok(Some(Secret::new("held".into())))
         }
-        fn set(&self, _: &EntryKey, _: &Redacted<String>) -> Result<(), StoreError> {
+        fn set(&self, _: &EntryKey, _: &Secret<String>) -> Result<(), StoreError> {
             self.wait();
             Ok(())
         }
@@ -874,7 +874,7 @@ mod tests {
             let started = std::time::Instant::now();
             assert!(matches!(store.get(&k), Err(StoreError::WouldAsk)));
             assert!(matches!(
-                store.set(&k, &Redacted::new("x".into())),
+                store.set(&k, &Secret::new("x".into())),
                 Err(StoreError::WouldAsk)
             ));
             assert!(matches!(store.delete(&k), Err(StoreError::WouldAsk)));
@@ -913,7 +913,7 @@ mod tests {
         });
         let k = key("work", "acc_1");
         assert_eq!(store.get(&k).unwrap().unwrap().expose(), "held");
-        store.set(&k, &Redacted::new("x".into())).unwrap();
+        store.set(&k, &Secret::new("x".into())).unwrap();
         assert!(store.delete(&k).unwrap());
         assert_eq!(
             held.reached.load(std::sync::atomic::Ordering::SeqCst),

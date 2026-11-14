@@ -4,25 +4,41 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest as _, Sha256};
 
-use crate::error::AuthError;
-use crate::secret::Redacted;
+use crate::secret::Secret;
 
-/// 32 random bytes as base64url: 43 characters, the RFC's recommended verifier.
-pub(crate) fn random_token() -> Result<Redacted<String>, AuthError> {
+/// The system could not produce random bytes.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("the system has no randomness available: {0}")]
+pub struct RandomError(String);
+
+/// 32 random bytes as base64url: 43 characters, the RFC's recommended verifier, and the
+/// shape of the `state` value.
+///
+/// # Errors
+///
+/// [`RandomError`] when the system has no randomness.
+pub fn random_token() -> Result<Secret<String>, RandomError> {
     let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).map_err(|e| AuthError::Random(e.to_string()))?;
-    Ok(Redacted::new(URL_SAFE_NO_PAD.encode(bytes)))
+    getrandom::fill(&mut bytes).map_err(|e| RandomError(e.to_string()))?;
+    Ok(Secret::new(URL_SAFE_NO_PAD.encode(bytes)))
 }
 
 /// A PKCE verifier and its S256 challenge. `plain` is never offered.
 #[derive(Debug)]
-pub(crate) struct Pkce {
-    pub(crate) verifier: Redacted<String>,
-    pub(crate) challenge: String,
+pub struct Pkce {
+    /// The secret the token request proves possession with.
+    pub verifier: Secret<String>,
+    /// `BASE64URL(SHA256(verifier))`, sent with the authorization request.
+    pub challenge: String,
 }
 
 impl Pkce {
-    pub(crate) fn new() -> Result<Self, AuthError> {
+    /// A fresh verifier and its challenge.
+    ///
+    /// # Errors
+    ///
+    /// [`RandomError`] when the system has no randomness.
+    pub fn new() -> Result<Self, RandomError> {
         let verifier = random_token()?;
         let challenge = challenge(verifier.expose());
         Ok(Self {
@@ -33,13 +49,14 @@ impl Pkce {
 }
 
 /// `BASE64URL(SHA256(verifier))`.
-pub(crate) fn challenge(verifier: &str) -> String {
+#[must_use]
+pub fn challenge(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
 /// Compares two byte strings in time that depends only on their lengths.
 #[must_use]
-pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

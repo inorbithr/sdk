@@ -42,6 +42,8 @@ mod extsock;
 mod generated;
 mod hooks;
 mod int64;
+#[cfg(feature = "login")]
+pub mod login;
 pub mod middleware;
 #[cfg(feature = "otel")]
 mod otel;

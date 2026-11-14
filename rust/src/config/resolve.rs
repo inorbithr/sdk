@@ -34,7 +34,14 @@ pub const PIPELINE: [&str; 12] = [
 const MAX_FILE: u64 = 1024 * 1024;
 
 /// The keys of a profile table the command line owns (section 4.2).
-const CLI_KEYS: [&str; 5] = ["kind", "account", "storage", "issuer", "client_id"];
+const CLI_KEYS: [&str; 6] = [
+    "kind",
+    "account",
+    "account_pinned",
+    "storage",
+    "issuer",
+    "client_id",
+];
 
 const SOURCES: [&str; 4] = ["env", "workload", "file", "cli"];
 
@@ -1419,4 +1426,80 @@ pub(crate) fn program_found(program: &str, env: &BTreeMap<String, String>) -> bo
         exts.iter()
             .any(|ext| dir.join(format!("{program}{ext}")).is_file())
     })
+}
+
+#[cfg(test)]
+mod command_line_keys {
+    use std::collections::BTreeMap;
+
+    use serde_json::Map;
+
+    use super::{CLI_KEYS, Inputs, Os, resolve};
+
+    /// What `iohr login` writes for a person with a chosen account: every key of
+    /// `CLI_KEYS`, `account_pinned` included (RFC 0231; `docs/config.md` section 4.2).
+    fn profile_with(key_lines: &str) -> String {
+        format!("[profiles.work]\n{key_lines}\n")
+    }
+
+    /// The keys the SDK reports as unknown (and ignores) in the profile `work`, by name.
+    fn unknown_keys(file: &str) -> Vec<String> {
+        let env = BTreeMap::from([
+            ("INORBIT_TOKEN".to_owned(), "t".to_owned()),
+            ("IOHR_CONFIG_DIR".to_owned(), "/cfg".to_owned()),
+            ("INORBIT_PROFILE".to_owned(), "work".to_owned()),
+        ]);
+        let read = |p: &str| (p == "/cfg/config.toml").then(|| file.as_bytes().to_vec());
+        let found = |_: &str| false;
+        let inputs = Inputs {
+            env: &env,
+            os: Os::Linux,
+            home: Some("/home/a".to_owned()),
+            cwd: "/".to_owned(),
+            code: Map::new(),
+            profile_type: None,
+            cli_found: &found,
+            read: &read,
+        };
+        let resolved = resolve(&inputs).unwrap_or_else(|e| panic!("{:?}", e.problems));
+        let text = resolved.describe.to_string();
+        [
+            "kind",
+            "account",
+            "account_pinned",
+            "storage",
+            "issuer",
+            "client_id",
+            "not_a_setting",
+        ]
+        .into_iter()
+        .filter(|k| text.contains(&format!("\"key\":\"{k}\"")) && text.contains("unknown key"))
+        .map(str::to_owned)
+        .collect()
+    }
+
+    #[test]
+    fn the_six_keys_iohr_writes_are_the_six_the_sdk_leaves_alone() {
+        assert_eq!(
+            CLI_KEYS,
+            [
+                "kind",
+                "account",
+                "account_pinned",
+                "storage",
+                "issuer",
+                "client_id"
+            ]
+        );
+        let file = profile_with(
+            "kind = \"person\"\naccount = \"acc_8d2e\"\naccount_pinned = true\nstorage = \"keyring\"\nissuer = \"https://auth.inorbit.hr\"\nclient_id = \"iohr-cli\"",
+        );
+        assert_eq!(unknown_keys(&file), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_key_the_sdk_does_not_know_is_still_reported() {
+        let file = profile_with("kind = \"person\"\nnot_a_setting = 1");
+        assert_eq!(unknown_keys(&file), ["not_a_setting"]);
+    }
 }
