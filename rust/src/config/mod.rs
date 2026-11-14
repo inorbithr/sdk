@@ -23,7 +23,7 @@ pub(crate) use no_proxy::ProxyRules;
 #[cfg(feature = "login")]
 pub(crate) use resolve::config_path;
 pub(crate) use resolve::{
-    Inputs, ProblemsText, Resolved, is_loopback, program_found, resolve, show_duration,
+    Inputs, LoginTarget, ProblemsText, Resolved, is_loopback, program_found, resolve, show_duration,
 };
 pub use resolve::{Os, PIPELINE};
 
@@ -53,6 +53,8 @@ pub struct LoadOptions {
     os: Option<Os>,
     home: Option<Option<String>>,
     cwd: Option<String>,
+    #[cfg(feature = "login")]
+    login_store: Option<std::sync::Arc<dyn crate::login::Store>>,
 }
 
 /// Names the variables, never their values: the environment may hold secrets.
@@ -66,7 +68,7 @@ impl fmt::Debug for LoadOptions {
             .field("os", &self.os)
             .field("home", &self.home)
             .field("cwd", &self.cwd)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -106,6 +108,21 @@ impl LoadOptions {
     pub fn cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
         self.cwd = Some(cwd.into().to_string_lossy().into_owned());
         self
+    }
+
+    /// The store the `login` source reads a person's session from, in place of the one
+    /// the profile's `storage` names (`docs/config.md` section 5.6). For a program that
+    /// keeps sessions of its own, and for tests.
+    #[cfg(feature = "login")]
+    #[must_use]
+    pub fn login_store(mut self, store: std::sync::Arc<dyn crate::login::Store>) -> Self {
+        self.login_store = Some(store);
+        self
+    }
+
+    #[cfg(feature = "login")]
+    pub(crate) fn login_store_ref(&self) -> Option<std::sync::Arc<dyn crate::login::Store>> {
+        self.login_store.clone()
     }
 
     pub(crate) fn env_map(&self) -> BTreeMap<String, String> {
@@ -218,6 +235,18 @@ pub(crate) fn run(
     let path_env = env.clone();
     let cli_found = move |program: &str| program_found(program, &path_env);
     let read = |p: &str| std::fs::read(p).ok();
+    // Whether the `login` source's store holds a session for the target. Without the
+    // `login` feature there is no store to read: the source is skipped with the reason
+    // said, never a panic.
+    #[cfg(feature = "login")]
+    let login_entry = {
+        let store = options.login_store_ref();
+        move |target: &LoginTarget| crate::login::probe(target, store.clone())
+    };
+    #[cfg(not(feature = "login"))]
+    let login_entry = |_: &LoginTarget| -> Result<(), String> {
+        Err("needs the `login` cargo feature (inorbithr = { features = [\"login\"] })".into())
+    };
     let inputs = Inputs {
         env: &env,
         os: options.os_value(),
@@ -227,6 +256,7 @@ pub(crate) fn run(
         profile_type: profile_type.map(str::to_owned),
         cli_found: &cli_found,
         read: &read,
+        login_entry: &login_entry,
     };
     resolve(&inputs).map_err(Into::into)
 }
