@@ -588,6 +588,8 @@ async fn off_thread_noting<T: Send + 'static>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::await_holding_lock)] // `serial_ui` is held across a quiet store's awaits on purpose
+
     use super::{
         EntryKey, FileStore, KeyringStore, MemoryStore, QuietStore, Store, StoreError,
         off_thread_noting,
@@ -596,6 +598,19 @@ mod tests {
 
     fn key(profile: &str, account: &str) -> EntryKey {
         EntryKey::new(profile.parse().unwrap(), account).unwrap()
+    }
+
+    /// The keychain's "no dialogs" switch is one flag for the whole process: every
+    /// [`QuietStore`] turns it off while it lives, and the keychain test below reads it
+    /// both ways. Tests that build a quiet store, or read the flag, take this lock so they
+    /// never overlap (under `cargo test`, which runs them as threads of one process; under
+    /// nextest each test is its own process and the lock is free).
+    static UI_FLAG: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn serial_ui() -> std::sync::MutexGuard<'static, ()> {
+        UI_FLAG
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn round_trip(store: &dyn Store) {
@@ -683,6 +698,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_slow_store_call_says_why_it_waits_and_still_answers() {
+        let _serial = serial_ui();
         let noted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let n = std::sync::Arc::clone(&noted);
         let got = off_thread_noting(
@@ -700,6 +716,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_quick_store_call_says_nothing() {
+        let _serial = serial_ui();
         let got = off_thread_noting(
             || Err::<(), _>(StoreError::Invalid("no")),
             std::time::Duration::from_secs(5),
@@ -744,6 +761,7 @@ mod tests {
     /// budget, without the "still waiting" line, and the person sees nothing.
     #[tokio::test]
     async fn a_quiet_store_call_fails_fast_and_never_says_it_waits() {
+        let _serial = serial_ui();
         let store = quiet(2_000, 30);
         let k = key("work", "acc_1");
         let started = std::time::Instant::now();
@@ -763,6 +781,7 @@ mod tests {
 
     #[test]
     fn a_quiet_store_passes_quick_calls_through() {
+        let _serial = serial_ui();
         let store = quiet(0, 1_000);
         let k = key("work", "acc_1");
         assert_eq!(store.get(&k).unwrap().unwrap().expose(), "late");
@@ -796,6 +815,7 @@ mod tests {
     /// and is not given up on at the read's budget.
     #[test]
     fn a_quiet_store_gives_a_write_more_time_than_a_read() {
+        let _serial = serial_ui();
         // The read cannot answer before its 20 ms budget, whatever the host's load (it
         // waits on a release the test holds), so it must fail with WouldAsk. The write
         // takes 100 ms: past the read budget, well inside the 5 s write budget.
@@ -886,6 +906,7 @@ mod tests {
     /// get, set or delete fails at once without starting a thread or reaching the store.
     #[test]
     fn a_quiet_store_with_calls_stuck_refuses_the_next_without_a_thread() {
+        let _serial = serial_ui();
         let (store, held, _tx) = stuck_quiet();
         let k = key("work", "acc_1");
         for _ in 0..100 {
@@ -920,6 +941,7 @@ mod tests {
     /// Once the stuck calls return, their places are free and calls work again.
     #[test]
     fn a_quiet_store_works_again_once_the_stuck_calls_return() {
+        let _serial = serial_ui();
         let (store, held, tx) = stuck_quiet();
         drop(tx);
         until("the stuck calls give their places back", || {
@@ -943,6 +965,7 @@ mod tests {
     /// the bound holds only because they share one gate.
     #[test]
     fn quiet_stores_on_the_os_store_share_one_gate() {
+        let _serial = serial_ui();
         let a = QuietStore::new(std::sync::Arc::new(MemoryStore::default()));
         let b = QuietStore::new(std::sync::Arc::new(MemoryStore::default()));
         assert!(std::sync::Arc::ptr_eq(&a.gate, &b.gate));
@@ -961,6 +984,7 @@ mod tests {
     #[test]
     fn the_keychain_refusing_to_prompt_is_would_ask() {
         use security_framework::base::Error;
+        let _serial = serial_ui();
         let platform = |code: i32| {
             super::failed(keyring_core::Error::PlatformFailure(Box::new(
                 Error::from_code(code),
