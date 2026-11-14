@@ -3,19 +3,18 @@
 //! Each grant is a typestate. A browser sign-in is an `Authorization<Browser>` until
 //! the browser comes back, a device sign-in an `Authorization<Device>` until the code
 //! is approved; both end as `Authorization<Granted>`, and only that state can become a
-//! stored [`Session`](crate::Session). A half-finished sign-in cannot be saved.
+//! stored [`Session`](super::Session). A half-finished sign-in cannot be saved.
 
 use std::time::Duration;
 
 use tokio::time::Instant;
 use url::Url;
 
-use crate::Redacted;
-use crate::error::AuthError;
-use crate::loopback::{Callback, Listener, SIGN_IN_WINDOW};
-use crate::oidc::{Provider, TokenError, Tokens};
-use crate::page::Page;
-use inorbithr::login::{AUDIENCE, Pkce, constant_time_eq, random_token};
+use super::loopback::{Callback, Listener, SIGN_IN_WINDOW};
+use super::page::Page;
+use super::provider::{Provider, TokenError, Tokens, read_answer};
+use super::{AUDIENCE, LoginError, Pkce, constant_time_eq, random_token};
+use crate::secret::Secret;
 
 /// The longest a device sign-in waits, whatever the provider allows.
 const DEVICE_WINDOW: Duration = Duration::from_mins(15);
@@ -23,6 +22,34 @@ const DEVICE_WINDOW: Duration = Duration::from_mins(15);
 const SLOW_DOWN_STEP: Duration = Duration::from_secs(5);
 /// Never poll faster than this, whatever the provider says.
 const MIN_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Where a sign-in starts: `Login::browser(&provider)` or `Login::device(&provider)`,
+/// then `.finish().await`, then [`Session::save`](super::Session::save).
+#[derive(Debug, Clone, Copy)]
+pub struct Login;
+
+impl Login {
+    /// A sign-in in a browser on this machine: binds the loopback listener and builds
+    /// the URL to open (see [`open_browser`](super::open_browser)).
+    ///
+    /// # Errors
+    ///
+    /// See [`Authorization::<Browser>::start`].
+    pub async fn browser(provider: &Provider) -> Result<Authorization<Browser>, LoginError> {
+        Authorization::<Browser>::start(provider.clone()).await
+    }
+
+    /// A sign-in with a device code, for a machine with no browser: show
+    /// [`user_code`](Authorization::user_code) and
+    /// [`verification_uri`](Authorization::verification_uri), never the device code.
+    ///
+    /// # Errors
+    ///
+    /// See [`Authorization::<Device>::start`].
+    pub async fn device(provider: &Provider) -> Result<Authorization<Device>, LoginError> {
+        Authorization::<Device>::start(provider.clone()).await
+    }
+}
 
 /// A sign-in in one of its states.
 #[derive(Debug)]
@@ -37,14 +64,14 @@ pub struct Browser {
     url: Url,
     listener: Listener,
     pkce: Pkce,
-    state: Redacted<String>,
+    state: Secret<String>,
     profile: Option<String>,
 }
 
 /// Waiting for a person to approve a code on another device.
 #[derive(Debug)]
 pub struct Device {
-    code: Redacted<String>,
+    code: Secret<String>,
     user_code: String,
     verification_uri: Url,
     verification_uri_complete: Option<Url>,
@@ -79,12 +106,12 @@ impl Authorization<Browser> {
     ///
     /// # Errors
     ///
-    /// [`AuthError::Callback`] when no loopback port can be bound, and
-    /// [`AuthError::Random`] when the system has no randomness.
-    pub async fn start(provider: Provider) -> Result<Self, AuthError> {
+    /// [`LoginError::Callback`] when no loopback port can be bound, and
+    /// [`LoginError::Random`] when the system has no randomness.
+    pub async fn start(provider: Provider) -> Result<Self, LoginError> {
         let listener = Listener::bind()
             .await
-            .map_err(|e| AuthError::Callback(format!("cannot listen on this machine: {e}")))?;
+            .map_err(|e| LoginError::Callback(format!("cannot listen on this machine: {e}")))?;
         let pkce = Pkce::new()?;
         let state = random_token()?;
         let mut url = provider.authorization_endpoint.clone();
@@ -127,10 +154,10 @@ impl Authorization<Browser> {
     ///
     /// # Errors
     ///
-    /// [`AuthError::TimedOut`], [`AuthError::Denied`], [`AuthError::StateMismatch`],
-    /// [`AuthError::IssuerMismatch`], [`AuthError::Callback`], or the token exchange's
+    /// [`LoginError::TimedOut`], [`LoginError::Denied`], [`LoginError::StateMismatch`],
+    /// [`LoginError::IssuerMismatch`], [`LoginError::Callback`], or the token exchange's
     /// error.
-    pub async fn finish(self) -> Result<Authorization<Granted>, AuthError> {
+    pub async fn finish(self) -> Result<Authorization<Granted>, LoginError> {
         self.finish_within(SIGN_IN_WINDOW).await
     }
 
@@ -139,7 +166,7 @@ impl Authorization<Browser> {
     pub async fn finish_within(
         self,
         window: Duration,
-    ) -> Result<Authorization<Granted>, AuthError> {
+    ) -> Result<Authorization<Granted>, LoginError> {
         let Self {
             provider,
             state:
@@ -154,9 +181,9 @@ impl Authorization<Browser> {
         let redirect_uri = listener.redirect_uri().to_owned();
         let (cb, reply) = listener.accept_callback(window).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::TimedOut {
-                AuthError::TimedOut
+                LoginError::TimedOut
             } else {
-                AuthError::Callback(e.to_string())
+                LoginError::Callback(e.to_string())
             }
         })?;
         // The browser waits on its connection until the outcome is known, so its page
@@ -204,15 +231,15 @@ impl Authorization<Browser> {
 
 /// The page for a sign-in that failed: a fixed sentence per kind of failure, never
 /// text from the request or the sign-in service.
-fn failure_page(e: &AuthError) -> Page<'static> {
+fn failure_page(e: &LoginError) -> Page<'static> {
     match e {
-        AuthError::Denied => Page::Denied,
-        AuthError::StateMismatch => Page::StateMismatch,
-        AuthError::IssuerMismatch => {
+        LoginError::Denied => Page::Denied,
+        LoginError::StateMismatch => Page::StateMismatch,
+        LoginError::IssuerMismatch => {
             Page::Failed("The answer came from another sign-in service than the one configured.")
         }
-        AuthError::OAuth { .. } => Page::Failed("The sign-in service refused the request."),
-        AuthError::Callback(_) => Page::Failed("The browser came back without a sign-in code."),
+        LoginError::OAuth { .. } => Page::Failed("The sign-in service refused the request."),
+        LoginError::Callback(_) => Page::Failed("The browser came back without a sign-in code."),
         _ => Page::Failed("The sign-in code could not be exchanged for a session."),
     }
 }
@@ -223,25 +250,25 @@ fn verdict(
     cb: &Callback,
     expected_state: &str,
     issuer: &str,
-) -> Result<Redacted<String>, AuthError> {
+) -> Result<Secret<String>, LoginError> {
     let state_ok = cb
         .state
         .as_deref()
         .is_some_and(|s| constant_time_eq(s.as_bytes(), expected_state.as_bytes()));
     if !state_ok {
-        return Err(AuthError::StateMismatch);
+        return Err(LoginError::StateMismatch);
     }
     if cb.iss.as_deref().is_some_and(|iss| iss != issuer) {
-        return Err(AuthError::IssuerMismatch);
+        return Err(LoginError::IssuerMismatch);
     }
     match (&cb.error, &cb.code) {
-        (Some(e), _) if e == "access_denied" => Err(AuthError::Denied),
-        (Some(e), _) => Err(AuthError::OAuth {
+        (Some(e), _) if e == "access_denied" => Err(LoginError::Denied),
+        (Some(e), _) => Err(LoginError::OAuth {
             error: e.clone(),
             description: cb.error_description.clone().unwrap_or_default(),
         }),
-        (None, Some(code)) if !code.is_empty() => Ok(Redacted::new(code.clone())),
-        (None, _) => Err(AuthError::Callback(
+        (None, Some(code)) if !code.is_empty() => Ok(Secret::new(code.clone())),
+        (None, _) => Err(LoginError::Callback(
             "the browser came back without a code".into(),
         )),
     }
@@ -252,12 +279,12 @@ impl Authorization<Device> {
     ///
     /// # Errors
     ///
-    /// [`AuthError::NoDeviceGrant`] when the provider has no device endpoint, and
-    /// [`AuthError::Http`] when the request fails or the answer is unusable.
-    pub async fn start(provider: Provider) -> Result<Self, AuthError> {
+    /// [`LoginError::NoDeviceGrant`] when the provider has no device endpoint, and
+    /// [`LoginError::Http`] when the request fails or the answer is unusable.
+    pub async fn start(provider: Provider) -> Result<Self, LoginError> {
         #[derive(serde::Deserialize)]
         struct Wire {
-            device_code: Redacted<String>,
+            device_code: Secret<String>,
             user_code: String,
             verification_uri: String,
             #[serde(default)]
@@ -269,7 +296,7 @@ impl Authorization<Device> {
         let endpoint = provider
             .device_authorization_endpoint
             .clone()
-            .ok_or(AuthError::NoDeviceGrant)?;
+            .ok_or(LoginError::NoDeviceGrant)?;
         let resp = provider
             .http
             .post(endpoint)
@@ -280,21 +307,19 @@ impl Authorization<Device> {
             ])
             .send()
             .await
-            .map_err(|e| AuthError::Http(crate::oidc::reason(&e)))?;
+            .map_err(|e| LoginError::Http(super::provider::reason(&e)))?;
         if !resp.status().is_success() {
-            return Err(AuthError::Http(format!(
+            return Err(LoginError::Http(format!(
                 "the device code request answered HTTP {}",
                 resp.status().as_u16()
             )));
         }
-        let w: Wire = resp
-            .json()
-            .await
-            .map_err(|_| AuthError::Http("the device code answer cannot be read".into()))?;
+        let w: Wire = serde_json::from_slice(&read_answer(resp).await?)
+            .map_err(|_| LoginError::Http("the device code answer cannot be read".into()))?;
         // Every link shown to a person is on the sign-in service itself.
         let verification_uri = provider
             .same_origin(&w.verification_uri)
-            .ok_or_else(|| AuthError::Http("the device code points to another site".into()))?;
+            .ok_or_else(|| LoginError::Http("the device code points to another site".into()))?;
         let verification_uri_complete = w
             .verification_uri_complete
             .as_deref()
@@ -337,16 +362,16 @@ impl Authorization<Device> {
     ///
     /// # Errors
     ///
-    /// [`AuthError::Denied`] when the person refuses, [`AuthError::TimedOut`] when the
+    /// [`LoginError::Denied`] when the person refuses, [`LoginError::TimedOut`] when the
     /// code expires, or the token endpoint's error.
-    pub async fn finish(self) -> Result<Authorization<Granted>, AuthError> {
+    pub async fn finish(self) -> Result<Authorization<Granted>, LoginError> {
         let Self {
             provider,
             state: mut d,
         } = self;
         loop {
             if Instant::now() + d.interval > d.deadline {
-                return Err(AuthError::TimedOut);
+                return Err(LoginError::TimedOut);
             }
             tokio::time::sleep(d.interval).await;
             let answer = provider
@@ -369,7 +394,7 @@ impl Authorization<Device> {
                     d.interval += SLOW_DOWN_STEP;
                 }
                 Err(TokenError::OAuth { error, .. }) if error == "expired_token" => {
-                    return Err(AuthError::TimedOut);
+                    return Err(LoginError::TimedOut);
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -397,9 +422,9 @@ impl Authorization<Granted> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::LoginError;
+    use super::super::loopback::Callback;
     use super::verdict;
-    use crate::AuthError;
-    use crate::loopback::Callback;
 
     fn cb(state: &str, code: Option<&str>, error: Option<&str>, iss: Option<&str>) -> Callback {
         Callback {
@@ -428,27 +453,27 @@ mod tests {
         );
         assert!(matches!(
             verdict(&cb("x", Some("c"), None, None), "s", iss),
-            Err(AuthError::StateMismatch)
+            Err(LoginError::StateMismatch)
         ));
         assert!(matches!(
             verdict(&Callback::default(), "s", iss),
-            Err(AuthError::StateMismatch)
+            Err(LoginError::StateMismatch)
         ));
         assert!(matches!(
             verdict(&cb("s", Some("c"), None, Some("https://evil")), "s", iss),
-            Err(AuthError::IssuerMismatch)
+            Err(LoginError::IssuerMismatch)
         ));
         assert!(matches!(
             verdict(&cb("s", None, Some("access_denied"), None), "s", iss),
-            Err(AuthError::Denied)
+            Err(LoginError::Denied)
         ));
         assert!(matches!(
             verdict(&cb("s", None, Some("server_error"), None), "s", iss),
-            Err(AuthError::OAuth { .. })
+            Err(LoginError::OAuth { .. })
         ));
         assert!(matches!(
             verdict(&cb("s", None, None, None), "s", iss),
-            Err(AuthError::Callback(_))
+            Err(LoginError::Callback(_))
         ));
     }
 }

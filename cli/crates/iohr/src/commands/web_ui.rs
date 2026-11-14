@@ -1,6 +1,6 @@
 //! `iohr ui`: serve the InOrbit web UI (`sdk/ui`) on a loopback address (RFC 0217).
 //!
-//! The listener is the sign-in redirect's (`iohr_auth::loopback`): 127.0.0.1 first, else
+//! The listener is the sign-in redirect's (`inorbithr::login::bind_loopback`): 127.0.0.1 first, else
 //! `[::1]`, a read window and a head cap per connection. It adds what a file server
 //! needs and no HTTP stack: GET and HEAD only, a `Host` that names this listener (so a
 //! rebound DNS name cannot reach it), paths that cannot leave the UI folder or follow a
@@ -52,7 +52,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use iohr_auth::loopback::{MAX_HEAD, READ_WINDOW, bind_loopback};
+use inorbithr::login::{MAX_HEAD, READ_WINDOW, bind_loopback};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;

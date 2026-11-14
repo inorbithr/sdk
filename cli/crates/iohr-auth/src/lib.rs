@@ -18,10 +18,6 @@
 mod config;
 mod credential;
 mod error;
-mod flow;
-pub mod loopback;
-mod oidc;
-mod page;
 mod session;
 
 pub use config::{
@@ -30,14 +26,13 @@ pub use config::{
 };
 pub use credential::{Bearer, Credential, StaticToken};
 pub use error::AuthError;
-pub use flow::{Authorization, Browser, Device, Granted};
 /// A secret that never prints and is zeroed on drop: the SDK's [`inorbithr::Secret`].
 pub use inorbithr::Secret as Redacted;
 pub use inorbithr::login::ConfigError;
 pub use inorbithr::login::{
-    Claims, ClaimsError, EntryKey, FileStore, KeyringStore, Kind, MemoryStore, Profile,
-    ProfileName, ProfileNameError, QuietStore, Storage, Store, StoreError, create_new_private,
-    create_private_dir, off_thread, temp_path, write_private,
+    Authorization, Browser, Claims, ClaimsError, DEFAULT_CLIENT_ID, DEFAULT_ISSUER, Device,
+    EntryKey, FileStore, Granted, KeyringStore, Kind, Login, LoginError, MemoryStore, Profile,
+    ProfileName, ProfileNameError, Provider, QuietStore, SignOut, Storage, Store, StoreError,
+    create_new_private, create_private_dir, off_thread, temp_path, write_private,
 };
-pub use oidc::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER, Provider};
 pub use session::Session;

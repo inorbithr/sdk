@@ -3,7 +3,7 @@
 //! A listener on `127.0.0.1` (or `[::1]` when IPv4 loopback is unavailable) on a port
 //! the operating system picks. It answers anything but `GET /callback` with an error
 //! and keeps waiting; the first `GET /callback` ends it, and its page is sent once the
-//! sign-in has succeeded or failed. The pages (`crate::page`) load nothing from
+//! sign-in has succeeded or failed. The pages (`page`) load nothing from
 //! anywhere, run only their own hashed script, and tell the browser not to send a
 //! referrer.
 
@@ -15,10 +15,10 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{Instant, timeout, timeout_at};
 
-use crate::page::{Page, Rendered};
+use super::page::{Page, Rendered};
 
 /// How long a browser sign-in may take before the listener gives up.
-pub const SIGN_IN_WINDOW: Duration = Duration::from_mins(5);
+pub(crate) const SIGN_IN_WINDOW: Duration = Duration::from_mins(5);
 /// How long one connection may take to send its request head.
 pub const READ_WINDOW: Duration = Duration::from_secs(10);
 /// The largest request head read; a redirect with a code and state fits in far less.
@@ -27,7 +27,7 @@ pub const MAX_HEAD: usize = 8 * 1024;
 /// The query of the one `GET /callback` request.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct Callback {
+pub(crate) struct Callback {
     /// The authorization code.
     pub code: Option<String>,
     /// The `state` sent with the authorization request.
@@ -43,7 +43,7 @@ pub struct Callback {
 /// What a request head turned out to be.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Request {
+pub(crate) enum Request {
     /// `GET /callback?...`.
     Callback(Callback),
     /// Any other path, such as `/favicon.ico`.
@@ -55,7 +55,7 @@ pub enum Request {
 /// Why a request head was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum ParseError {
+pub(crate) enum ParseError {
     /// Not an HTTP/1 request line.
     #[error("not an HTTP request")]
     Malformed,
@@ -70,7 +70,7 @@ pub enum ParseError {
 ///
 /// [`ParseError`] when the line is not `METHOD /target HTTP/1.x`, the target is not
 /// origin-form, or a callback parameter is repeated.
-pub fn parse_request(head: &[u8]) -> Result<Request, ParseError> {
+pub(crate) fn parse_request(head: &[u8]) -> Result<Request, ParseError> {
     let line_end = head
         .windows(2)
         .position(|w| w == b"\r\n")
@@ -112,7 +112,7 @@ pub fn parse_request(head: &[u8]) -> Result<Request, ParseError> {
 
 /// A listener waiting for the browser to come back.
 #[derive(Debug)]
-pub struct Listener {
+pub(crate) struct Listener {
     inner: TcpListener,
     redirect_uri: String,
 }
@@ -123,7 +123,7 @@ impl Listener {
     /// # Errors
     ///
     /// The I/O error when neither loopback address can be bound.
-    pub async fn bind() -> io::Result<Self> {
+    pub(crate) async fn bind() -> io::Result<Self> {
         let inner = bind_loopback(0).await?;
         let addr = inner.local_addr()?;
         let redirect_uri = match addr {
@@ -138,7 +138,7 @@ impl Listener {
 
     /// The redirect URI to send in the authorization request.
     #[must_use]
-    pub fn redirect_uri(&self) -> &str {
+    pub(crate) fn redirect_uri(&self) -> &str {
         &self.redirect_uri
     }
 
@@ -149,7 +149,7 @@ impl Listener {
     /// # Errors
     ///
     /// [`io::ErrorKind::TimedOut`] when the window passes, or the listener's I/O error.
-    pub async fn accept_callback(self, window: Duration) -> io::Result<(Callback, Reply)> {
+    pub(crate) async fn accept_callback(self, window: Duration) -> io::Result<(Callback, Reply)> {
         let deadline = Instant::now() + window;
         loop {
             let (mut stream, _) =
@@ -179,7 +179,7 @@ impl Listener {
 
 /// The browser's open connection, waiting for the page that says how the sign-in went.
 #[derive(Debug)]
-pub struct Reply {
+pub(crate) struct Reply {
     stream: TcpStream,
 }
 
@@ -214,7 +214,7 @@ pub async fn bind_loopback(port: u16) -> io::Result<TcpListener> {
 /// # Errors
 ///
 /// The I/O error of the read.
-pub async fn read_head(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+pub(crate) async fn read_head(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
     let mut head = Vec::with_capacity(1024);
     let mut buf = [0u8; 1024];
     loop {

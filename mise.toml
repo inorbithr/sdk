@@ -407,7 +407,7 @@ dbus-run-session -- bash -e -o pipefail -c "
 [tasks."cli:hydra"]
 shell = "bash -e -o pipefail -c"
 description = "Command line: browser and device sign-in, refresh and revocation against a real Ory Hydra (the version the platform runs), in Docker"
-dir = "cli"
+dir = "rust"
 run = """
 # The version core pins in devops/k8s/auth/hydra.yaml, by digest.
 image="oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9"
@@ -426,7 +426,7 @@ docker run -d --name "$name" -p "127.0.0.1:$port:4444" -p "127.0.0.1:$aport:4445
   "$image" serve all --dev >/dev/null
 for _ in $(seq 1 60); do curl -fs "$public/health/ready" >/dev/null && break; sleep 1; done
 IOHR_TEST_REQUIRE_HYDRA=1 IOHR_TEST_HYDRA="$public" IOHR_TEST_HYDRA_ADMIN="$admin" \\
-  cargo nextest run --locked -p iohr-auth -E 'binary(hydra)'
+  cargo nextest run --locked --features login -E 'binary(login_hydra)'
 """
 
 [tasks."cli:compile-test"]

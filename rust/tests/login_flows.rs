@@ -1,6 +1,7 @@
 //! Sign-in flows against a mock provider: discovery checks, the loopback redirect,
 //! device polling, and a session refreshing with rotation.
 
+#![cfg(feature = "login")]
 #![allow(clippy::unwrap_used, reason = "tests fail by panicking")]
 
 use std::sync::Arc;
@@ -8,9 +9,9 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use iohr_auth::{
-    AuthError, Authorization, Browser, Credential, Device, EntryKey, MemoryStore, Provider,
-    Redacted, Session, Store,
+use inorbithr::Secret;
+use inorbithr::login::{
+    EntryKey, Login, LoginError, MemoryStore, Provider, Session, SignOut, Store,
 };
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -76,7 +77,7 @@ async fn discovery_refuses_another_issuer_and_foreign_endpoints() {
             .mount(&server)
             .await;
         let e = Provider::discover(&server.uri(), CLIENT).await.unwrap_err();
-        assert!(matches!(e, AuthError::Discovery(_)), "{e}");
+        assert!(matches!(e, LoginError::Discovery(_)), "{e}");
     }
     assert!(
         Provider::discover("http://auth.example.com", CLIENT)
@@ -100,10 +101,7 @@ async fn browser_sign_in_ignores_other_paths_and_checks_the_state() {
         .await;
 
     let provider = Provider::discover(&issuer, CLIENT).await.unwrap();
-    let auth = Authorization::<Browser>::start(provider)
-        .await
-        .unwrap()
-        .for_profile("work");
+    let auth = Login::browser(&provider).await.unwrap().for_profile("work");
     let url = auth.url().clone();
     let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
     assert_eq!(q["code_challenge_method"], "S256");
@@ -148,7 +146,7 @@ async fn browser_sign_in_ignores_other_paths_and_checks_the_state() {
 async fn a_callback_with_another_state_ends_the_sign_in() {
     let server = provider_server().await;
     let provider = Provider::discover(&server.uri(), CLIENT).await.unwrap();
-    let auth = Authorization::<Browser>::start(provider).await.unwrap();
+    let auth = Login::browser(&provider).await.unwrap();
     let redirect = auth
         .url()
         .query_pairs()
@@ -165,7 +163,7 @@ async fn a_callback_with_another_state_ends_the_sign_in() {
             .unwrap()
     });
     let e = auth.finish().await.unwrap_err();
-    assert!(matches!(e, AuthError::StateMismatch), "{e}");
+    assert!(matches!(e, LoginError::StateMismatch), "{e}");
     let page = browser.await.unwrap();
     assert!(page.contains("did not match") && !page.contains("forged"));
     assert!(
@@ -182,12 +180,12 @@ async fn a_callback_with_another_state_ends_the_sign_in() {
 async fn the_browser_window_is_bounded() {
     let server = provider_server().await;
     let provider = Provider::discover(&server.uri(), CLIENT).await.unwrap();
-    let auth = Authorization::<Browser>::start(provider).await.unwrap();
+    let auth = Login::browser(&provider).await.unwrap();
     let e = auth
         .finish_within(Duration::from_millis(200))
         .await
         .unwrap_err();
-    assert!(matches!(e, AuthError::TimedOut), "{e}");
+    assert!(matches!(e, LoginError::TimedOut), "{e}");
 }
 
 /// A provider whose device endpoint hands out code `dc`, and whose token endpoint
@@ -236,7 +234,7 @@ async fn device_polling_waits_slows_down_and_finishes() {
     })
     .await;
     let provider = Provider::discover(&server.uri(), CLIENT).await.unwrap();
-    let auth = Authorization::<Device>::start(provider).await.unwrap();
+    let auth = Login::device(&provider).await.unwrap();
     assert_eq!(auth.user_code(), "ABCD2345");
     assert!(auth.verification_uri_complete().is_some());
     let started = std::time::Instant::now();
@@ -255,16 +253,16 @@ async fn device_polling_stops_on_denial_and_expiry() {
     for (answer, want_denied) in [("access_denied", true), ("expired_token", false)] {
         let server = device_server(|_| vec![oauth_error(answer)]).await;
         let provider = Provider::discover(&server.uri(), CLIENT).await.unwrap();
-        let e = Authorization::<Device>::start(provider)
+        let e = Login::device(&provider)
             .await
             .unwrap()
             .finish()
             .await
             .unwrap_err();
         if want_denied {
-            assert!(matches!(e, AuthError::Denied), "{e}");
+            assert!(matches!(e, LoginError::Denied), "{e}");
         } else {
-            assert!(matches!(e, AuthError::TimedOut), "{e}");
+            assert!(matches!(e, LoginError::TimedOut), "{e}");
         }
     }
 }
@@ -280,11 +278,11 @@ async fn a_device_link_to_another_site_is_refused() {
         .mount(&server)
         .await;
     let provider = Provider::discover(&server.uri(), CLIENT).await.unwrap();
-    assert!(Authorization::<Device>::start(provider).await.is_err());
+    assert!(Login::device(&provider).await.is_err());
 }
 
-fn stored(refresh: &str, access_token: &str, expires_at: i64) -> Redacted<String> {
-    Redacted::new(
+fn stored(refresh: &str, access_token: &str, expires_at: i64) -> Secret<String> {
+    Secret::new(
         serde_json::json!({"refresh_token": refresh, "access_token": access_token, "expires_at": expires_at}).to_string(),
     )
 }
@@ -311,8 +309,8 @@ async fn a_session_refreshes_and_writes_the_rotated_token_back() {
     let session = Session::load(Arc::clone(&store), key(), &server.uri(), CLIENT)
         .await
         .unwrap();
-    let first = session.bearer().await.unwrap();
-    let second = session.bearer().await.unwrap();
+    let first = session.access_token().await.unwrap();
+    let second = session.access_token().await.unwrap();
     assert_eq!(first.expose(), second.expose(), "the fresh token is reused");
     let kept = store.get(&key()).unwrap().unwrap();
     assert!(
@@ -354,8 +352,8 @@ async fn a_token_rotated_by_another_process_is_taken_instead_of_ending_the_sessi
         .with_priority(1)
         .mount(&server)
         .await;
-    let bearer = session.bearer().await.unwrap();
-    assert_eq!(bearer.expose(), fresh);
+    let bearer = session.access_token().await.unwrap();
+    assert_eq!(bearer.expose(), &fresh);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -374,8 +372,8 @@ async fn a_refused_refresh_with_nothing_newer_ends_the_session() {
         .await
         .unwrap();
     assert!(matches!(
-        session.bearer().await.unwrap_err(),
-        AuthError::SessionEnded { .. }
+        session.access_token().await.unwrap_err(),
+        LoginError::SessionEnded { .. }
     ));
 }
 
@@ -395,10 +393,11 @@ async fn revoking_sends_the_refresh_token_to_the_revocation_endpoint() {
     store
         .set(&key(), &stored("rt-0", &access(0, 900), now() + 900))
         .unwrap();
-    let session = Session::load(store, key(), &server.uri(), CLIENT)
+    let session = Session::load(Arc::clone(&store), key(), &server.uri(), CLIENT)
         .await
         .unwrap();
-    session.revoke().await.unwrap();
+    assert_eq!(session.sign_out().await.unwrap(), SignOut::Revoked);
+    assert!(store.get(&key()).unwrap().is_none(), "the entry is deleted");
 }
 
 #[tokio::test]
@@ -411,7 +410,7 @@ async fn debug_output_of_a_session_holds_no_token() {
     let session = Session::load(store, key(), &server.uri(), CLIENT)
         .await
         .unwrap();
-    let shown = format!("{session:?} {:?}", session.bearer().await.unwrap());
+    let shown = format!("{session:?} {:?}", session.access_token().await.unwrap());
     assert!(
         !shown.contains("rt-secret") && !shown.contains("eyJ"),
         "{shown}"
@@ -435,11 +434,9 @@ async fn extra_scopes_join_the_defaults_once_in_both_flows() {
             .unwrap()
     };
     let want = "openid offline_access iohr.api coordinator:runner coordinator:read";
-    let browser = Authorization::<Browser>::start(provider.clone())
-        .await
-        .unwrap();
+    let browser = Login::browser(&provider).await.unwrap();
     assert_eq!(scope_of(browser.url().query().unwrap()), want);
-    let _ = Authorization::<Device>::start(provider).await.unwrap();
+    let _ = Login::device(&provider).await.unwrap();
     let sent = server.received_requests().await.unwrap();
     let body = sent
         .iter()
