@@ -1,7 +1,7 @@
 use std::future::Future;
 
+use crate::Redacted;
 use crate::error::AuthError;
-use crate::secret::Redacted;
 
 /// The value of an `Authorization: Bearer` header for one request.
 #[derive(Debug, Clone)]

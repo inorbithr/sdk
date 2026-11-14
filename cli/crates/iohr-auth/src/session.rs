@@ -8,12 +8,12 @@ use time::OffsetDateTime;
 use tokio::sync::{Mutex, OnceCell};
 use zeroize::Zeroizing;
 
+use crate::Redacted;
 use crate::credential::{Bearer, Credential};
 use crate::error::AuthError;
 use crate::flow::{Authorization, Granted};
 use crate::oidc::{Provider, TokenError};
-use crate::secret::Redacted;
-use crate::store::{EntryKey, Store, StoreError};
+use inorbithr::login::{EntryKey, Store, StoreError};
 
 /// Refresh when less than this is left of the access token.
 const REFRESH_MARGIN: time::Duration = time::Duration::seconds(60);
@@ -280,5 +280,7 @@ async fn read(
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, StoreError> + Send + 'static,
 ) -> Result<T, AuthError> {
-    crate::store::off_thread(f).await.map_err(AuthError::from)
+    inorbithr::login::off_thread(f)
+        .await
+        .map_err(AuthError::from)
 }

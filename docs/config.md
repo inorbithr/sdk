@@ -1014,6 +1014,15 @@ changelog; the conformance cases for it are `pending` until then. The Rust crate
 it behind the opt-in cargo feature `login` (off by default; a program that only uses keys
 compiles none of the store code).
 
+**Where the build is (slice 2 of RFC 0231).** The Rust crate has the opt-in cargo feature
+`login`: `inorbithr::login` holds the primitives `iohr` used to keep for itself, the
+profile table (`Config`, `Profile`, `Kind`, `Storage`, `ProfileName`; one reader of the
+file's `default` and command-line keys, which keeps `[sdk]`, unknown keys and comments),
+PKCE, the token claims, the credential store (the OS keychain, an owner-only file, an
+in-memory one) and the browser check. The sign-in flows and the `login` source are the
+next slices; the conformance cases stay `pending` until then. `iohr` builds on these
+primitives, so the two can no longer disagree about the file.
+
 **The source.** `login` is a credential source named `login`, ranked between `file` (4)
 and `cli` (5) in the chain of section 5.1, so `cli` stays last, for a machine where only
 `iohr` can reach the store.

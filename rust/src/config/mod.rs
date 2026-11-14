@@ -20,6 +20,8 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 pub(crate) use no_proxy::ProxyRules;
+#[cfg(feature = "login")]
+pub(crate) use resolve::config_path;
 pub(crate) use resolve::{
     Inputs, ProblemsText, Resolved, is_loopback, program_found, resolve, show_duration,
 };

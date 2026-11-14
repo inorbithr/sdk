@@ -17,7 +17,6 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::Env;
-use crate::browser;
 use crate::cli::{
     AccountArg, ConnectionStatus, ConnectionsAdd, ConnectionsCommand, ConnectionsReconnect, Global,
     SecretInput, UseStatus,
@@ -29,6 +28,7 @@ use crate::error::Error;
 use crate::output::Out;
 use crate::prompt;
 use crate::ui::Listed;
+use inorbithr::login::browser;
 
 /// How often a connect session is asked whether the person has finished.
 const POLL: Duration = Duration::from_secs(2);

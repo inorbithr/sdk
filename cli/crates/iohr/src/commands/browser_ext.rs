@@ -6,9 +6,9 @@
 //! for a live listing or the load-unpacked steps before one. This command opens that page
 //! in the default browser, so the command line never keeps a second list of stores.
 
-use crate::browser;
 use crate::cli::{BrowserInstall, Global};
 use crate::output::Out;
+use inorbithr::login::browser;
 
 /// The page that installs the extension, on the console next to the API in `base_url`.
 pub(crate) fn install_url(base_url: &str) -> String {

@@ -8,9 +8,9 @@ use serde::Deserialize;
 use time::OffsetDateTime;
 use url::Url;
 
-use crate::claims::Claims;
+use crate::Redacted;
 use crate::error::AuthError;
-use crate::secret::Redacted;
+use inorbithr::login::Claims;
 
 /// The InOrbit sign-in service.
 pub const DEFAULT_ISSUER: &str = "https://auth.inorbit.hr";
@@ -269,7 +269,7 @@ impl Provider {
         #[derive(Deserialize)]
         struct IdClaims {
             iss: String,
-            #[serde(deserialize_with = "crate::claims::audiences")]
+            #[serde(deserialize_with = "inorbithr::login::audiences")]
             aud: Vec<String>,
         }
         let bad = || AuthError::Http("the ID token cannot be read".into());

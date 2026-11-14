@@ -3,8 +3,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Deserialize;
 use time::OffsetDateTime;
 
-/// The audience every InOrbit API token carries.
-pub(crate) const AUDIENCE: &str = "iohr-api";
+use crate::auth::AUDIENCE;
 
 /// What an InOrbit access token says about itself, read without verifying it.
 ///
@@ -105,7 +104,9 @@ fn scopes<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Erro
     })
 }
 
-pub(crate) fn audiences<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+/// Reads an `aud` claim, a string or a list, as a list (for the ID-token check).
+#[doc(hidden)]
+pub fn audiences<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum Aud {
@@ -120,7 +121,7 @@ pub(crate) fn audiences<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<St
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use time::OffsetDateTime;
@@ -128,7 +129,7 @@ pub(crate) mod tests {
     use super::{Claims, ClaimsError};
 
     /// An unsigned token with the given claims, for tests.
-    pub(crate) fn token(claims: &serde_json::Value) -> String {
+    pub(super) fn token(claims: &serde_json::Value) -> String {
         let enc = |v: &serde_json::Value| URL_SAFE_NO_PAD.encode(v.to_string());
         format!(
             "{}.{}.c2ln",

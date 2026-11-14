@@ -1,11 +1,9 @@
 //! The profile table `iohr login` writes, read by the SDK (RFC 0231 slice 1,
 //! docs/config.md section 5.6).
 //!
-//! These tests need the `login` feature and `inorbithr::login`, which slice 2 of
-//! RFC 0231 adds by moving `iohr-auth`'s profile reader into this crate. Until then the file
-//! sits in `tests/pending/`, which Cargo does not build, so main stays green under
-//! `--all-features`. Slice 2 moves it to `tests/login_profile.rs` with the feature and the
-//! module; it fails to compile before that change and passes after it.
+//! The tests need the `login` feature; without it the file builds to nothing. They
+//! guard that the SDK reads what `iohr` writes (slice 2 of RFC 0231 moved the reader
+//! here from `iohr-auth`).
 #![cfg(feature = "login")]
 
 use std::path::Path;
@@ -42,7 +40,10 @@ fn the_sdk_reads_the_profile_table_iohr_writes() {
     let config = inorbithr::login::Config::parse(IOHR_WRITES, Path::new("config.toml"))
         .expect("the table iohr writes is valid");
 
-    assert_eq!(config.default().map(|n| n.as_str()), Some("work"));
+    assert_eq!(
+        config.default().map(inorbithr::login::ProfileName::as_str),
+        Some("work")
+    );
 
     let work = config
         .profile("work")

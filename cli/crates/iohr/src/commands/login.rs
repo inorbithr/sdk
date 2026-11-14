@@ -11,13 +11,13 @@ use time::OffsetDateTime;
 use zeroize::Zeroizing;
 
 use crate::Env;
-use crate::browser;
 use crate::cli::{Global, Login};
 use crate::commands::accounts::{Me, Why, choose};
 use crate::commands::profile::point_at;
 use crate::context::{Ctx, Prompts, blocking, session_for};
 use crate::error::Error;
 use crate::output::Out;
+use inorbithr::login::browser;
 
 /// The profile a first `login` creates when no `--profile` is given.
 const DEFAULT_PROFILE: &str = "default";

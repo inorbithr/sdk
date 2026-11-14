@@ -702,7 +702,7 @@ fn sign_setting(g: &Global, env: &Env) -> crate::runner::settings::Setting<SignW
     let ctx = Ctx::load(g).ok();
     let profile = ctx.as_ref().and_then(|c| {
         let name = run_profile(g, env, c)?;
-        let own = c.config.profile(&name)?.runner.as_ref()?;
+        let own = c.config.profile_runner(&name)?;
         Some((name, own))
     });
     crate::runner::settings::upgrade_sign_of(

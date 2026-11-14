@@ -15,7 +15,6 @@
 
 #![forbid(unsafe_code)]
 
-mod claims;
 mod config;
 mod credential;
 mod error;
@@ -23,23 +22,22 @@ mod flow;
 pub mod loopback;
 mod oidc;
 mod page;
-mod pkce;
-mod secret;
 mod session;
-mod store;
 
-pub use claims::{Claims, ClaimsError};
 pub use config::{
-    AskConfig, Config, ConfigError, DoctorConfig, ExtConfig, Kind, MemoryConfig, PanelConfig,
-    Profile, ProfileName, ProfileNameError, ProjectConfig, RunnerConfig, Storage, SyncConfig,
-    create_new_private, create_private_dir, temp_path, write_private,
+    AskConfig, Config, DoctorConfig, ExtConfig, MemoryConfig, PanelConfig, ProjectConfig,
+    RunnerConfig, SyncConfig,
 };
 pub use credential::{Bearer, Credential, StaticToken};
 pub use error::AuthError;
 pub use flow::{Authorization, Browser, Device, Granted};
-pub use oidc::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER, Provider};
-pub use secret::Redacted;
-pub use session::Session;
-pub use store::{
-    EntryKey, FileStore, KeyringStore, MemoryStore, QuietStore, Store, StoreError, off_thread,
+/// A secret that never prints and is zeroed on drop: the SDK's [`inorbithr::Secret`].
+pub use inorbithr::Secret as Redacted;
+pub use inorbithr::login::ConfigError;
+pub use inorbithr::login::{
+    Claims, ClaimsError, EntryKey, FileStore, KeyringStore, Kind, MemoryStore, Profile,
+    ProfileName, ProfileNameError, QuietStore, Storage, Store, StoreError, create_new_private,
+    create_private_dir, off_thread, temp_path, write_private,
 };
+pub use oidc::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER, Provider};
+pub use session::Session;
