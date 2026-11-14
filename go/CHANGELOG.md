@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/inorbithr/sdk/compare/go/v0.3.1...go/v0.3.2) (2026-11-14)
+
+
+### Bug fixes
+
+* keep tokens and key secrets out of JSON and structured logs in every SDK ([#466](https://github.com/inorbithr/sdk/issues/466)) ([d85ea3c](https://github.com/inorbithr/sdk/commit/d85ea3ced0fe8165ed159af32f3c133493cad5ea))
+
 ## [0.3.1](https://github.com/inorbithr/sdk/compare/go/v0.3.0...go/v0.3.1) (2026-10-31)
 
 
