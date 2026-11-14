@@ -19,6 +19,8 @@ ci-tools/
 
 # Rust
 target/
+# Side build folders (target-cli/ and the like) are never committed either.
+target-*/
 
 # TypeScript
 node_modules/
