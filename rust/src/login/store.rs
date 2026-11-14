@@ -634,11 +634,11 @@ mod tests {
     }
 
     /// Runs against the real OS store, and only where `IOHR_TEST_REQUIRE_STORE` is set: CI
-    /// on macOS and Windows, and `mise run cli:keyring` on Linux. There a missing or
-    /// locked store is a failure. Without the variable the test says so and returns,
-    /// because on a developer's Mac the login Keychain can wait on an access prompt
-    /// nobody sees and hold the Keychain lock, which stalls every other `iohr` that
-    /// reads its credentials, sign-in included.
+    /// on macOS and Windows (`mise run cli:check`), and `mise run cli:keyring` on Linux.
+    /// There a missing or locked store is a failure. Without the variable the test says
+    /// so and returns, because on a developer's Mac the login Keychain can wait on an
+    /// access prompt nobody sees and hold the Keychain lock, which stalls every other
+    /// `iohr` that reads its credentials, sign-in included.
     #[test]
     fn os_credential_store() {
         let required = std::env::var("IOHR_TEST_REQUIRE_STORE").is_ok_and(|v| !v.is_empty());
