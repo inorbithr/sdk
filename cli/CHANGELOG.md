@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0...iohr/v0.1.1) (2026-11-14)
+
+
+### Features
+
+* **rust:** login primitives in inorbithr behind the login feature (RFC 0231 slice 2) ([#566](https://github.com/inorbithr/sdk/issues/566)) ([454e82c](https://github.com/inorbithr/sdk/commit/454e82c3f36a47eb9e421723e3a3afbdcd40a952))
+* **rust:** sign-in flows in inorbithr behind the login feature (RFC 0231 slice 3) ([#569](https://github.com/inorbithr/sdk/issues/569)) ([302cdcf](https://github.com/inorbithr/sdk/commit/302cdcf76a55fac77c970c61e8d40ab859b6cc1c))
+
 ## [0.1.0](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.39...iohr/v0.1.0) (2026-11-13)
 
 
