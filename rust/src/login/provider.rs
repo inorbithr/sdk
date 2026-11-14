@@ -326,7 +326,6 @@ pub(crate) async fn read_answer(resp: reqwest::Response) -> Result<Vec<u8>, Logi
     })
 }
 
-
 /// A token endpoint answer. Its secrets are [`Secret`] from the moment they are read.
 #[derive(Deserialize)]
 pub(crate) struct TokenResponse {
