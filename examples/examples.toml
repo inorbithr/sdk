@@ -58,6 +58,11 @@ name = "config-load"
 shows = "A client from load, with where each setting came from"
 env = "key"
 
+[[call]]
+name = "login-device"
+shows = "A person signs in with the device flow and calls as that person (Rust, the login feature)"
+env = "none"
+
 # How to run one example of a language. {name} is the call name (unary-get), {snake} is
 # unary_get and {pascal} is UnaryGet. `prepare` runs once, in `dir`, before the examples.
 [language.go]
@@ -95,3 +100,20 @@ run = ".build/debug/Calls {name}"
 
 [language.swift.skip]
 stream-socket = "the Swift SDK has no WebSocket stream transport yet"
+login-device = "the login feature is Rust-only until the other SDKs ship theirs (RFC 0231)"
+
+[language.go.skip]
+login-device = "the login feature is Rust-only until the other SDKs ship theirs (RFC 0231)"
+
+[language.typescript.skip]
+login-device = "the login feature is Rust-only until the other SDKs ship theirs (RFC 0231)"
+
+[language.python.skip]
+login-device = "the login feature is Rust-only until the other SDKs ship theirs (RFC 0231)"
+
+[language.java.skip]
+login-device = "the login feature is Rust-only until the other SDKs ship theirs (RFC 0231)"
+
+[language.csharp.skip]
+login-device = "the login feature is Rust-only until the other SDKs ship theirs (RFC 0231)"
+
