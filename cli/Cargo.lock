@@ -1826,7 +1826,7 @@ dependencies = [
 
 [[package]]
 name = "iohr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -1873,7 +1873,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-atlas-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "proptest",
@@ -1886,7 +1886,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-codegen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "heck",
@@ -1905,7 +1905,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-lab"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "regex",
  "serde",
@@ -1915,7 +1915,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-openapi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "heck",
  "serde",

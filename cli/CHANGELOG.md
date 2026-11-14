@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.1](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0...iohr/v0.1.1) (2026-11-14)
+
+
+### Features
+
+* **rust:** INORBIT_LOGIN_CLIENT_ID and the login example; iohr-auth deleted (RFC 0231 slice 5) ([#571](https://github.com/inorbithr/sdk/issues/571)) ([d7e2af4](https://github.com/inorbithr/sdk/commit/d7e2af4f2ecf74c645441e3642bf5dadeacfffe2))
+* **rust:** login primitives in inorbithr behind the login feature (RFC 0231 slice 2) ([#566](https://github.com/inorbithr/sdk/issues/566)) ([454e82c](https://github.com/inorbithr/sdk/commit/454e82c3f36a47eb9e421723e3a3afbdcd40a952))
+* **rust:** sign-in flows in inorbithr behind the login feature (RFC 0231 slice 3) ([#569](https://github.com/inorbithr/sdk/issues/569)) ([302cdcf](https://github.com/inorbithr/sdk/commit/302cdcf76a55fac77c970c61e8d40ab859b6cc1c))
+* **rust:** the login source in the default chain (RFC 0231 slice 4) ([#570](https://github.com/inorbithr/sdk/issues/570)) ([37ee291](https://github.com/inorbithr/sdk/commit/37ee2914f3d454352e547d29ae3d482b41aa0dd7))
+
 ## [0.1.0](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.39...iohr/v0.1.0) (2026-11-13)
 
 
