@@ -9,6 +9,7 @@ use time::OffsetDateTime;
 use url::Url;
 
 use super::{Claims, LoginError};
+use crate::auth::transport_reason;
 use crate::secret::Secret;
 use crate::transport::{Capped, read_capped};
 
@@ -74,7 +75,7 @@ impl Provider {
             .get(&url)
             .send()
             .await
-            .map_err(|e| LoginError::Discovery(reason(&e)))?;
+            .map_err(|e| LoginError::Discovery(transport_reason(&e)))?;
         if !resp.status().is_success() {
             return Err(LoginError::Discovery(format!(
                 "{url} answered HTTP {}",
@@ -174,7 +175,7 @@ impl Provider {
             .form(form)
             .send()
             .await
-            .map_err(|e| TokenError::Transport(reason(&e)))?;
+            .map_err(|e| TokenError::Transport(transport_reason(&e)))?;
         let status = resp.status();
         let body = read_answer(resp)
             .await
@@ -219,7 +220,7 @@ impl Provider {
             ])
             .send()
             .await
-            .map_err(|e| LoginError::Http(reason(&e)))?;
+            .map_err(|e| LoginError::Http(transport_reason(&e)))?;
         if resp.status().is_success() {
             Ok(())
         } else {
@@ -321,27 +322,10 @@ fn checked_origin(issuer: &str) -> Result<Url, LoginError> {
 pub(crate) async fn read_answer(resp: reqwest::Response) -> Result<Vec<u8>, LoginError> {
     read_capped(resp, MAX_BODY).await.map_err(|e| match e {
         Capped::TooLarge => LoginError::Http("the sign-in service answered too much".into()),
-        Capped::Read(e) => LoginError::Http(reason(&e)),
+        Capped::Read(e) => LoginError::Http(transport_reason(&e)),
     })
 }
 
-/// The error's causes without the URL, which may carry a code.
-pub(crate) fn reason(e: &reqwest::Error) -> String {
-    let mut parts = Vec::new();
-    let mut source: Option<&dyn std::error::Error> = std::error::Error::source(e);
-    while let Some(s) = source {
-        parts.push(s.to_string());
-        source = s.source();
-    }
-    if e.is_timeout() {
-        parts.insert(0, "timed out".into());
-    }
-    if parts.is_empty() {
-        "the connection failed".into()
-    } else {
-        parts.join(": ")
-    }
-}
 
 /// A token endpoint answer. Its secrets are [`Secret`] from the moment they are read.
 #[derive(Deserialize)]

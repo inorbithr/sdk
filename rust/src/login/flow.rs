@@ -307,7 +307,7 @@ impl Authorization<Device> {
             ])
             .send()
             .await
-            .map_err(|e| LoginError::Http(super::provider::reason(&e)))?;
+            .map_err(|e| LoginError::Http(crate::auth::transport_reason(&e)))?;
         if !resp.status().is_success() {
             return Err(LoginError::Http(format!(
                 "the device code request answered HTTP {}",
