@@ -253,7 +253,7 @@ follow section 2.3. "File" says whether the key may appear in the config file.
 | `scopes` | `INORBIT_SCOPES` | yes | list | none | Scopes to ask for with a key; required with a key |
 | `token` | `INORBIT_TOKEN` | **never** | secret | none | A bearer token used as is (an API token, RFC 0016) |
 | `token_file` | `INORBIT_TOKEN_FILE` | yes | path | none | A file holding a bearer token, re-read when it changes |
-| `credential_sources` | `INORBIT_CREDENTIAL_SOURCES` | yes | list of `env`, `workload`, `file`, `cli` | all four | Which credential sources the chain may use (section 5.1). Code is always allowed |
+| `credential_sources` | `INORBIT_CREDENTIAL_SOURCES` | yes | list of `env`, `workload`, `file`, `login`, `cli` | all five | Which credential sources the chain may use (section 5.1). Code is always allowed |
 | `cli_path` | `INORBIT_CLI_PATH` | yes | path | `iohr` on `PATH` | The command line the `cli` source runs |
 
 ### 3.3 Time and retries
@@ -873,6 +873,7 @@ the developer's login.
 | 2 | Environment | `env` | `INORBIT_[<P>_]TOKEN`, `_TOKEN_FILE` or `_KEY_ID` is set | Static token, token file, or client credentials with `_KEY_SECRET` or `_KEY_SECRET_FILE` |
 | 3 | Workload identity | `workload` | `INORBIT_[<P>_]WEB_IDENTITY_TOKEN_FILE`, or `ACTIONS_ID_TOKEN_REQUEST_URL` with `INORBIT_[<P>_]FEDERATED_KEY_ID` | **Reserved.** The platform cannot exchange an outside identity token yet (section 5.5). The source is skipped with "not offered by the platform yet" |
 | 4 | Config file | `file` | the profile's table sets `token_file` or `key_id` | Token file, or client credentials with `key_secret_file` |
+| 4.5 | The stored session | `login` | the chosen profile has `kind = "person"` and the store holds an entry for it (needs the Rust `login` cargo feature) | The profile's session, refreshed by the SDK itself (section 5.6); no child process |
 | 5 | The `iohr` login | `cli` | the chosen profile exists in the file with a `kind` (the command line made it) | A token from `iohr auth token` (section 5.4) |
 
 When no source has credentials, `load` fails with a `ConfigError` that lists each source
@@ -883,9 +884,14 @@ no credentials found for profile "default"; tried:
   env: INORBIT_TOKEN, INORBIT_TOKEN_FILE and INORBIT_KEY_ID are not set
   workload: not offered by the platform yet
   file: no config file at /home/ana/.config/iohr/config.toml
+  login: skipped, no profile chosen
   cli: skipped, no profile chosen
-Set INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES, or run `iohr login`.
+Set INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES, or sign in with `iohr login`.
 ```
+
+The reasons a `login` source is skipped: "no profile chosen", "profile X is not a person's
+sign-in", "no stored session for profile X", "not in credential_sources", and, in a build
+without the cargo feature, "needs the `login` cargo feature". It is never a panic.
 
 Rules:
 
@@ -1006,13 +1012,11 @@ token or a key in a repository secret. [recipes.md](recipes.md) shows both.
 
 ### 5.6 Person sign-in (`login`)
 
-**Status: the contract for RFC 0231, not built yet.** Today a person signs in through
-`iohr` only, and the SDK reads that login through the `cli` source (section 5.4). This
-section fixes what the SDK's own sign-in and its `login` source will do, so every
-language writes to one text. Nothing here is released until the SDK says so in its
-changelog; the conformance cases for it are `pending` until then. The Rust crate will offer
-it behind the opt-in cargo feature `login` (off by default; a program that only uses keys
-compiles none of the store code).
+**Status: built in the Rust crate (slices 3 and 4 of RFC 0231); other languages follow
+the same text.** A person signs in with the SDK's own flows, and the `login` source reads
+the stored session. The Rust crate offers it behind the opt-in cargo feature `login` (off
+by default; a program that only uses keys compiles none of the store code). The
+conformance cases for it stay `pending` for a language until its SDK has it.
 
 **Where the build is (slice 3 of RFC 0231).** The Rust crate has the opt-in cargo feature
 `login`: `inorbithr::login` holds the primitives `iohr` used to keep for itself, the
@@ -1043,8 +1047,18 @@ in-memory one) and the browser check, and now the sign-in flows themselves:
   log, URL, `Debug` or error string (tested).
 
 `iohr login`, `logout` and `auth token` call these; `iohr-auth` keeps only its profile
-wrapper. The `login` source in the chain (slice 4) is not built; the conformance cases stay
-`pending` until then.
+wrapper.
+
+**Slice 4: the chain.** `StoredSession` is a `TokenProvider` over `Session`: it does not
+refresh, rotate or re-read the store itself, it asks `Session`, and it caches by the
+`CachedToken` rules (a token with under a minute left is renewed; `invalidate` makes the
+next call get a fresh one). The `login` source in the chain (section 5.1) uses it, so
+`DefaultCredential` picks it up unchanged, and a signed-in profile works with no `iohr`
+on the machine. In a build without the `login` feature the source is skipped with the
+reason above. `LoadOptions::login_store` injects a store for tests. A newer, still fresh
+access token that another process wrote is taken as is, not refreshed again. A failed refresh
+with a still-valid token is logged as `token_refresh_failed`, like every other credential,
+and names no token.
 
 **The source.** `login` is a credential source named `login`, ranked between `file` (4)
 and `cli` (5) in the chain of section 5.1, so `cli` stays last, for a machine where only

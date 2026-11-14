@@ -174,6 +174,9 @@ func TestEveryCaseReplays(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if err := substituteReplay(c, ts.Endpoints.baseURL(c.transport())); err != nil {
+				t.Fatal(err)
+			}
 			status, out := load(t, ts, `{"name": "`+area+"/"+name+`"}`)
 			if status != http.StatusOK {
 				t.Fatalf("load: %d %v", status, out)

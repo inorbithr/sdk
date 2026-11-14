@@ -113,6 +113,7 @@ struct ClientOptions {
     credential_sources: Option<Vec<String>>,
     #[serde(default)]
     cli: bool,
+    stored_session: Option<StoredSessionSeed>,
     pipeline: Option<PipelineEdit>,
     log: Option<String>,
     log_headers: Option<bool>,
@@ -124,6 +125,30 @@ struct ClientOptions {
     transport: Option<String>,
     ca_bundle: Option<bool>,
     no_proxy: Option<String>,
+}
+
+/// A person's session already in the credential store (RFC 0231), written under the
+/// profile's entry before the case runs.
+// Read only with the `login` feature; the fields are the case format either way.
+#[cfg_attr(not(feature = "login"), allow(dead_code))]
+#[derive(Deserialize)]
+struct StoredSessionSeed {
+    profile: String,
+    account: String,
+    access_token: String,
+    refresh_token: String,
+    expires_in_s: i64,
+    rotated_by_another_process: Option<RotatedSession>,
+}
+
+/// What another process writes to the entry between this one's reads: the session
+/// refuses the old refresh token, re-reads, and retries with this one.
+#[cfg_attr(not(feature = "login"), allow(dead_code))]
+#[derive(Deserialize)]
+struct RotatedSession {
+    access_token: String,
+    refresh_token: String,
+    expires_in_s: i64,
 }
 
 #[derive(Deserialize, Default)]
@@ -156,6 +181,8 @@ struct Expect {
     rate_limit: Option<Value>,
     idempotency_key: Option<String>,
     config: Option<Value>,
+    /// The store entry after the case: a subset to match, or the string `absent`.
+    stored_session: Option<Value>,
 }
 
 /// A key that is present, even as `null`, is `Some`.
@@ -356,10 +383,114 @@ async fn verdict(http: &reqwest::Client, url: &str) -> Verdict {
 struct Captured {
     probes: Arc<Mutex<BTreeMap<String, Vec<Headers>>>>,
     logs: Arc<Mutex<Vec<Value>>>,
+    #[cfg(feature = "login")]
+    store: Option<Arc<CaseStore>>,
     #[cfg(feature = "otel")]
     spans: Option<opentelemetry_sdk::trace::InMemorySpanExporter>,
     #[cfg(feature = "otel")]
     provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
+}
+
+/// The credential store a case's client reads, in memory: it holds the seeded session
+/// and, for `rotated_by_another_process`, plays a second process.
+///
+/// The session reads the entry three times before it refreshes (the chain's probe,
+/// the load and the re-read under the lock). Every one of those returns the old entry.
+/// The fourth read, the re-read after the service refused the refresh token, finds the
+/// newer entry the other process wrote. A write of this process ends the stepping.
+#[cfg(feature = "login")]
+struct CaseStore {
+    inner: inorbithr::login::MemoryStore,
+    rotated: Mutex<Option<inorbithr::Secret<String>>>,
+    reads: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(feature = "login")]
+const READS_BEFORE_ROTATION: usize = 3;
+
+#[cfg(feature = "login")]
+fn stored_json(access: &str, refresh: &str, expires_in_s: i64) -> inorbithr::Secret<String> {
+    let at = time::OffsetDateTime::now_utc().unix_timestamp() + expires_in_s;
+    inorbithr::Secret::new(
+        json!({ "refresh_token": refresh, "access_token": access, "expires_at": at }).to_string(),
+    )
+}
+
+#[cfg(feature = "login")]
+impl CaseStore {
+    fn seeded(seed: Option<&StoredSessionSeed>, key: Option<&inorbithr::login::EntryKey>) -> Self {
+        use inorbithr::login::Store as _;
+        let inner = inorbithr::login::MemoryStore::default();
+        let mut rotated = None;
+        if let (Some(seed), Some(key)) = (seed, key) {
+            inner
+                .set(
+                    key,
+                    &stored_json(&seed.access_token, &seed.refresh_token, seed.expires_in_s),
+                )
+                .unwrap();
+            rotated = seed
+                .rotated_by_another_process
+                .as_ref()
+                .map(|r| stored_json(&r.access_token, &r.refresh_token, r.expires_in_s));
+        }
+        Self {
+            inner,
+            rotated: Mutex::new(rotated),
+            reads: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+}
+
+#[cfg(feature = "login")]
+impl inorbithr::login::Store for CaseStore {
+    fn get(
+        &self,
+        key: &inorbithr::login::EntryKey,
+    ) -> Result<Option<inorbithr::Secret<String>>, inorbithr::login::StoreError> {
+        let n = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if n >= READS_BEFORE_ROTATION
+            && let Some(newer) = self.rotated.lock().unwrap().take()
+        {
+            self.inner.set(key, &newer)?;
+        }
+        self.inner.get(key)
+    }
+
+    fn set(
+        &self,
+        key: &inorbithr::login::EntryKey,
+        secret: &inorbithr::Secret<String>,
+    ) -> Result<(), inorbithr::login::StoreError> {
+        self.rotated.lock().unwrap().take();
+        self.inner.set(key, secret)
+    }
+
+    fn delete(
+        &self,
+        key: &inorbithr::login::EntryKey,
+    ) -> Result<bool, inorbithr::login::StoreError> {
+        self.inner.delete(key)
+    }
+}
+
+/// The store entry the case's profile names: the seed's profile and account, else the
+/// config file's chosen profile.
+#[cfg(feature = "login")]
+fn entry_key(case: &Case, scratch: &Scratch) -> inorbithr::login::EntryKey {
+    use inorbithr::login::{Config, EntryKey, ProfileName};
+    if let Some(seed) = &case.client.stored_session {
+        let name: ProfileName = seed.profile.parse().expect("a profile name");
+        return EntryKey::new(name, &seed.account).expect("an entry key");
+    }
+    let text = scratch.sub(case.client.config_file.as_deref().expect("a config file"));
+    let config = Config::parse(&text, Path::new("config.toml")).expect("the case's config");
+    let name = case.client.profile.clone().map_or_else(
+        || config.default().cloned().expect("a default profile"),
+        |p| p.parse().expect("a profile name"),
+    );
+    let profile = config.profile(&name).expect("the profile");
+    EntryKey::new(name, profile.account()).expect("an entry key")
 }
 
 /// A probe middleware: records the headers of every request it sees, and passes it on.
@@ -580,12 +711,16 @@ fn build_client(
             .collect();
         let home = scratch.dir.path().join("home");
         std::fs::create_dir_all(&home).unwrap();
-        b = b.load_options(
-            LoadOptions::new()
-                .env(env)
-                .home(Some(home))
-                .cwd(scratch.dir.path()),
-        );
+        #[allow(unused_mut)]
+        let mut load = LoadOptions::new()
+            .env(env)
+            .home(Some(home))
+            .cwd(scratch.dir.path());
+        #[cfg(feature = "login")]
+        if let Some(store) = &captured.store {
+            load = load.login_store(Arc::clone(store) as Arc<dyn inorbithr::login::Store>);
+        }
+        b = b.load_options(load);
         return b.load().expect("the client loads");
     }
     b.build().expect("the client builds")
@@ -1045,6 +1180,40 @@ async fn every_case_passes() {
         }
         let scratch = Scratch::new(loaded.base_url.as_deref().unwrap_or(&replay.url));
         let mut captured = Captured::default();
+        let needs_login = case.client.stored_session.is_some()
+            || case.action.op.starts_with("login.")
+            || case.expect.stored_session.is_some();
+        if cfg!(not(feature = "login")) && needs_login {
+            eprintln!("skip {name}: needs the `login` feature (mise run conformance:rust)");
+            continue;
+        }
+        #[cfg(feature = "login")]
+        if needs_login {
+            let key = entry_key(case, &scratch);
+            captured.store = Some(Arc::new(CaseStore::seeded(
+                case.client.stored_session.as_ref(),
+                Some(&key),
+            )));
+        }
+        #[cfg(feature = "login")]
+        if case.action.op.starts_with("login.") {
+            scratch.write(&case.client.files);
+            let outcome = login_op(case, &scratch, &captured).await;
+            let v = verdict(&http, &replay.url).await;
+            let mut problems = check(case, &[], &v);
+            if let Err(why) = outcome {
+                problems.push(format!("{}: {why}", case.action.op));
+            }
+            problems.extend(check_stored(case, &scratch, &captured));
+            ran += 1;
+            if problems.is_empty() {
+                eprintln!("pass {name}");
+            } else {
+                eprintln!("FAIL {name}:\n  {}", problems.join("\n  "));
+                failed.push(case.name.clone());
+            }
+            continue;
+        }
         let client = build_client(&loaded, &replay.url, &scratch, &mut captured);
         if matches!(case.area.as_str(), "sse" | "socket") {
             let (items, error) = stream(&client, &case.action).await;
@@ -1090,6 +1259,8 @@ async fn every_case_passes() {
         let v = verdict(&http, &replay.url).await;
         let mut problems = check(case, &results, &v);
         problems.extend(check_m6(case, &client, &results, &captured));
+        #[cfg(feature = "login")]
+        problems.extend(check_stored(case, &scratch, &captured));
         drop(client);
         ran += 1;
         if problems.is_empty() {
@@ -1101,6 +1272,77 @@ async fn every_case_passes() {
     }
     assert!(ran > 0, "no case ran");
     assert!(failed.is_empty(), "failed cases: {failed:?}");
+}
+
+/// The sign-in operations a case names, through `inorbithr::login`: sign-out of the
+/// seeded entry, and a device sign-in whose driver approves at once and shows the code
+/// to nobody (the case checks the polling).
+#[cfg(feature = "login")]
+async fn login_op(case: &Case, scratch: &Scratch, captured: &Captured) -> Result<(), String> {
+    use inorbithr::login::{Config, Login, Provider, Session, Store};
+    let store: Arc<dyn Store> = captured.store.clone().expect("the case store");
+    let key = entry_key(case, scratch);
+    let text = scratch.sub(case.client.config_file.as_deref().expect("a config file"));
+    let config = Config::parse(&text, Path::new("config.toml")).map_err(|e| e.to_string())?;
+    let profile = config.profile(key.profile()).expect("the profile");
+    let issuer = profile.issuer().expect("an issuer").to_owned();
+    let client_id = profile.client_id().expect("a client id").to_owned();
+    match case.action.op.as_str() {
+        "login.sign_out" => {
+            let session = Session::load(store, key, &issuer, &client_id)
+                .await
+                .map_err(|e| e.to_string())?;
+            session
+                .sign_out()
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+        "login.device" => {
+            let provider = Provider::discover(&issuer, &client_id)
+                .await
+                .map_err(|e| e.to_string())?;
+            let granted = Login::device(&provider)
+                .await
+                .map_err(|e| e.to_string())?
+                .finish()
+                .await
+                .map_err(|e| e.to_string())?;
+            Session::save(granted, store, key)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+        other => Err(format!("unknown login op {other}")),
+    }
+}
+
+/// `expect.stored_session`: the entry the case leaves in the store.
+#[cfg(feature = "login")]
+fn check_stored(case: &Case, scratch: &Scratch, captured: &Captured) -> Vec<String> {
+    use inorbithr::login::Store as _;
+    let Some(want) = &case.expect.stored_session else {
+        return Vec::new();
+    };
+    let store = captured.store.as_ref().expect("the case store");
+    let entry = store.inner.get(&entry_key(case, scratch)).unwrap();
+    match (want.as_str(), entry) {
+        (Some("absent"), None) => Vec::new(),
+        (Some("absent"), Some(_)) => vec!["stored_session: want absent, the entry is there".into()],
+        (_, None) => vec![format!("stored_session: want {want}, the entry is absent")],
+        (_, Some(secret)) => {
+            let got: Value = serde_json::from_str(secret.expose()).unwrap_or(Value::Null);
+            if subset(want, &got) {
+                Vec::new()
+            } else {
+                // Names only: the values are tokens.
+                let keys: Vec<&String> = got.as_object().map_or(Vec::new(), |o| o.keys().collect());
+                vec![format!(
+                    "stored_session: the entry does not match {want} (fields {keys:?})"
+                )]
+            }
+        }
+    }
 }
 
 /// Runs the futures at once and keeps their order, without another dependency.

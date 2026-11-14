@@ -43,7 +43,7 @@ const CLI_KEYS: [&str; 6] = [
     "client_id",
 ];
 
-const SOURCES: [&str; 4] = ["env", "workload", "file", "cli"];
+const SOURCES: [&str; 5] = ["env", "workload", "file", "login", "cli"];
 
 /// The operating system whose conventions apply to the config file's location and to
 /// paths (`docs/config.md` section 4.1).
@@ -133,6 +133,24 @@ pub(crate) struct Inputs<'a> {
     pub(crate) cli_found: &'a dyn Fn(&str) -> bool,
     /// Reads a file: `None` when it does not exist or cannot be read.
     pub(crate) read: &'a dyn Fn(&str) -> Option<Vec<u8>>,
+    /// Whether the `login` source's store holds a session for the target: `Err` with
+    /// the reason it cannot be used (no entry, the store cannot be reached, the `login`
+    /// feature is off).
+    pub(crate) login_entry: &'a dyn Fn(&LoginTarget) -> Result<(), String>,
+}
+
+/// The stored sign-in a profile of `kind = "person"` names: where its session lives and
+/// what it refreshes with (`docs/config.md` section 5.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoginTarget {
+    pub(crate) profile: String,
+    pub(crate) account: String,
+    /// The profile's `storage = "file"`; otherwise the operating system's store.
+    pub(crate) file_store: bool,
+    /// The config file's directory, whose `secrets` folder holds a file store.
+    pub(crate) dir: String,
+    pub(crate) issuer: Option<String>,
+    pub(crate) client_id: Option<String>,
 }
 
 use crate::error::Problem;
@@ -348,6 +366,7 @@ struct Resolver<'a> {
     ignored: Vec<Value>,
     /// Secret values by setting, never in `settings`.
     secrets: BTreeMap<String, Secret<String>>,
+    login: Option<LoginTarget>,
 }
 
 /// Parses a duration: digits, then `ms`, `s`, `m` or `h`, greater than zero. The value
@@ -469,6 +488,8 @@ pub(crate) fn valid_profile(name: &str) -> bool {
 pub(crate) struct Resolved {
     pub(crate) describe: Value,
     pub(crate) secrets: BTreeMap<String, Secret<String>>,
+    /// The stored sign-in, when the chain chose the `login` source.
+    pub(crate) login: Option<LoginTarget>,
 }
 
 /// Resolves the configuration. `Ok` holds the `describe()` document.
@@ -619,6 +640,7 @@ pub(crate) fn resolve(inp: &Inputs<'_>) -> Result<Resolved, Invalid> {
         settings: Map::new(),
         ignored: Vec::new(),
         secrets: BTreeMap::new(),
+        login: None,
     };
     r.check_file_keys();
     r.resolve_settings();
@@ -632,6 +654,7 @@ pub(crate) fn resolve(inp: &Inputs<'_>) -> Result<Resolved, Invalid> {
     }
     let credential = credential.unwrap_or(Value::Null);
     let secrets = std::mem::take(&mut r.secrets);
+    let login = r.login.take();
     Ok(Resolved {
         describe: json!({
             "profile": profile.map_or(Value::Null, |(name, source)| json!({ "name": name, "source": source })),
@@ -642,6 +665,7 @@ pub(crate) fn resolve(inp: &Inputs<'_>) -> Result<Resolved, Invalid> {
             "ignored": r.ignored,
         }),
         secrets,
+        login,
     })
 }
 
@@ -919,7 +943,7 @@ impl Resolver<'_> {
                     && let Some(bad) = l.iter().find(|x| !SOURCES.contains(&x.as_str()))
                 {
                     return Err(format!(
-                        "{bad:?} is not a credential source; use env, workload, file or cli"
+                        "{bad:?} is not a credential source; use env, workload, file, login or cli"
                     ));
                 }
                 if s.name == "no_proxy" {
@@ -1032,7 +1056,7 @@ impl Resolver<'_> {
     }
 
     /// The credential chain (section 5.1). `None` when a problem stopped it.
-    #[allow(clippy::too_many_lines, reason = "the five sources in order")]
+    #[allow(clippy::too_many_lines, reason = "the sources in order")]
     fn chain(&mut self, profile: Option<&str>, table: Option<&toml::Table>) -> Option<Value> {
         let mut tried: Vec<Value> = Vec::new();
         let skip = |tried: &mut Vec<Value>, source: &str, reason: &str| {
@@ -1266,6 +1290,52 @@ impl Resolver<'_> {
             }
         }
 
+        // 4.5. The stored sign-in of a person's profile.
+        if used.is_none() {
+            let kind = table
+                .and_then(|t| t.get("kind"))
+                .and_then(toml::Value::as_str);
+            let account = table
+                .and_then(|t| t.get("account"))
+                .and_then(toml::Value::as_str);
+            let name = profile.unwrap_or_default();
+            if !self.allowed("login") {
+                skip(&mut tried, "login", "not in credential_sources");
+            } else if profile.is_none() {
+                skip(&mut tried, "login", "skipped, no profile chosen");
+            } else if kind != Some("person") {
+                let reason =
+                    format!("profile {name} is not a person's sign-in (kind is not person)");
+                skip(&mut tried, "login", &reason);
+            } else if let Some(account) = account {
+                let text = |k: &str| {
+                    table
+                        .and_then(|t| t.get(k))
+                        .and_then(toml::Value::as_str)
+                        .map(str::to_owned)
+                };
+                let target = LoginTarget {
+                    profile: name.to_owned(),
+                    account: account.to_owned(),
+                    file_store: text("storage").as_deref() == Some("file"),
+                    dir: self.file_dir.clone(),
+                    issuer: text("issuer"),
+                    client_id: text("client_id"),
+                };
+                match (self.inp.login_entry)(&target) {
+                    Ok(()) => {
+                        tried.push(json!({ "source": "login", "result": "used" }));
+                        used = Some(("login", "login"));
+                        self.login = Some(target);
+                    }
+                    Err(reason) => skip(&mut tried, "login", &reason),
+                }
+            } else {
+                let reason = format!("profile {name} has no account");
+                skip(&mut tried, "login", &reason);
+            }
+        }
+
         // 5. The iohr login.
         if used.is_none() {
             let program = self
@@ -1310,7 +1380,7 @@ impl Resolver<'_> {
             }
             let _ = write!(
                 m,
-                "\nSet {p}KEY_ID, {p}KEY_SECRET and {p}SCOPES, or {p}TOKEN, or run `iohr login`."
+                "\nSet {p}KEY_ID, {p}KEY_SECRET and {p}SCOPES, or {p}TOKEN, or sign in with `iohr login`."
             );
             self.problem("credential", "", m);
             return None;
@@ -1460,6 +1530,7 @@ mod command_line_keys {
             profile_type: None,
             cli_found: &found,
             read: &read,
+            login_entry: &|_| Err("none".to_owned()),
         };
         let resolved = resolve(&inputs).unwrap_or_else(|e| panic!("{:?}", e.problems));
         let text = resolved.describe.to_string();

@@ -796,6 +796,18 @@ impl<P: TokenProvider + 'static> CachedToken<P> {
     }
 }
 
+impl<P> CachedToken<P> {
+    /// Tells the client's logger and token-exchange counter of this cache's fetches,
+    /// the same hook every built-in source uses.
+    #[cfg(feature = "login")]
+    pub(crate) fn attach(&self, logger: &Logger, exchanged: Option<Exchanged>) {
+        let _ = self.cache.logger.set(logger.clone());
+        if let Some(f) = exchanged {
+            let _ = self.cache.exchanged.set(f);
+        }
+    }
+}
+
 impl<P: TokenProvider + 'static> TokenProvider for CachedToken<P> {
     async fn token(&self) -> Result<Token, AuthError> {
         let inner = Arc::clone(&self.inner);
