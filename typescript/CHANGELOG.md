@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.2](https://github.com/inorbithr/sdk/compare/typescript/v0.3.1...typescript/v0.3.2) (2026-11-14)
+
+
+### Bug fixes
+
+* keep tokens and key secrets out of JSON and structured logs in every SDK ([#466](https://github.com/inorbithr/sdk/issues/466)) ([d85ea3c](https://github.com/inorbithr/sdk/commit/d85ea3ced0fe8165ed159af32f3c133493cad5ea))
+
+
+### Documentation
+
+* **docs:** READMEs match today's SDKs and CLI ([#323](https://github.com/inorbithr/sdk/issues/323)) ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+* **sdk:** READMEs match today's SDKs and CLI ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+
+
+### Dependencies
+
+* **ts:** bump @opentelemetry/api ([c049666](https://github.com/inorbithr/sdk/commit/c049666324436d9c29355da96b93387ac0d75cbf))
+* **ts:** bump @opentelemetry/api from 1.9.1 to 1.10.0 in /typescript in the ts group across 1 directory ([#338](https://github.com/inorbithr/sdk/issues/338)) ([c049666](https://github.com/inorbithr/sdk/commit/c049666324436d9c29355da96b93387ac0d75cbf))
+
 ## [0.3.1](https://github.com/inorbithr/sdk/compare/typescript/v0.3.0...typescript/v0.3.1) (2026-10-24)
 
 
