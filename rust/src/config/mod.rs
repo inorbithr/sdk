@@ -30,6 +30,17 @@ pub use resolve::{Os, PIPELINE};
 use crate::error::ConfigError;
 use crate::secret::Secret;
 
+/// The injected sign-in store. Wrapped so `LoadOptions` stays `UnwindSafe` and
+/// `RefUnwindSafe` (published auto traits); the store is only ever cloned out.
+#[cfg(feature = "login")]
+#[derive(Clone)]
+struct HeldStore(std::sync::Arc<dyn crate::login::Store>);
+
+#[cfg(feature = "login")]
+impl std::panic::UnwindSafe for HeldStore {}
+#[cfg(feature = "login")]
+impl std::panic::RefUnwindSafe for HeldStore {}
+
 /// What `load` reads instead of the process, for tests and tools: the environment, the
 /// operating system's conventions, the home directory and the working directory
 /// (`docs/config.md` section 9.2). Anything not set is the process's own.
@@ -54,7 +65,7 @@ pub struct LoadOptions {
     home: Option<Option<String>>,
     cwd: Option<String>,
     #[cfg(feature = "login")]
-    login_store: Option<std::sync::Arc<dyn crate::login::Store>>,
+    login_store: Option<HeldStore>,
 }
 
 /// Names the variables, never their values: the environment may hold secrets.
@@ -116,13 +127,15 @@ impl LoadOptions {
     #[cfg(feature = "login")]
     #[must_use]
     pub fn login_store(mut self, store: std::sync::Arc<dyn crate::login::Store>) -> Self {
-        self.login_store = Some(store);
+        self.login_store = Some(HeldStore(store));
         self
     }
 
     #[cfg(feature = "login")]
     pub(crate) fn login_store_ref(&self) -> Option<std::sync::Arc<dyn crate::login::Store>> {
-        self.login_store.clone()
+        self.login_store
+            .as_ref()
+            .map(|s| std::sync::Arc::clone(&s.0))
     }
 
     pub(crate) fn env_map(&self) -> BTreeMap<String, String> {
