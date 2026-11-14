@@ -1,4 +1,4 @@
-use inorbithr::login::{ClaimsError, ConfigError, RandomError, StoreError};
+use inorbithr::login::{ClaimsError, ConfigError, LoginError, RandomError, StoreError};
 
 /// Why a credential could not be produced or kept.
 #[derive(Debug, thiserror::Error)]
@@ -74,5 +74,30 @@ pub enum AuthError {
 impl From<RandomError> for AuthError {
     fn from(e: RandomError) -> Self {
         Self::Random(e.to_string())
+    }
+}
+
+/// The SDK's sign-in errors, with the commands that fix them: the SDK cannot name
+/// `iohr login`, the command line does.
+impl From<LoginError> for AuthError {
+    fn from(e: LoginError) -> Self {
+        match e {
+            LoginError::NotSignedIn { profile } => Self::NotSignedIn { profile },
+            LoginError::SessionEnded { profile } => Self::SessionEnded { profile },
+            LoginError::Claims(e) => Self::Claims(e),
+            LoginError::Store(e) => Self::Store(e),
+            LoginError::Config(e) => Self::Config(e),
+            LoginError::Discovery(m) => Self::Discovery(m),
+            LoginError::Http(m) => Self::Http(m),
+            LoginError::OAuth { error, description } => Self::OAuth { error, description },
+            LoginError::Denied => Self::Denied,
+            LoginError::TimedOut => Self::TimedOut,
+            LoginError::StateMismatch => Self::StateMismatch,
+            LoginError::IssuerMismatch => Self::IssuerMismatch,
+            LoginError::Callback(m) => Self::Callback(m),
+            LoginError::NoDeviceGrant => Self::NoDeviceGrant,
+            LoginError::Random(m) => Self::Random(m),
+            other => Self::Http(other.to_string()),
+        }
     }
 }

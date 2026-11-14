@@ -29,6 +29,7 @@ encrypted-key = ["rustls", "dep:pkcs8"]
 # and the access-token claims, as `inorbithr::login`. Off by default: a program that only
 # uses keys compiles none of the store code (tests/login_features.rs proves it).
 login = [
+  "rustls",
   "dep:keyring-core",
   "dep:sha2",
   "dep:toml_edit",
@@ -100,6 +101,7 @@ windows-native-keyring-store = { version = "1", optional = true }
 zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"], optional = true }
 
 [dev-dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["http2", "json", "query", "form", "cookies"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "test-util"] }
 wiremock = "0.6"
 serde-saphyr = "2"

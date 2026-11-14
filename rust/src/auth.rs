@@ -18,6 +18,7 @@ use crate::retry::{
     BACKOFF_BASE, BACKOFF_CAP, RETRY_AFTER_CAP, backoff, retry_after, retryable_status,
 };
 use crate::secret::Secret;
+use crate::transport::{Capped, read_capped};
 
 /// An access token and when it stops being valid.
 #[derive(Debug, Clone)]
@@ -504,13 +505,10 @@ impl Exchange {
             }
             let resp = outcome.map_err(|e| AuthError::Transport(transport_reason(&e)))?;
             let status = resp.status().as_u16();
-            if resp.content_length().is_some_and(|n| n > MAX_BODY as u64) {
-                return Err(AuthError::Transport("the answer is too large".into()));
-            }
-            let body = resp
-                .bytes()
-                .await
-                .map_err(|e| AuthError::Transport(transport_reason(&e)))?;
+            let body = read_capped(resp, MAX_BODY).await.map_err(|e| match e {
+                Capped::TooLarge => AuthError::Transport("the answer is too large".into()),
+                Capped::Read(e) => AuthError::Transport(transport_reason(&e)),
+            })?;
             if !(200..300).contains(&status) {
                 let refusal = serde_json::from_slice::<Refusal>(&body).unwrap_or_default();
                 return Err(AuthError::Exchange {
@@ -891,17 +889,16 @@ impl TokenProvider for ChainedCredential {
 /// values, SR-13).
 pub(crate) fn transport_reason(e: &reqwest::Error) -> String {
     let mut parts = Vec::new();
+    if e.is_timeout() {
+        parts.push("timed out".to_owned());
+    }
     let mut source: Option<&dyn std::error::Error> = std::error::Error::source(e);
     while let Some(s) = source {
         parts.push(s.to_string());
         source = s.source();
     }
     if parts.is_empty() {
-        if e.is_timeout() {
-            "timed out".to_owned()
-        } else {
-            "the connection failed".to_owned()
-        }
+        "the connection failed".to_owned()
     } else {
         parts.join(": ")
     }
@@ -977,5 +974,40 @@ mod tests {
         assert_eq!(p.token().await.unwrap().expose(), "two");
         p.invalidate().await;
         assert!(p.token().await.is_err());
+    }
+
+    /// SR-19: a token answer with no Content-Length is still cut off at `MAX_BODY`.
+    #[tokio::test]
+    async fn a_streamed_token_answer_over_the_cap_is_refused() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf).await;
+            let head = b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                transfer-encoding: chunked\r\n\r\n";
+            sock.write_all(head).await.unwrap();
+            let chunk = vec![b' '; 64 * 1024];
+            let size = format!("{:x}\r\n", chunk.len());
+            for _ in 0..=(crate::error::MAX_BODY / chunk.len()) {
+                if sock.write_all(size.as_bytes()).await.is_err()
+                    || sock.write_all(&chunk).await.is_err()
+                    || sock.write_all(b"\r\n").await.is_err()
+                {
+                    return;
+                }
+            }
+            let _ = sock.write_all(b"0\r\n\r\n").await;
+        });
+        let url = url::Url::parse(&format!("http://{addr}/oauth2/token")).unwrap();
+        let p = ClientCredentials::new("ak_1", Secret::from("s"), ["identity:read"])
+            .unwrap()
+            .token_url(url);
+        let err = p.token().await.unwrap_err().to_string();
+        assert!(err.contains("the answer is too large"), "{err}");
+        server.abort();
     }
 }

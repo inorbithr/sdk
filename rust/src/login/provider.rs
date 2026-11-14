@@ -8,13 +8,14 @@ use serde::Deserialize;
 use time::OffsetDateTime;
 use url::Url;
 
-use crate::Redacted;
-use crate::error::AuthError;
-use inorbithr::login::Claims;
+use super::{Claims, LoginError};
+use crate::auth::transport_reason;
+use crate::secret::Secret;
+use crate::transport::{Capped, read_capped};
 
 /// The InOrbit sign-in service.
 pub const DEFAULT_ISSUER: &str = "https://auth.inorbit.hr";
-/// The command line's public OAuth client: no secret, PKCE required.
+/// The public OAuth client the command line (and any program using the default) signs in as: no secret, PKCE required.
 pub const DEFAULT_CLIENT_ID: &str = "iohr-cli";
 /// What a person's session asks for: an ID token, a refresh token, the API.
 pub(crate) const SCOPES: &str = "openid offline_access iohr.api";
@@ -24,7 +25,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// The largest answer read from the sign-in service.
 const MAX_BODY: usize = 256 * 1024;
 
-/// A discovered identity provider and the client the command line signs in as.
+/// A discovered identity provider and the client the program signs in as.
 #[derive(Debug, Clone)]
 pub struct Provider {
     pub(crate) http: reqwest::Client,
@@ -54,18 +55,18 @@ impl Provider {
     ///
     /// # Errors
     ///
-    /// [`AuthError::Discovery`] when the issuer URL is not HTTPS (loopback excepted),
+    /// [`LoginError::Discovery`] when the issuer URL is not HTTPS (loopback excepted),
     /// the document cannot be fetched, or it fails a check.
-    pub async fn discover(issuer: &str, client_id: &str) -> Result<Self, AuthError> {
+    pub async fn discover(issuer: &str, client_id: &str) -> Result<Self, LoginError> {
         let base = checked_origin(issuer)?;
         let http = reqwest::Client::builder()
-            .user_agent(concat!("iohr/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("inorbithr/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
             .https_only(base.scheme() == "https")
             .build()
-            .map_err(|e| AuthError::Discovery(format!("cannot start the HTTP client: {e}")))?;
+            .map_err(|e| LoginError::Discovery(format!("cannot start the HTTP client: {e}")))?;
         let url = format!(
             "{}/.well-known/openid-configuration",
             issuer.trim_end_matches('/')
@@ -74,30 +75,30 @@ impl Provider {
             .get(&url)
             .send()
             .await
-            .map_err(|e| AuthError::Discovery(reason(&e)))?;
+            .map_err(|e| LoginError::Discovery(transport_reason(&e)))?;
         if !resp.status().is_success() {
-            return Err(AuthError::Discovery(format!(
+            return Err(LoginError::Discovery(format!(
                 "{url} answered HTTP {}",
                 resp.status().as_u16()
             )));
         }
-        let doc: Discovery = serde_json::from_slice(&read_capped(resp).await?).map_err(|e| {
-            AuthError::Discovery(format!("the OpenID configuration is not valid: {e}"))
+        let doc: Discovery = serde_json::from_slice(&read_answer(resp).await?).map_err(|e| {
+            LoginError::Discovery(format!("the OpenID configuration is not valid: {e}"))
         })?;
         // RFC 8414 section 3.3: the issuer in the document is the one asked for.
         if doc.issuer != issuer {
-            return Err(AuthError::Discovery(format!(
+            return Err(LoginError::Discovery(format!(
                 "the provider says it is {}, not {issuer}",
                 doc.issuer
             )));
         }
-        let endpoint = |raw: &str| -> Result<Url, AuthError> {
-            let u =
-                Url::parse(raw).map_err(|_| AuthError::Discovery(format!("{raw} is not a URL")))?;
+        let endpoint = |raw: &str| -> Result<Url, LoginError> {
+            let u = Url::parse(raw)
+                .map_err(|_| LoginError::Discovery(format!("{raw} is not a URL")))?;
             if u.origin() == base.origin() {
                 Ok(u)
             } else {
-                Err(AuthError::Discovery(format!("{raw} is not on {issuer}")))
+                Err(LoginError::Discovery(format!("{raw} is not on {issuer}")))
             }
         };
         Ok(Self {
@@ -147,6 +148,12 @@ impl Provider {
         all.join(" ")
     }
 
+    /// Whether the sign-in service offers token revocation (RFC 7009).
+    #[must_use]
+    pub fn can_revoke(&self) -> bool {
+        self.revocation_endpoint.is_some()
+    }
+
     /// The OAuth client id.
     #[must_use]
     pub fn client_id(&self) -> &str {
@@ -168,9 +175,9 @@ impl Provider {
             .form(form)
             .send()
             .await
-            .map_err(|e| TokenError::Transport(reason(&e)))?;
+            .map_err(|e| TokenError::Transport(transport_reason(&e)))?;
         let status = resp.status();
-        let body = read_capped(resp)
+        let body = read_answer(resp)
             .await
             .map_err(|e| TokenError::Transport(e.to_string()))?;
         if status.is_success() {
@@ -180,7 +187,7 @@ impl Provider {
                 )
             });
         }
-        match serde_json::from_slice::<OAuthErrorWire>(&body) {
+        match serde_json::from_slice::<OLoginErrorWire>(&body) {
             Ok(e) => Err(TokenError::OAuth {
                 error: e.error,
                 description: e.error_description.unwrap_or_default(),
@@ -196,13 +203,13 @@ impl Provider {
     ///
     /// # Errors
     ///
-    /// [`AuthError::Http`] when the provider has no revocation endpoint or the call
+    /// [`LoginError::Http`] when the provider has no revocation endpoint or the call
     /// fails.
-    pub async fn revoke(&self, refresh_token: &Redacted<String>) -> Result<(), AuthError> {
+    pub async fn revoke(&self, refresh_token: &Secret<String>) -> Result<(), LoginError> {
         let url = self
             .revocation_endpoint
             .clone()
-            .ok_or_else(|| AuthError::Http("the provider cannot revoke tokens".into()))?;
+            .ok_or_else(|| LoginError::Http("the provider cannot revoke tokens".into()))?;
         let resp = self
             .http
             .post(url)
@@ -213,11 +220,11 @@ impl Provider {
             ])
             .send()
             .await
-            .map_err(|e| AuthError::Http(reason(&e)))?;
+            .map_err(|e| LoginError::Http(transport_reason(&e)))?;
         if resp.status().is_success() {
             Ok(())
         } else {
-            Err(AuthError::Http(format!(
+            Err(LoginError::Http(format!(
                 "revoking answered HTTP {}",
                 resp.status().as_u16()
             )))
@@ -233,9 +240,9 @@ impl Provider {
         wire: TokenResponse,
         need_refresh: bool,
         need_id_token: bool,
-    ) -> Result<Tokens, AuthError> {
+    ) -> Result<Tokens, LoginError> {
         if !wire.token_type.eq_ignore_ascii_case("bearer") {
-            return Err(AuthError::Http(format!(
+            return Err(LoginError::Http(format!(
                 "unexpected token type {}",
                 wire.token_type
             )));
@@ -244,11 +251,13 @@ impl Provider {
         let claims = Claims::read(wire.access_token.expose(), now)?;
         match (&wire.id_token, need_id_token) {
             (Some(id), _) => self.check_id_token(id)?,
-            (None, true) => return Err(AuthError::Http("the sign-in returned no ID token".into())),
+            (None, true) => {
+                return Err(LoginError::Http("the sign-in returned no ID token".into()));
+            }
             (None, false) => {}
         }
         if need_refresh && wire.refresh_token.is_none() {
-            return Err(AuthError::Http(
+            return Err(LoginError::Http(
                 "the sign-in returned no refresh token (offline_access)".into(),
             ));
         }
@@ -265,33 +274,35 @@ impl Provider {
         })
     }
 
-    fn check_id_token(&self, id: &Redacted<String>) -> Result<(), AuthError> {
+    fn check_id_token(&self, id: &Secret<String>) -> Result<(), LoginError> {
         #[derive(Deserialize)]
         struct IdClaims {
             iss: String,
-            #[serde(deserialize_with = "inorbithr::login::audiences")]
+            #[serde(deserialize_with = "super::audiences")]
             aud: Vec<String>,
         }
-        let bad = || AuthError::Http("the ID token cannot be read".into());
+        let bad = || LoginError::Http("the ID token cannot be read".into());
         let payload = id.expose().split('.').nth(1).ok_or_else(bad)?;
         let bytes = URL_SAFE_NO_PAD
             .decode(payload.trim_end_matches('='))
             .map_err(|_| bad())?;
         let c: IdClaims = serde_json::from_slice(&bytes).map_err(|_| bad())?;
         if c.iss != self.issuer {
-            return Err(AuthError::IssuerMismatch);
+            return Err(LoginError::IssuerMismatch);
         }
         if !c.aud.iter().any(|a| a == &self.client_id) {
-            return Err(AuthError::Http("the ID token is for another client".into()));
+            return Err(LoginError::Http(
+                "the ID token is for another client".into(),
+            ));
         }
         Ok(())
     }
 }
 
 /// HTTPS, or HTTP to this machine, with nothing but an origin and an optional path.
-fn checked_origin(issuer: &str) -> Result<Url, AuthError> {
+fn checked_origin(issuer: &str) -> Result<Url, LoginError> {
     let u =
-        Url::parse(issuer).map_err(|_| AuthError::Discovery(format!("{issuer} is not a URL")))?;
+        Url::parse(issuer).map_err(|_| LoginError::Discovery(format!("{issuer} is not a URL")))?;
     let loopback = match u.host() {
         Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
         Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
@@ -300,63 +311,36 @@ fn checked_origin(issuer: &str) -> Result<Url, AuthError> {
     };
     let scheme_ok = u.scheme() == "https" || (u.scheme() == "http" && loopback);
     if !scheme_ok || u.query().is_some() || u.fragment().is_some() || !u.username().is_empty() {
-        return Err(AuthError::Discovery(format!(
+        return Err(LoginError::Discovery(format!(
             "{issuer} must be an https URL (plain http only to this machine)"
         )));
     }
     Ok(u)
 }
 
-async fn read_capped(mut resp: reqwest::Response) -> Result<Vec<u8>, AuthError> {
-    let mut body = Vec::new();
-    while let Some(chunk) = resp
-        .chunk()
-        .await
-        .map_err(|e| AuthError::Http(reason(&e)))?
-    {
-        if body.len() + chunk.len() > MAX_BODY {
-            return Err(AuthError::Http(
-                "the sign-in service answered too much".into(),
-            ));
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
+/// The sign-in service's answer, read through the SDK's one capped reader.
+pub(crate) async fn read_answer(resp: reqwest::Response) -> Result<Vec<u8>, LoginError> {
+    read_capped(resp, MAX_BODY).await.map_err(|e| match e {
+        Capped::TooLarge => LoginError::Http("the sign-in service answered too much".into()),
+        Capped::Read(e) => LoginError::Http(transport_reason(&e)),
+    })
 }
 
-/// The error's causes without the URL, which may carry a code.
-pub(crate) fn reason(e: &reqwest::Error) -> String {
-    let mut parts = Vec::new();
-    let mut source: Option<&dyn std::error::Error> = std::error::Error::source(e);
-    while let Some(s) = source {
-        parts.push(s.to_string());
-        source = s.source();
-    }
-    if e.is_timeout() {
-        parts.insert(0, "timed out".into());
-    }
-    if parts.is_empty() {
-        "the connection failed".into()
-    } else {
-        parts.join(": ")
-    }
-}
-
-/// A token endpoint answer. Its secrets are [`Redacted`] from the moment they are read.
+/// A token endpoint answer. Its secrets are [`Secret`] from the moment they are read.
 #[derive(Deserialize)]
 pub(crate) struct TokenResponse {
-    pub(crate) access_token: Redacted<String>,
+    pub(crate) access_token: Secret<String>,
     pub(crate) token_type: String,
     #[serde(default)]
     pub(crate) expires_in: Option<i64>,
     #[serde(default)]
-    pub(crate) refresh_token: Option<Redacted<String>>,
+    pub(crate) refresh_token: Option<Secret<String>>,
     #[serde(default)]
-    pub(crate) id_token: Option<Redacted<String>>,
+    pub(crate) id_token: Option<Secret<String>>,
 }
 
 #[derive(Deserialize)]
-struct OAuthErrorWire {
+struct OLoginErrorWire {
     error: String,
     #[serde(default)]
     error_description: Option<String>,
@@ -371,7 +355,7 @@ pub(crate) enum TokenError {
     Transport(String),
 }
 
-impl From<TokenError> for AuthError {
+impl From<TokenError> for LoginError {
     fn from(e: TokenError) -> Self {
         match e {
             TokenError::OAuth { error, .. } if error == "access_denied" => Self::Denied,
@@ -383,8 +367,8 @@ impl From<TokenError> for AuthError {
 
 /// Checked tokens from a grant or a refresh.
 pub(crate) struct Tokens {
-    pub(crate) access: Redacted<String>,
-    pub(crate) refresh: Option<Redacted<String>>,
+    pub(crate) access: Secret<String>,
+    pub(crate) refresh: Option<Secret<String>>,
     pub(crate) expires_at: OffsetDateTime,
     pub(crate) claims: Claims,
 }

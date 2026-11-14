@@ -109,7 +109,14 @@ store. Slices, each its own PR:
       keychain crate), `login_store.rs` (two sessions, one store), `login_profile.rs`.
       Found 2026-11-14: the SDK left five command-line keys alone but `iohr` writes six
       (`account_pinned`); fixed with a test.
-- [ ] 3. The flows (authorization code with PKCE, device code, refresh)
+- [x] 3. The flows (authorization code with PKCE, device code, refresh, sign-out):
+      `inorbithr::login::{Provider, Login, Authorization, Session, SignOut, open_browser}`;
+      the flows moved out of `iohr-auth`, the provider answers use the transport's capped
+      reader. Tests: `login_flows.rs`, `login_secrets.rs`, `login_hydra.rs` (`mise run
+      cli:hydra`). Behaviour change: `iohr logout` now always deletes the local session,
+      even when the revoke fails, and says so (it used to keep it and exit 1). The RFC
+      names `Session::save`; the code also has `Session::access_token()` in place of a
+      `Credential` impl, which the `login` source will use in slice 4.
 - [ ] 4. The `login` credential source in the chain (config.md section 5.1)
 - [ ] 5. Delete `iohr-auth`
 

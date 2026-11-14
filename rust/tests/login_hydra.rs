@@ -7,6 +7,7 @@
 //! accepts the login, consent and device-code steps through Hydra's admin API, as the
 //! platform's sign-in pages do.
 
+#![cfg(feature = "login")]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -16,9 +17,9 @@
 
 use std::sync::Arc;
 
-use iohr_auth::{
-    AuthError, Authorization, Browser, Credential, Device, EntryKey, MemoryStore, Provider,
-    Redacted, Session, Store,
+use inorbithr::Secret;
+use inorbithr::login::{
+    EntryKey, Login, LoginError, MemoryStore, Provider, Session, SignOut, Store,
 };
 use reqwest::header::LOCATION;
 use url::Url;
@@ -169,7 +170,7 @@ fn expire(store: &Arc<dyn Store>) -> String {
         serde_json::from_str(store.get(&key()).unwrap().unwrap().expose()).unwrap();
     v["expires_at"] = serde_json::json!(0);
     let refresh = v["refresh_token"].as_str().unwrap().to_owned();
-    store.set(&key(), &Redacted::new(v.to_string())).unwrap();
+    store.set(&key(), &Secret::new(v.to_string())).unwrap();
     refresh
 }
 
@@ -178,7 +179,7 @@ async fn browser_sign_in_refresh_and_revocation() {
     let Some(h) = hydra() else { return };
     seed(&h).await;
     let provider = Provider::discover(&h.public, CLIENT).await.unwrap();
-    let auth = Authorization::<Browser>::start(provider).await.unwrap();
+    let auth = Login::browser(&provider).await.unwrap();
     let url = auth.url().to_string();
 
     let b = browser();
@@ -192,30 +193,40 @@ async fn browser_sign_in_refresh_and_revocation() {
     assert_eq!(granted.subject(), "person-browser");
 
     let store: Arc<dyn Store> = Arc::new(MemoryStore::default());
-    let session = Session::create(granted, Arc::clone(&store), key())
+    let session = Session::save(granted, Arc::clone(&store), key())
         .await
         .unwrap();
-    assert!(session.bearer().await.unwrap().expose().starts_with("eyJ"));
+    assert!(
+        session
+            .access_token()
+            .await
+            .unwrap()
+            .expose()
+            .starts_with("eyJ")
+    );
 
     // A real refresh rotates the refresh token and writes it back.
     let before = expire(&store);
     let session = Session::load(Arc::clone(&store), key(), &h.public, CLIENT)
         .await
         .unwrap();
-    session.bearer().await.unwrap();
+    session.access_token().await.unwrap();
     let after: serde_json::Value =
         serde_json::from_str(store.get(&key()).unwrap().unwrap().expose()).unwrap();
     assert_ne!(after["refresh_token"].as_str().unwrap(), before, "rotated");
 
     // Revoked, the session cannot be refreshed any more.
-    session.revoke().await.unwrap();
+    let kept = store.get(&key()).unwrap().unwrap();
+    assert_eq!(session.sign_out().await.unwrap(), SignOut::Revoked);
+    assert!(store.get(&key()).unwrap().is_none(), "the entry is deleted");
+    store.set(&key(), &kept).unwrap();
     expire(&store);
     let session = Session::load(Arc::clone(&store), key(), &h.public, CLIENT)
         .await
         .unwrap();
     assert!(matches!(
-        session.bearer().await.unwrap_err(),
-        AuthError::SessionEnded { .. }
+        session.access_token().await.unwrap_err(),
+        LoginError::SessionEnded { .. }
     ));
 }
 
@@ -224,7 +235,7 @@ async fn device_sign_in() {
     let Some(h) = hydra() else { return };
     seed(&h).await;
     let provider = Provider::discover(&h.public, CLIENT).await.unwrap();
-    let auth = Authorization::<Device>::start(provider).await.unwrap();
+    let auth = Login::device(&provider).await.unwrap();
     let complete = auth
         .verification_uri_complete()
         .expect("a complete link")
@@ -256,7 +267,7 @@ async fn a_wrong_device_code_is_not_accepted() {
     let Some(h) = hydra() else { return };
     seed(&h).await;
     let provider = Provider::discover(&h.public, CLIENT).await.unwrap();
-    let auth = Authorization::<Device>::start(provider).await.unwrap();
+    let auth = Login::device(&provider).await.unwrap();
     let b = browser();
     let page = location(&b, auth.verification_uri_complete().unwrap().as_str()).await;
     let r = reqwest::Client::new()

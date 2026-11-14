@@ -1,7 +1,7 @@
 use std::fmt;
 use std::process::ExitCode;
 
-use iohr_auth::{AuthError, ClaimsError, ConfigError, StoreError};
+use iohr_auth::{AuthError, ClaimsError, ConfigError, LoginError, StoreError};
 
 use inorbithr::Code;
 
@@ -115,6 +115,12 @@ impl From<AuthError> for Error {
             AuthError::Store(StoreError::WouldAsk) => Self::StoreWouldAsk(e.to_string()),
             other => Self::Failed(other.to_string()),
         }
+    }
+}
+
+impl From<LoginError> for Error {
+    fn from(e: LoginError) -> Self {
+        AuthError::from(e).into()
     }
 }
 
