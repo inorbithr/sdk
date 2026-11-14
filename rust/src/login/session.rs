@@ -257,9 +257,21 @@ impl Session {
     /// [`LoginError::SessionEnded`] when the refresh is refused and nothing newer is in
     /// the store, [`LoginError::Store`], or the sign-in service's error.
     pub async fn access_token(&self) -> Result<Secret<String>, LoginError> {
+        self.obtain(false).await.map(|(access, _)| access)
+    }
+
+    /// The access token and when it expires. With `rejected`, the access token held
+    /// now was refused by a server: a newer one another process stored is taken, and
+    /// otherwise the session refreshes at once, even with time left on the old one.
+    pub(crate) async fn obtain(
+        &self,
+        rejected: bool,
+    ) -> Result<(Secret<String>, OffsetDateTime), LoginError> {
         let mut current = self.current.lock().await;
-        if current.fresh() {
-            return Ok(current.access.clone());
+        let bad = rejected.then(|| current.access.clone());
+        let usable = |c: &Current| c.fresh() && bad.as_ref().is_none_or(|b| c.access != *b);
+        if usable(&current) {
+            return Ok((current.access.clone(), current.expires_at));
         }
         // Another process may have refreshed already.
         if let Some(stored) = read(&self.store, &self.key)
@@ -267,8 +279,8 @@ impl Session {
             .and_then(|s| Current::decode(&s))
         {
             *current = stored;
-            if current.fresh() {
-                return Ok(current.access.clone());
+            if usable(&current) {
+                return Ok((current.access.clone(), current.expires_at));
             }
         }
         let used = current.refresh.clone();
@@ -286,7 +298,7 @@ impl Session {
                         profile: self.profile.clone(),
                     });
                 };
-                if newer.fresh() {
+                if usable(&newer) {
                     newer
                 } else {
                     self.refresh_with(&newer.refresh)
@@ -302,7 +314,7 @@ impl Session {
         };
         self.persist(&next).await?;
         *current = next;
-        Ok(current.access.clone())
+        Ok((current.access.clone(), current.expires_at))
     }
 }
 

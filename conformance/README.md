@@ -118,7 +118,10 @@ A driver then:
 
    `base_url` is the listener the case's `client.transport` selects: `http_url` for
    none or `http`, `https_url` for `https` and `proxy` (with `proxy_url` as the proxy),
-   `mtls_url` for `mtls`. It is what `{replay}` stands for in `env` and `config_file`.
+   `mtls_url` for `mtls`. It is what `{replay}` stands for in `env` and `config_file`, and in an exchange's
+   response (the server writes it at load, so a sign-in service's discovery answer can name its
+   own endpoints). `{id_token:CLIENT}` in a response becomes an unsigned ID token from this
+   server for the client `CLIENT`.
 3. Points `base_url` and `token_url` (`{base_url}/oauth2/token`) at it, sets `ca_bundle`,
    `client_cert`, `client_key` and `proxy` as `client.transport` says, and runs the
    case's action.
@@ -190,7 +193,7 @@ The rest is the driver's. Where each new field is handled:
 | request `headers` matchers, `headers_absent`, `via`, `client_cert` | server |
 | `client.transport` | driver, with the server's `base_url`, `proxy_url`, `ca_file`, `client_cert_file`, `client_key_file` |
 | `client.cli` | driver (`cli_path` = the replay binary), the server binary answers |
-| `client.load`, `env`, `config_file`, `files`, `profile`, `credential_sources`; `{replay}` (= `base_url`) and `{dir}` substitution | driver |
+| `client.load`, `env`, `config_file`, `files`, `profile`, `credential_sources`, `stored_session` (seeds the credential store; a stepped store plays `rotated_by_another_process`), `expect.stored_session`, the `login.sign_out` and `login.device` ops; `{replay}` (= `base_url`) and `{dir}` substitution | driver |
 | `client.pipeline`, `log`, `log_headers`, `log_allow_headers`, `tracing`, `rate_limit`, `total_timeout_ms`, `retry_budget_capacity`, `no_proxy` | driver |
 | `action.options`, `action.rewrite` (file rotation between calls) | driver |
 | `expect.probes` (with the same matchers as request headers), `logs`, `spans`, `rate_limit`, `idempotency_key`, `config` | driver |

@@ -10,6 +10,7 @@
 //! SDK share one profile table and one store.
 
 pub mod browser;
+mod chain;
 mod claims;
 mod config;
 mod error;
@@ -23,6 +24,8 @@ mod store;
 
 pub use crate::auth::AUDIENCE;
 pub use browser::open as open_browser;
+pub use chain::StoredSession;
+pub(crate) use chain::probe;
 pub use claims::{Claims, ClaimsError, audiences};
 pub use config::{
     Config, ConfigError, Kind, Profile, ProfileName, ProfileNameError, Storage, create_new_private,
@@ -36,4 +39,5 @@ pub use provider::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER, Provider};
 pub use session::{Session, SignOut};
 pub use store::{
     EntryKey, FileStore, KeyringStore, MemoryStore, QuietStore, Store, StoreError, off_thread,
+    store_for,
 };

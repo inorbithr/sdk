@@ -6,9 +6,8 @@ use inorbithr::{
     Token, TokenProvider,
 };
 use iohr_auth::{
-    AuthError, Bearer, Claims, Config, Credential, EntryKey, FileStore, KeyringStore, Kind,
-    ProfileName, QuietStore, Redacted, Session as PersonSession, StaticToken, Storage, Store,
-    StoreError,
+    AuthError, Bearer, Claims, Config, Credential, EntryKey, Kind, ProfileName, Redacted,
+    Session as PersonSession, StaticToken, Storage, Store, StoreError,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -71,11 +70,11 @@ impl Ctx {
     ) -> Result<Arc<dyn Store>, Error> {
         #[cfg(test)]
         OPENED.with(|n| n.set(n.get() + 1));
-        Ok(match (storage, prompts) {
-            (Storage::File, _) => Arc::new(FileStore::new(self.dir.join("secrets"))),
-            (_, Prompts::Allowed) => Arc::new(KeyringStore::open()?),
-            (_, Prompts::Never) => Arc::new(QuietStore::new(Arc::new(KeyringStore::open()?))),
-        })
+        Ok(inorbithr::login::store_for(
+            storage,
+            &self.dir,
+            prompts == Prompts::Never,
+        )?)
     }
 
     /// The profile chosen by `--profile`, `IOHR_PROFILE`, or the default.

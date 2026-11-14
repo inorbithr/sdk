@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use keyring_core::{CredentialStore, Entry};
 
-use super::config::{ProfileName, write_private};
+use super::config::{ProfileName, Storage, write_private};
 use crate::secret::Secret;
 
 /// The service name every `iohr` entry carries in the OS credential store.
@@ -116,6 +116,24 @@ pub trait Store: Send + Sync {
     ///
     /// [`StoreError`] when the store cannot be written.
     fn delete(&self, key: &EntryKey) -> Result<bool, StoreError>;
+}
+
+/// The store a profile's secret lives in: its `secrets` folder under the config
+/// directory `dir` for [`Storage::File`], else the operating system's. With `quiet`
+/// the OS store is wrapped in a [`QuietStore`], so a call never waits on or shows a
+/// credential prompt; the file store never prompts and is never wrapped.
+///
+/// The command line and the SDK's `login` credential source both open stores here.
+///
+/// # Errors
+///
+/// [`StoreError::Unavailable`] when the OS store cannot be reached.
+pub fn store_for(storage: Storage, dir: &Path, quiet: bool) -> Result<Arc<dyn Store>, StoreError> {
+    Ok(match (storage, quiet) {
+        (Storage::File, _) => Arc::new(FileStore::new(dir.join("secrets"))),
+        (_, false) => Arc::new(KeyringStore::open()?),
+        (_, true) => Arc::new(QuietStore::new(Arc::new(KeyringStore::open()?))),
+    })
 }
 
 /// The operating system's credential store: macOS Keychain, Windows Credential
