@@ -1,4 +1,7 @@
-use iohr_auth::{EntryKey, Kind, Profile, ProfileName};
+use inorbithr::login::EntryKey;
+use inorbithr::login::Kind;
+use inorbithr::login::Profile;
+use inorbithr::login::ProfileName;
 use serde_json::Value;
 
 use crate::Env;

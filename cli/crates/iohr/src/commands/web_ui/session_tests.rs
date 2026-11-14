@@ -3,7 +3,7 @@
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use iohr_auth::Redacted;
+use inorbithr::Secret;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -56,7 +56,7 @@ async fn signed_in(
 ) {
     let dir = built_ui();
     let env = Env {
-        token: Some(Redacted::new(jwt())),
+        token: Some(Secret::new(jwt())),
         ..Env::default()
     };
     let panels = panels_with(

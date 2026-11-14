@@ -3,7 +3,7 @@
 # three advisories as rust/deny.toml and cli/osv-scanner.toml).
 
 # zbus 6 absorbed these three crates, so RustSec marks them unmaintained; no vulnerability and
-# no fixed version. They arrive through the optional `login` feature (moved here from iohr-auth,
+# no fixed version. They arrive through the optional `login` feature (moved here from the former iohr-auth crate,
 # RFC 0231) -> zbus-secret-service-keyring-store -> secret-service 5.2.0 (the latest) -> zbus 5,
 # with no release on zbus 6 yet (https://github.com/z-galaxy/zbus/issues/2043). Remove all three
 # once secret-service ships on zbus 6 (owner decision apr_01M57RXDB6NG3F183GPCJZC5SY).

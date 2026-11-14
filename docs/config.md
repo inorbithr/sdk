@@ -1046,8 +1046,9 @@ in-memory one) and the browser check, and now the sign-in flows themselves:
   transport uses); a larger one is refused unread. Tokens stay `Secret`: none appears in a
   log, URL, `Debug` or error string (tested).
 
-`iohr login`, `logout` and `auth token` call these; `iohr-auth` keeps only its profile
-wrapper.
+`iohr login`, `logout` and `auth token` call these. The command line has no second copy
+of them: its `auth` module keeps only what is the command line's own (the `[runner]`,
+`[ask]`, `[panel]` and other tables, and the `Credential` wrapper over the SDK's session).
 
 **Slice 4: the chain.** `StoredSession` is a `TokenProvider` over `Session`: it does not
 refresh, rotate or re-read the store itself, it asks `Session`, and it caches by the
@@ -1106,8 +1107,11 @@ required, loopback redirects on any port, refresh tokens that rotate. It can be 
 code (`client_id`), in the environment (`INORBIT_LOGIN_CLIENT_ID`) or in the profile
 table, in the precedence of section 2.1 (code, then environment, then the profile).
 A session belongs to the client that made it, and the profile's `client_id` names that
-client; a session refreshes with the client id the profile records, so a setting that
-disagrees with a stored session is reported, never used to sign the person out.
+client: a session refreshes with the client id its profile records, so when the profile
+records one it is used for the refresh and the environment value applies only to a
+profile that records none (a sign-in made with code or the environment records its own
+in the profile). The Rust SDK reads `INORBIT_LOGIN_CLIENT_ID` today; a setting that
+disagrees with a stored session is never used to sign the person out.
 
 **The store.** One entry per profile and account.
 
@@ -1140,6 +1144,12 @@ disagrees with a stored session is reported, never used to sign the person out.
   refresh (`invalid_grant`), it re-reads the entry once more and, if the refresh token
   there is not the one it sent, retries once with it. Only then is it an `AuthError`
   saying to sign in again. The SDK never signs the person out for a refresh it lost.
+- **A rotated credential found in the store.** When the re-read entry holds a newer
+  access token that is still fresh (more than 60 s left), the SDK takes it as it is and
+  makes no refresh at all: another process already did it, and a second refresh would
+  rotate the refresh token again for nothing. The case does not depend on the order
+  reads happen in; it is a property of the entry's content (conformance case
+  `a-refresh-refused-after-another-process-rotated`).
 - A 401 from the API invalidates the cached access token (section 5.3).
 
 **Signing in and out.**

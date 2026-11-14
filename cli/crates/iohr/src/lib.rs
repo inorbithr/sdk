@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod atlas;
+pub mod auth;
 pub mod cli;
 pub mod environments;
 pub mod ext;
@@ -18,6 +19,7 @@ pub mod roles;
 pub mod template;
 
 mod access;
+
 mod actions;
 mod args;
 mod ask;
@@ -78,20 +80,20 @@ pub use usage::{
     report_clap as report_usage_clap, report_failure, report_message as report_usage_message,
 };
 
-use iohr_auth::Redacted;
+use inorbithr::Secret;
 
 /// What the command line reads from its environment besides flags.
 #[derive(Debug, Default, Clone)]
 pub struct Env {
     /// `IOHR_TOKEN`: an API token used in memory, nothing written (SR-24).
-    pub token: Option<Redacted<String>>,
+    pub token: Option<Secret<String>>,
     /// `IOHR_TOKEN_<PROFILE>`: a token standing in for a named profile, for CI, where
     /// `iohr sdk check` runs and a person cannot sign in. Read on demand.
-    profile_tokens: std::collections::BTreeMap<String, Redacted<String>>,
+    profile_tokens: std::collections::BTreeMap<String, Secret<String>>,
     /// `IOHR_EXT_REGISTRY`: the registry for extensions, over `ext.registry`.
     pub ext_registry: Option<String>,
     /// `IOHR_EXT_REGISTRY_AUTH`: `user:password` for a private registry mirror.
-    pub ext_registry_auth: Option<Redacted<String>>,
+    pub ext_registry_auth: Option<Secret<String>>,
     /// `IOHR_SIGN_IDENTITY`: how an upgrade signs the new binary on macOS, over
     /// `upgrade_sign_identity` (`auto`, `-` or an identity).
     pub sign_identity: Option<String>,
@@ -101,7 +103,7 @@ impl Env {
     /// Reads the process environment.
     #[must_use]
     pub fn from_process() -> Self {
-        let read = |v: String| Redacted::new(v.trim().to_owned());
+        let read = |v: String| Secret::new(v.trim().to_owned());
         let token = std::env::var("IOHR_TOKEN")
             .ok()
             .filter(|t| !t.trim().is_empty())
@@ -133,7 +135,7 @@ impl Env {
 
     /// The token `IOHR_TOKEN_<PROFILE>` holds for `profile`, if any.
     #[must_use]
-    pub fn profile_token(&self, profile: &str) -> Option<&Redacted<String>> {
+    pub fn profile_token(&self, profile: &str) -> Option<&Secret<String>> {
         self.profile_tokens.get(&env_name(profile))
     }
 }

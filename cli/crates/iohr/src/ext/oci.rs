@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::time::{Duration, Instant};
 
-use iohr_auth::Redacted;
+use inorbithr::Secret;
 use reqwest::StatusCode;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::Deserialize;
@@ -341,8 +341,8 @@ pub(crate) struct Fetched {
 pub struct Registry {
     http: reqwest::Client,
     source: Source,
-    auth: Option<Redacted<String>>,
-    tokens: Mutex<HashMap<String, Redacted<String>>>,
+    auth: Option<Secret<String>>,
+    tokens: Mutex<HashMap<String, Secret<String>>>,
     verbose: bool,
 }
 
@@ -363,7 +363,7 @@ impl Registry {
     /// [`OciError::Config`] when the HTTP stack cannot start.
     pub fn new(
         source: Source,
-        auth: Option<Redacted<String>>,
+        auth: Option<Secret<String>>,
         verbose: bool,
     ) -> Result<Self, OciError> {
         let origin = source.base.origin();
@@ -647,7 +647,7 @@ impl Registry {
         &self,
         params: &HashMap<String, String>,
         repo: &str,
-    ) -> Result<Redacted<String>, OciError> {
+    ) -> Result<Secret<String>, OciError> {
         #[derive(Deserialize)]
         struct Wire {
             #[serde(default)]
@@ -692,7 +692,7 @@ impl Registry {
         w.token
             .or(w.access_token)
             .filter(|t| !t.is_empty())
-            .map(Redacted::new)
+            .map(Secret::new)
             .ok_or_else(|| self.refused("sent no pull token"))
     }
 
@@ -723,7 +723,7 @@ impl Registry {
     }
 }
 
-fn basic(auth: &Redacted<String>) -> Result<HeaderValue, OciError> {
+fn basic(auth: &Secret<String>) -> Result<HeaderValue, OciError> {
     use base64::Engine as _;
     let encoded = base64::engine::general_purpose::STANDARD.encode(auth.expose());
     let mut v = HeaderValue::from_str(&format!("Basic {encoded}"))

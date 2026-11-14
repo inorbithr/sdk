@@ -6,7 +6,7 @@ all-features = true
 [advisories]
 yanked = "deny"
 # zbus 6 absorbed these three crates, so RustSec marks them unmaintained; no vulnerability.
-# They arrive through iohr-auth -> zbus-secret-service-keyring-store -> secret-service 5 -> zbus 5,
+# They arrive through iohr -> inorbithr (login) -> zbus-secret-service-keyring-store -> secret-service 5 -> zbus 5,
 # with no release on zbus 6 yet (https://github.com/z-galaxy/zbus/issues/2043).
 # Remove all three once secret-service ships on zbus 6 (owner decision apr_01M57RXDB6NG3F183GPCJZC5SY).
 ignore = [

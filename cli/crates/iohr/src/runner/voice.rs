@@ -837,7 +837,9 @@ mod tests {
 
     use std::sync::Arc;
 
-    use iohr_auth::{Redacted, StaticToken};
+    use inorbithr::Secret;
+
+    use crate::auth::StaticToken;
     use serde_json::json;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1394,7 +1396,7 @@ mod tests {
     }
 
     fn api_at(uri: &str) -> Api {
-        let person = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+        let person = Arc::new(AnyCredential::Token(StaticToken::new(Secret::new(
             "person-token".to_owned(),
         ))));
         Api::new(uri, person, false).unwrap()

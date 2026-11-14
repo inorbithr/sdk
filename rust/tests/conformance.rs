@@ -394,19 +394,42 @@ struct Captured {
 /// The credential store a case's client reads, in memory: it holds the seeded session
 /// and, for `rotated_by_another_process`, plays a second process.
 ///
-/// The session reads the entry three times before it refreshes (the chain's probe,
-/// the load and the re-read under the lock). Every one of those returns the old entry.
-/// The fourth read, the re-read after the service refused the refresh token, finds the
-/// newer entry the other process wrote. A write of this process ends the stepping.
+/// The other process writes its newer entry once the replay server has answered the
+/// first token-endpoint call (the refresh the service refused), so the next read finds
+/// it. The trigger is the server's own count (`token_exchanges` in `/_result`), not how
+/// many times the store was read: how often the SDK reads the entry before it refreshes
+/// (the chain's probe, the load, the re-read under the lock) may change without this
+/// store noticing. A write of this process ends the stepping.
 #[cfg(feature = "login")]
 struct CaseStore {
     inner: inorbithr::login::MemoryStore,
     rotated: Mutex<Option<inorbithr::Secret<String>>>,
-    reads: std::sync::atomic::AtomicUsize,
+    replay: String,
 }
 
+/// How many token-endpoint calls the replay server has answered, read with a plain
+/// blocking GET on `/_result` (the store's calls are synchronous).
 #[cfg(feature = "login")]
-const READS_BEFORE_ROTATION: usize = 3;
+fn token_exchanges_so_far(replay: &str) -> u32 {
+    use std::io::{Read, Write};
+    let authority = replay.strip_prefix("http://").unwrap_or(replay);
+    let Ok(mut conn) = std::net::TcpStream::connect(authority) else {
+        return 0;
+    };
+    let _ = conn.set_read_timeout(Some(Duration::from_secs(2)));
+    let request =
+        format!("GET /_result HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n");
+    if conn.write_all(request.as_bytes()).is_err() {
+        return 0;
+    }
+    let mut answer = String::new();
+    let _ = conn.read_to_string(&mut answer);
+    answer
+        .split_once("\r\n\r\n")
+        .and_then(|(_, body)| serde_json::from_str::<Value>(body).ok())
+        .and_then(|v| v["token_exchanges"].as_u64())
+        .map_or(0, |n| u32::try_from(n).unwrap_or(u32::MAX))
+}
 
 #[cfg(feature = "login")]
 fn stored_json(access: &str, refresh: &str, expires_in_s: i64) -> inorbithr::Secret<String> {
@@ -418,7 +441,11 @@ fn stored_json(access: &str, refresh: &str, expires_in_s: i64) -> inorbithr::Sec
 
 #[cfg(feature = "login")]
 impl CaseStore {
-    fn seeded(seed: Option<&StoredSessionSeed>, key: Option<&inorbithr::login::EntryKey>) -> Self {
+    fn seeded(
+        seed: Option<&StoredSessionSeed>,
+        key: Option<&inorbithr::login::EntryKey>,
+        replay: &str,
+    ) -> Self {
         use inorbithr::login::Store as _;
         let inner = inorbithr::login::MemoryStore::default();
         let mut rotated = None;
@@ -437,7 +464,7 @@ impl CaseStore {
         Self {
             inner,
             rotated: Mutex::new(rotated),
-            reads: std::sync::atomic::AtomicUsize::new(0),
+            replay: replay.to_owned(),
         }
     }
 }
@@ -448,12 +475,14 @@ impl inorbithr::login::Store for CaseStore {
         &self,
         key: &inorbithr::login::EntryKey,
     ) -> Result<Option<inorbithr::Secret<String>>, inorbithr::login::StoreError> {
-        let n = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if n >= READS_BEFORE_ROTATION
-            && let Some(newer) = self.rotated.lock().unwrap().take()
+        let mut rotated = self.rotated.lock().unwrap();
+        if rotated.is_some()
+            && token_exchanges_so_far(&self.replay) >= 1
+            && let Some(newer) = rotated.take()
         {
             self.inner.set(key, &newer)?;
         }
+        drop(rotated);
         self.inner.get(key)
     }
 
@@ -1193,6 +1222,7 @@ async fn every_case_passes() {
             captured.store = Some(Arc::new(CaseStore::seeded(
                 case.client.stored_session.as_ref(),
                 Some(&key),
+                &replay.url,
             )));
         }
         #[cfg(feature = "login")]

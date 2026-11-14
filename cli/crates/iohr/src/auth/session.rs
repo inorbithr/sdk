@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use inorbithr::login::{self, Authorization, EntryKey, Granted, SignOut, Store};
 
-use crate::credential::{Bearer, Credential};
-use crate::error::AuthError;
+use super::credential::{Bearer, Credential};
+use super::error::AuthError;
 
 /// A signed-in person. Implements [`Credential`]; the work is the SDK's.
 #[derive(Debug)]

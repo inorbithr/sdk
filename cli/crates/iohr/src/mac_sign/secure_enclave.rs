@@ -28,7 +28,7 @@ impl SecureEnclave {
     /// The key in `dir`, with its helper built; the key itself need not exist yet
     /// (`ensure` makes it).
     pub(super) fn open(dir: &Path) -> Result<Self, String> {
-        iohr_auth::create_private_dir(dir)
+        inorbithr::login::create_private_dir(dir)
             .map_err(|e| format!("cannot make {}: {}", dir.display(), e.kind()))?;
         Ok(Self {
             helper: build_helper(dir)?,

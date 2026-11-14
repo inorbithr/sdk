@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
-use iohr_auth::ProfileName;
+use inorbithr::login::ProfileName;
 
 use inorbithr::DEFAULT_BASE_URL;
 
@@ -61,7 +61,7 @@ pub struct Global {
     #[arg(long, global = true, env = "IOHR_ISSUER", hide = true)]
     issuer: Option<String>,
     /// The OAuth client the command line signs in as.
-    #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
+    #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = inorbithr::login::DEFAULT_CLIENT_ID, hide = true)]
     pub client_id: String,
     /// Sign in as someone other than a person (`iohr runner` and `iohr coordinator` only).
     ///
@@ -195,7 +195,7 @@ impl Global {
         self.issuer
             .as_deref()
             .or(self.environment().issuer.as_deref())
-            .unwrap_or(iohr_auth::DEFAULT_ISSUER)
+            .unwrap_or(inorbithr::login::DEFAULT_ISSUER)
     }
 
     /// Refuses an environment whose address is a placeholder, unless the caller named

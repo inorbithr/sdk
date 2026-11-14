@@ -12,7 +12,9 @@
 
 use std::path::Path;
 
-use iohr_auth::{Config, DoctorConfig};
+use crate::auth::Config;
+
+use crate::auth::DoctorConfig;
 use serde::Serialize;
 
 /// The MCP bridge's local address (owner-only, a Mac with the InOrbit agent installed).

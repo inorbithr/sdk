@@ -571,12 +571,12 @@ fn now() -> String {
 }
 
 fn create_private_dir(dir: &Path) -> Result<(), ExtError> {
-    iohr_auth::create_private_dir(dir).map_err(|e| io("create", dir, &e))
+    inorbithr::login::create_private_dir(dir).map_err(|e| io("create", dir, &e))
 }
 
 fn write_file(path: &Path, bytes: &[u8], program: bool) -> Result<(), ExtError> {
     use std::io::Write as _;
-    let mut f = iohr_auth::create_new_private(path, if program { 0o700 } else { 0o600 })
+    let mut f = inorbithr::login::create_new_private(path, if program { 0o700 } else { 0o600 })
         .map_err(|e| io("create", path, &e))?;
     f.write_all(bytes)
         .and_then(|()| f.sync_all())

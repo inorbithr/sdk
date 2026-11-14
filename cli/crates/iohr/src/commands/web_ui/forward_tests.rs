@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use iohr_auth::Redacted;
+use inorbithr::Secret;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use wiremock::matchers::{body_json, header_exists, method, path};
@@ -41,7 +41,7 @@ pub(super) async fn rig(api_url: &str, limits: Limits) -> Rig {
     let dir = built_ui();
     let cfg = tempfile::tempdir().expect("cfg");
     let env = Env {
-        token: Some(Redacted::new(jwt())),
+        token: Some(Secret::new(jwt())),
         ..Env::default()
     };
     let panels = panels_with(

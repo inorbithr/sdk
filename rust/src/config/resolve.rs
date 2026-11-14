@@ -1320,7 +1320,10 @@ impl Resolver<'_> {
                     file_store: text("storage").as_deref() == Some("file"),
                     dir: self.file_dir.clone(),
                     issuer: text("issuer"),
-                    client_id: text("client_id"),
+                    // The client the profile records refreshes its own session; with none
+                    // recorded, `INORBIT_LOGIN_CLIENT_ID` names it (section 5.6).
+                    client_id: text("client_id")
+                        .or_else(|| self.var("INORBIT_LOGIN_CLIENT_ID").map(str::to_owned)),
                 };
                 match (self.inp.login_entry)(&target) {
                     Ok(()) => {

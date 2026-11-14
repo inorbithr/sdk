@@ -1844,7 +1844,6 @@ dependencies = [
  "indicatif",
  "inorbithr",
  "iohr-atlas-core",
- "iohr-auth",
  "iohr-codegen",
  "iohr-lab",
  "iohr-openapi",
@@ -1883,18 +1882,6 @@ dependencies = [
  "sha2",
  "thiserror",
  "uuid",
-]
-
-[[package]]
-name = "iohr-auth"
-version = "0.1.0"
-dependencies = [
- "inorbithr",
- "serde",
- "tempfile",
- "thiserror",
- "toml",
- "toml_edit",
 ]
 
 [[package]]
