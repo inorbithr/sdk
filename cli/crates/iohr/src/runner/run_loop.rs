@@ -140,6 +140,19 @@ pub(crate) struct GateCheck {
     pub(crate) env: Vec<(OsString, OsString)>,
 }
 
+impl GateCheck {
+    /// The check signs in to the gate-slot lease with the runner's own profile: its name
+    /// (never a token) goes in as `IOHR_PROFILE`, replacing one the runner was started
+    /// with, so a runner started with `--profile` still takes the lease.
+    pub(crate) fn with_profile(mut self, profile: Option<&str>) -> Self {
+        if let Some(name) = profile {
+            self.env.retain(|(k, _)| k != "IOHR_PROFILE");
+            self.env.push(("IOHR_PROFILE".into(), name.into()));
+        }
+        self
+    }
+}
+
 impl Default for GateCheck {
     fn default() -> Self {
         Self {
@@ -3075,6 +3088,24 @@ mod tests {
     }
 
     /// A job whose check is still running holds its slot: a second offer during the
+    #[test]
+    fn the_runners_profile_reaches_the_check_as_iohr_profile() {
+        let mut g = GateCheck::default();
+        g.env = vec![
+            ("IOHR_PROFILE".into(), "old".into()),
+            ("PATH".into(), "/bin".into()),
+        ];
+        let g = g.with_profile(Some("runner"));
+        let named: Vec<_> = g.env.iter().filter(|(k, _)| k == "IOHR_PROFILE").collect();
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].1, "runner");
+        assert!(g.env.iter().any(|(k, _)| k == "PATH"));
+        // No profile (a token session): the environment is left as it was.
+        let mut h = GateCheck::default();
+        h.env = vec![("PATH".into(), "/bin".into())];
+        assert_eq!(h.clone().with_profile(None).env, h.env);
+    }
+
     /// check is not accepted (the check is what fills the host).
     #[tokio::test]
     async fn a_job_in_its_check_counts_as_taken() {
