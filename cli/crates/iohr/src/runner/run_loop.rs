@@ -3087,22 +3087,25 @@ mod tests {
         );
     }
 
-    /// A job whose check is still running holds its slot: a second offer during the
     #[test]
     fn the_runners_profile_reaches_the_check_as_iohr_profile() {
-        let mut g = GateCheck::default();
-        g.env = vec![
-            ("IOHR_PROFILE".into(), "old".into()),
-            ("PATH".into(), "/bin".into()),
-        ];
+        let g = GateCheck {
+            env: vec![
+                ("IOHR_PROFILE".into(), "old".into()),
+                ("PATH".into(), "/bin".into()),
+            ],
+            ..GateCheck::default()
+        };
         let g = g.with_profile(Some("runner"));
         let named: Vec<_> = g.env.iter().filter(|(k, _)| k == "IOHR_PROFILE").collect();
         assert_eq!(named.len(), 1);
         assert_eq!(named[0].1, "runner");
         assert!(g.env.iter().any(|(k, _)| k == "PATH"));
         // No profile (a token session): the environment is left as it was.
-        let mut h = GateCheck::default();
-        h.env = vec![("PATH".into(), "/bin".into())];
+        let h = GateCheck {
+            env: vec![("PATH".into(), "/bin".into())],
+            ..GateCheck::default()
+        };
         assert_eq!(h.clone().with_profile(None).env, h.env);
     }
 
