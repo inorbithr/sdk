@@ -174,9 +174,9 @@ an hour after its checkout is gone, and with the checkout otherwise; a job whose
 held is kept.
 
 The check keeps the host's build rules: `CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS` and
-`GATE_SLOTS` pass through the environment scrub, and so does the profile name
-`IOHR_PROFILE`, which the gate-slot lease in the repository's CI uses to sign in. A token
-(`IOHR_TOKEN*`) never passes. A job in its check counts against the runner's capacity.
+`GATE_SLOTS` pass through the environment scrub. The check, and only the check (never a turn), is also
+given the runner's profile name as `IOHR_PROFILE`, which the gate-slot lease in the
+repository's CI uses to sign in. A token (`IOHR_TOKEN*`) never passes. A job in its check counts against the runner's capacity.
 
 ## Staying current
 

@@ -393,9 +393,16 @@ async fn run(
 ) -> Result<Ran, Skip> {
     let mut c = shell(command);
     let (trust, dirs) = env::trusted(repo);
+    // The check alone (never a turn, which `env::scrub` keeps denying it) gets the
+    // runner's profile NAME, so the gate-slot lease it takes can sign in; never a token.
+    let profile = parent_env
+        .iter()
+        .find(|(k, _)| k == "IOHR_PROFILE")
+        .cloned();
     c.current_dir(repo)
         .env_clear()
         .envs(env::scrub(parent_env))
+        .envs(profile)
         .envs(env::contained())
         .env(trust, dirs)
         .stdin(Stdio::null())
@@ -689,6 +696,21 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(got.exit_code, 0);
         assert_eq!(got.output_sha256, hex(&Sha256::digest(SCRUBBED_OUT)));
+    }
+
+    /// The check (and only it) is told the runner's profile name for the gate-slot
+    /// lease; a token beside it still never arrives.
+    #[tokio::test]
+    async fn the_check_sees_the_profile_name_and_no_token() {
+        let (_root, _o, work) = repos();
+        let mut env = parent();
+        env.push(("IOHR_PROFILE".into(), "runner".into()));
+        env.push(("IOHR_TOKEN".into(), "secret-value".into()));
+        let cmd = r#"test "$IOHR_PROFILE" = runner && test -z "${IOHR_TOKEN:-}""#;
+        let got = check(&work, cmd, LIMIT, env, MainFrom::Checkout)
+            .await
+            .unwrap();
+        assert_eq!(got.exit_code, 0);
     }
 
     #[tokio::test]

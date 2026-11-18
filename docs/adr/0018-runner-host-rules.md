@@ -22,7 +22,7 @@ ignored three rules of that host (core `docs/ci.md`, "Build caps"; `devops/ci/ga
 1. The target is `runner/target/<owner>/<repo>/<job_id>`, covered by the existing
    `Kind::Target` sweep in `hygiene.rs` (no second sweep; core's `target-sweep.sh` and
    `wt-reap.py` serve core's worktrees and are not reusable for a runner state directory).
-2. The caps and `GATE_SLOTS` pass. For the lease, the profile name `IOHR_PROFILE` passes;
+2. The caps and `GATE_SLOTS` pass. For the lease, the profile name `IOHR_PROFILE` goes to the check only (`gate::run`; the scrub still denies it to turns);
    tokens stay denied. Trade-off: the check's child can use the runner's profile session
    for the gate-slot call (and anything else `iohr` allows that profile), where a narrow
    lease-only token would be tighter. No such token exists yet; adding one is the follow-up.

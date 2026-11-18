@@ -47,10 +47,6 @@ pub(crate) const ALLOW_EXACT: &[&str] = &[
     "NEXTEST_TEST_THREADS",
     "RUST_TEST_THREADS",
     "GATE_SLOTS",
-    // The CLI profile's name (not a session): the gate-slot lease a check takes calls
-    // `iohr api`, which finds the stored session of that profile, and with none the
-    // lease is skipped silently. See [`is_denied`]: `IOHR_TOKEN*` stays denied.
-    "IOHR_PROFILE",
     // Windows.
     "USERPROFILE",
     "USERNAME",
@@ -410,15 +406,14 @@ mod tests {
     }
 
     /// The host's build caps and the gate-slot switch reach the check, so it takes the
-    /// two-slot lease and honours the job caps; a token never does (only the profile name).
+    /// two-slot lease and honours the job caps; neither a token nor the profile name does (the gate check alone gets the name, see `gate::run`).
     #[test]
-    fn the_host_caps_and_the_lease_profile_pass_but_no_token_does() {
+    fn the_host_caps_pass_but_no_token_and_no_profile_does() {
         let parent = pairs(&[
             "CARGO_BUILD_JOBS",
             "NEXTEST_TEST_THREADS",
             "RUST_TEST_THREADS",
             "GATE_SLOTS",
-            "IOHR_PROFILE",
             "IOHR_TOKEN",
             "IOHR_TOKEN_FILE",
         ]);
@@ -429,8 +424,7 @@ mod tests {
                 "CARGO_BUILD_JOBS",
                 "NEXTEST_TEST_THREADS",
                 "RUST_TEST_THREADS",
-                "GATE_SLOTS",
-                "IOHR_PROFILE"
+                "GATE_SLOTS"
             ]
         );
         assert!(is_clean(&out));
