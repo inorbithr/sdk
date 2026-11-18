@@ -39,8 +39,18 @@ pub(crate) const ALLOW_EXACT: &[&str] = &[
     "XDG_STATE_HOME",
     "XDG_CACHE_HOME",
     "XDG_RUNTIME_DIR",
-    // Where `cargo` builds: not a secret, and the runner sets it per repository.
+    // Where `cargo` builds: not a secret, and the runner sets it per job checkout.
     "CARGO_TARGET_DIR",
+    // The host's caps (core `docs/ci.md`, Build caps): a check that lost them ran
+    // uncapped. None of these is a credential.
+    "CARGO_BUILD_JOBS",
+    "NEXTEST_TEST_THREADS",
+    "RUST_TEST_THREADS",
+    "GATE_SLOTS",
+    // The CLI profile's name (not a session): the gate-slot lease a check takes calls
+    // `iohr api`, which finds the stored session of that profile, and with none the
+    // lease is skipped silently. See [`is_denied`]: `IOHR_TOKEN*` stays denied.
+    "IOHR_PROFILE",
     // Windows.
     "USERPROFILE",
     "USERNAME",
@@ -397,6 +407,33 @@ mod tests {
     #[test]
     fn a_dirty_environment_is_not_clean() {
         assert!(!is_clean(&pairs(&["PATH", "ANTHROPIC_BASE_URL"])));
+    }
+
+    /// The host's build caps and the gate-slot switch reach the check, so it takes the
+    /// two-slot lease and honours the job caps; a token never does (only the profile name).
+    #[test]
+    fn the_host_caps_and_the_lease_profile_pass_but_no_token_does() {
+        let parent = pairs(&[
+            "CARGO_BUILD_JOBS",
+            "NEXTEST_TEST_THREADS",
+            "RUST_TEST_THREADS",
+            "GATE_SLOTS",
+            "IOHR_PROFILE",
+            "IOHR_TOKEN",
+            "IOHR_TOKEN_FILE",
+        ]);
+        let out = scrub(parent);
+        assert_eq!(
+            names(&out),
+            [
+                "CARGO_BUILD_JOBS",
+                "NEXTEST_TEST_THREADS",
+                "RUST_TEST_THREADS",
+                "GATE_SLOTS",
+                "IOHR_PROFILE"
+            ]
+        );
+        assert!(is_clean(&out));
     }
 
     #[test]
