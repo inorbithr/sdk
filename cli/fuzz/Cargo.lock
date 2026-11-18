@@ -1670,7 +1670,7 @@ dependencies = [
 
 [[package]]
 name = "inorbithr"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "apple-native-keyring-store",
  "base64",
@@ -1712,7 +1712,7 @@ dependencies = [
 
 [[package]]
 name = "iohr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aws-lc-rs",
  "base64",
@@ -1757,7 +1757,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-atlas-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "serde",
@@ -1769,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-codegen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "heck",
@@ -1797,7 +1797,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-lab"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "regex",
  "serde",
@@ -1807,7 +1807,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-openapi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "heck",
  "serde",
