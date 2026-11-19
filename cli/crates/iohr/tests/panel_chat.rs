@@ -205,6 +205,40 @@ fn one_enter_sends_a_question_mark_question() {
     );
 }
 
+/// Ctrl-Space, the key that moves the keyboard between the box and the terminal.
+const SWITCH: &[u8] = &[0x00];
+
+#[test]
+fn one_key_moves_between_the_chat_and_the_terminal_and_the_draft_stays() {
+    let rig = Rig::new("switch", QUICK);
+    let mut s = rig.panel("");
+    s.until("the box at the prompt", |sc| boxed(sc) && ready(sc));
+    s.send(SWITCH);
+    s.until("the box taking the keys", |sc| {
+        any(sc, "ask anything about this shell") && any(sc, "typing here")
+    });
+    s.send(b"why is the roll slow");
+    s.until("the draft in the box", |sc| any(sc, "why is the roll slow"));
+    s.send(SWITCH);
+    s.until("the keys back in the terminal", |sc| {
+        any(sc, "draft") && !any(sc, "typing here") && any(sc, "why is the roll slow")
+    });
+    // The terminal types and runs a command; no keystroke goes to the box.
+    line(&mut s, "echo SHELL\"\"TYPED");
+    s.until("the command ran", |sc| any(sc, "SHELLTYPED"));
+    s.send(SWITCH);
+    s.until("the draft waiting", |sc| {
+        any(sc, "typing here") && any(sc, "why is the roll slow")
+    });
+    s.send(b"\r");
+    s.until("the answer", |sc| any(sc, "ANSWER-ONE"));
+    assert!(
+        rig.saw("claude.stdin").contains("why is the roll slow"),
+        "the draft did not reach the agent: {}",
+        rig.saw("claude.stdin")
+    );
+}
+
 #[test]
 fn one_enter_sends_a_double_question_mark_question_as_a_deeper_one() {
     let rig = Rig::new("deeper", QUICK);
@@ -553,6 +587,26 @@ fn escape_and_h_in_two_reads_is_option_h_and_not_the_shells() {
     s.send(b"h");
     s.until("the box folded", folded);
     // The shell got neither the Esc nor the h.
+    assert!(!prompt_row(s.screen.screen()).contains('h'));
+}
+
+/// A panel that is late to run (a loaded hosted runner: tens of milliseconds with no time slice)
+/// finds the held Esc's time up and the `h` already waiting: that is still Option+h, since the
+/// two were written 5 ms apart. The stall is made by stopping the panel between the writes.
+#[test]
+fn escape_and_h_written_close_together_are_option_h_even_when_the_panel_runs_late() {
+    let rig = Rig::new("opthstall", QUICK);
+    let mut s = rig.panel_in("", "xterm");
+    s.until("the box", |sc| any(sc, HIDE) && ready(sc));
+    fresh(&mut s);
+    let pid = rustix::process::Pid::from_child(&s.child);
+    s.send(b"\x1b");
+    std::thread::sleep(Duration::from_millis(10));
+    rustix::process::kill_process(pid, rustix::process::Signal::STOP).unwrap();
+    s.send(b"h");
+    std::thread::sleep(Duration::from_millis(150));
+    rustix::process::kill_process(pid, rustix::process::Signal::CONT).unwrap();
+    s.until("the box folded", folded);
     assert!(!prompt_row(s.screen.screen()).contains('h'));
 }
 
