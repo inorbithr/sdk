@@ -27,10 +27,9 @@ jobs:
           persist-credentials: false
 @@CI_SETUP@@
       - name: Grade the suite against the bar
-        env:
-          PYTHONPATH: src
         run: |
-          python3 -m @@MODULE@@ | tee report.txt
+          set -o pipefail  # tee would otherwise hide the exit code: a missed bar must fail the job
+          @@CI_EVAL@@ | tee report.txt
           {
             echo '### Evals'
             echo '```'

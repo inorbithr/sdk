@@ -1,0 +1,12 @@
+name: @@MODULE@@
+description: An offline eval suite with a pass bar (@@NAME@@).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+# No runtime dependencies: dart:core, dart:io and dart:convert are enough.
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.26.0

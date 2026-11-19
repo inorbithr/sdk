@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -69,6 +70,12 @@ func (*CachedToken) String() string { return "CachedToken(" + redacted + ")" }
 
 // GoString never shows the token.
 func (c *CachedToken) GoString() string { return c.String() }
+
+// Format never shows a token, whatever the verb.
+func (c *CachedToken) Format(st fmt.State, _ rune) { formatRedacted(st, c) }
+
+// LogValue never shows a token in a log/slog record.
+func (c *CachedToken) LogValue() slog.Value { return logRedacted(c) }
 
 func (h *heldToken) fresh(now time.Time) bool {
 	return h.refreshAt.IsZero() || now.Before(h.refreshAt)
@@ -176,6 +183,12 @@ func (f *TokenFile) String() string { return "TokenFile(" + f.path + ")" }
 // GoString never shows the token.
 func (f *TokenFile) GoString() string { return f.String() }
 
+// Format never shows a token, whatever the verb.
+func (f *TokenFile) Format(st fmt.State, _ rune) { formatRedacted(st, f) }
+
+// LogValue never shows a token in a log/slog record.
+func (f *TokenFile) LogValue() slog.Value { return logRedacted(f) }
+
 // Token returns the token in the file.
 func (f *TokenFile) Token(context.Context) (Token, error) {
 	f.mu.Lock()
@@ -273,6 +286,12 @@ func (c *CliToken) String() string { return "CliToken(" + c.profile + ")" }
 // GoString never shows the token.
 func (c *CliToken) GoString() string { return c.String() }
 
+// Format never shows a token, whatever the verb.
+func (c *CliToken) Format(st fmt.State, _ rune) { formatRedacted(st, c) }
+
+// LogValue never shows a token in a log/slog record.
+func (c *CliToken) LogValue() slog.Value { return logRedacted(c) }
+
 // Token returns a cached token, or a fresh one from iohr auth token.
 func (c *CliToken) Token(ctx context.Context) (Token, error) { return c.cache.Token(ctx) }
 
@@ -363,6 +382,12 @@ func (c *ChainedCredential) String() string {
 // GoString never shows a token.
 func (c *ChainedCredential) GoString() string { return c.String() }
 
+// Format never shows a token, whatever the verb.
+func (c *ChainedCredential) Format(st fmt.State, _ rune) { formatRedacted(st, c) }
+
+// LogValue never shows a token in a log/slog record.
+func (c *ChainedCredential) LogValue() slog.Value { return logRedacted(c) }
+
 // Token returns a token from the provider chosen, choosing it on the first call.
 func (c *ChainedCredential) Token(ctx context.Context) (Token, error) {
 	c.mu.Lock()
@@ -438,3 +463,9 @@ func (d *DefaultCredential) String() string {
 
 // GoString never shows a token.
 func (d *DefaultCredential) GoString() string { return d.String() }
+
+// Format never shows a token, whatever the verb.
+func (d *DefaultCredential) Format(st fmt.State, _ rune) { formatRedacted(st, d) }
+
+// LogValue never shows a token in a log/slog record.
+func (d *DefaultCredential) LogValue() slog.Value { return logRedacted(d) }

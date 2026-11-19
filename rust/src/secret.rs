@@ -2,6 +2,9 @@ use std::fmt;
 
 use zeroize::{Zeroize, Zeroizing};
 
+/// What every printer in the crate shows in place of a secret.
+pub(crate) const REDACTED: &str = "<redacted>";
+
 /// A secret value: a key secret or an access token.
 ///
 /// `Debug` and `Display` print `<redacted>`, the value is not `Serialize`, and its
@@ -55,19 +58,35 @@ impl<'de, T: Zeroize + serde::Deserialize<'de>> serde::Deserialize<'de> for Secr
 
 impl<T: Zeroize> fmt::Debug for Secret<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("<redacted>")
+        f.write_str(REDACTED)
     }
 }
 
 impl<T: Zeroize> fmt::Display for Secret<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("<redacted>")
+        f.write_str(REDACTED)
     }
 }
+
+/// Two secrets are equal when their values are, so a stored token can be compared with a
+/// fresh one (a rotated refresh token) without reading either.
+impl<T: Zeroize + PartialEq> PartialEq for Secret<T> {
+    fn eq(&self, other: &Self) -> bool {
+        *self.0 == *other.0
+    }
+}
+
+impl<T: Zeroize + Eq> Eq for Secret<T> {}
 
 #[cfg(test)]
 mod tests {
     use super::Secret;
+
+    #[test]
+    fn secrets_compare_by_value() {
+        assert_eq!(Secret::from("a"), Secret::from("a"));
+        assert_ne!(Secret::from("a"), Secret::from("b"));
+    }
 
     #[test]
     fn every_way_to_print_it_is_redacted() {

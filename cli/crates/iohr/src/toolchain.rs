@@ -46,7 +46,6 @@ use std::time::{Duration, Instant};
 use semver::Version;
 use serde::Deserialize;
 
-use crate::ask;
 use crate::commands::upgrade::{get, http_within};
 use crate::project::{installed_version, parse_lenient, toolchain_line};
 
@@ -598,9 +597,9 @@ pub(crate) fn upgrade_for(
 /// The upgrade for `lang` as this machine has it installed.
 pub(crate) fn upgrade_here(lang: Lang, latest: &Version) -> Upgrade {
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let binary = ask::find_on_path(lang.program(), &path);
+    let binary = crate::paths::find_program(lang.program(), &path);
     upgrade_for(lang, binary.as_deref(), latest, |p| {
-        ask::find_on_path(p, &path).is_some()
+        crate::paths::find_program(p, &path).is_some()
     })
 }
 

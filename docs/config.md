@@ -253,7 +253,7 @@ follow section 2.3. "File" says whether the key may appear in the config file.
 | `scopes` | `INORBIT_SCOPES` | yes | list | none | Scopes to ask for with a key; required with a key |
 | `token` | `INORBIT_TOKEN` | **never** | secret | none | A bearer token used as is (an API token, RFC 0016) |
 | `token_file` | `INORBIT_TOKEN_FILE` | yes | path | none | A file holding a bearer token, re-read when it changes |
-| `credential_sources` | `INORBIT_CREDENTIAL_SOURCES` | yes | list of `env`, `workload`, `file`, `cli` | all four | Which credential sources the chain may use (section 5.1). Code is always allowed |
+| `credential_sources` | `INORBIT_CREDENTIAL_SOURCES` | yes | list of `env`, `workload`, `file`, `login`, `cli` | all five | Which credential sources the chain may use (section 5.1). Code is always allowed |
 | `cli_path` | `INORBIT_CLI_PATH` | yes | path | `iohr` on `PATH` | The command line the `cli` source runs |
 
 ### 3.3 Time and retries
@@ -431,6 +431,8 @@ profile's keys win), and its flags win over both. `iohr upgrade` reads
 | `id` | a runner id (`rnr_...`) | not set | `run` and `gate-report`: the runner they drive when this machine's key matches more than one; `register` refreshes that one. `--runner` and `IOHR_RUNNER_ID` win over it |
 | `kube_context` | a kubeconfig context name | not set | `run`: the cluster approved host actions reach, passed to every `kubectl` call as `--context` |
 | `kubeconfig` | an absolute path | not set | `run`: the kubeconfig the pinned `kubectl` reads, passed as `--kubeconfig` |
+| `build_volume` | an absolute path | not set | `run`, at start: the volume whose free space pauses new build turns; unset, there is no such pause |
+| `build_volume_min_free_gb` | a whole number of GB, 1 or more; needs `build_volume` | 100 | `run`, at start: the free space `build_volume` keeps for new build turns |
 | `auto_upgrade` | true or false | true | `run`: look for a newer `iohr` release and install it (below); `--no-auto-upgrade` turns it off for one run |
 | `upgrade_interval_minutes` | 5 to 10080 | 60 | `run`: minutes between looks for a newer release |
 | `upgrade_restart` | `exec` or `exit` | `exec` | `run`: how the runner starts the new binary (below) |
@@ -488,11 +490,12 @@ is refused with a note and the settings in use stay. Lowering `capacity` never s
 running turn; new turns wait until fewer run. A coordinator older than this sends a 400
 for the new fields, and the runner falls back to the old heartbeat.
 
-When `/mnt/build` exists and has less than 100 GB free, the runner drops `build` from
-the kinds it declares until the volume has room again (`none` when nothing is left, so
-the coordinator offers it nothing new). `iohr runner config show [--json]` prints each
-value in effect, where it came from and the build volume's free space, without signing
-in.
+With `build_volume` set, while that volume exists and has less than
+`build_volume_min_free_gb` (default 100) GB free, the runner drops `build` from the kinds
+it declares until the volume has room again (`none` when nothing is left, so the
+coordinator offers it nothing new). With no `build_volume` there is no such pause, and
+`run` says so when it starts. `iohr runner config show [--json]` prints each value in
+effect, where it came from and the build volume's free space, without signing in.
 
 A job's GitHub access comes from its lease: the token the coordinator sends for the
 account's GitHub App installation. When a lease brings none, the runner uses this
@@ -870,6 +873,7 @@ the developer's login.
 | 2 | Environment | `env` | `INORBIT_[<P>_]TOKEN`, `_TOKEN_FILE` or `_KEY_ID` is set | Static token, token file, or client credentials with `_KEY_SECRET` or `_KEY_SECRET_FILE` |
 | 3 | Workload identity | `workload` | `INORBIT_[<P>_]WEB_IDENTITY_TOKEN_FILE`, or `ACTIONS_ID_TOKEN_REQUEST_URL` with `INORBIT_[<P>_]FEDERATED_KEY_ID` | **Reserved.** The platform cannot exchange an outside identity token yet (section 5.5). The source is skipped with "not offered by the platform yet" |
 | 4 | Config file | `file` | the profile's table sets `token_file` or `key_id` | Token file, or client credentials with `key_secret_file` |
+| 4.5 | The stored session | `login` | the chosen profile has `kind = "person"` and the store holds an entry for it (needs the Rust `login` cargo feature) | The profile's session, refreshed by the SDK itself (section 5.6); no child process |
 | 5 | The `iohr` login | `cli` | the chosen profile exists in the file with a `kind` (the command line made it) | A token from `iohr auth token` (section 5.4) |
 
 When no source has credentials, `load` fails with a `ConfigError` that lists each source
@@ -880,9 +884,14 @@ no credentials found for profile "default"; tried:
   env: INORBIT_TOKEN, INORBIT_TOKEN_FILE and INORBIT_KEY_ID are not set
   workload: not offered by the platform yet
   file: no config file at /home/ana/.config/iohr/config.toml
+  login: skipped, no profile chosen
   cli: skipped, no profile chosen
-Set INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES, or run `iohr login`.
+Set INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES, or sign in with `iohr login`.
 ```
+
+The reasons a `login` source is skipped: "no profile chosen", "profile X is not a person's
+sign-in", "no stored session for profile X", "not in credential_sources", and, in a build
+without the cargo feature, "needs the `login` cargo feature". It is never a panic.
 
 Rules:
 
@@ -1001,6 +1010,168 @@ Until workload identity exists, a Kubernetes workload uses a key whose secret is
 from a Kubernetes Secret (`INORBIT_KEY_SECRET_FILE`), and GitHub Actions uses an API
 token or a key in a repository secret. [recipes.md](recipes.md) shows both.
 
+### 5.6 Person sign-in (`login`)
+
+**Status: built in the Rust crate (slices 3 and 4 of RFC 0231); other languages follow
+the same text.** A person signs in with the SDK's own flows, and the `login` source reads
+the stored session. The Rust crate offers it behind the opt-in cargo feature `login` (off
+by default; a program that only uses keys compiles none of the store code). The
+conformance cases for it stay `pending` for a language until its SDK has it.
+
+**Where the build is (slice 3 of RFC 0231).** The Rust crate has the opt-in cargo feature
+`login`: `inorbithr::login` holds the primitives `iohr` used to keep for itself, the
+profile table (`Config`, `Profile`, `Kind`, `Storage`, `ProfileName`; one reader of the
+file's `default` and command-line keys, which keeps `[sdk]`, unknown keys and comments),
+PKCE, the token claims, the credential store (the OS keychain, an owner-only file, an
+in-memory one) and the browser check, and now the sign-in flows themselves:
+
+- `Provider` reads the issuer's OIDC discovery and refuses an answer whose issuer differs
+  or whose endpoints are not on the issuer's origin. The default client is `iohr-cli`,
+  scopes `openid offline_access iohr.api`; the client id is a setting.
+- `Login::browser(&provider)` and `Login::device(&provider)` start a typestate
+  `Authorization<Browser | Device>`; `.finish().await` gives `Granted`. The browser flow
+  listens on loopback only, on an OS-picked port, for five minutes, answers only
+  `GET /callback`, compares `state` in constant time, and its pages load nothing and send
+  no referrer. The device flow follows RFC 8628 3.5 (5 s more on `slow_down`, a floor, a
+  hard limit) and shows the user code and link, never the device code.
+- `Session::save(granted, store, key)` keeps the session; `Session::access_token()` returns
+  it, refreshing when under a minute is left, writing the rotated refresh token back, and
+  on a refused refresh re-reading the store once and retrying (a second process may have
+  rotated it).
+- `Session::sign_out()` revokes when the provider offers it, then always deletes the
+  entry. A failed revoke still deletes locally and returns `SignOut::Local { reason }`, so
+  the caller can say the session may stay valid until it expires.
+- `open_browser()` opens the system browser and honours `IOHR_NO_BROWSER`.
+- Every answer from the sign-in service is read with the SDK's size cap (the reader the
+  transport uses); a larger one is refused unread. Tokens stay `Secret`: none appears in a
+  log, URL, `Debug` or error string (tested).
+
+`iohr login`, `logout` and `auth token` call these. The command line has no second copy
+of them: its `auth` module keeps only what is the command line's own (the `[runner]`,
+`[ask]`, `[panel]` and other tables, and the `Credential` wrapper over the SDK's session).
+
+**Slice 4: the chain.** `StoredSession` is a `TokenProvider` over `Session`: it does not
+refresh, rotate or re-read the store itself, it asks `Session`, and it caches by the
+`CachedToken` rules (a token with under a minute left is renewed; `invalidate` makes the
+next call get a fresh one). The `login` source in the chain (section 5.1) uses it, so
+`DefaultCredential` picks it up unchanged, and a signed-in profile works with no `iohr`
+on the machine. In a build without the `login` feature the source is skipped with the
+reason above. `LoadOptions::login_store` injects a store for tests. A newer, still fresh
+access token that another process wrote is taken as is, not refreshed again. A failed refresh
+with a still-valid token is logged as `token_refresh_failed`, like every other credential,
+and names no token.
+
+**The source.** `login` is a credential source named `login`, ranked between `file` (4)
+and `cli` (5) in the chain of section 5.1, so `cli` stays last, for a machine where only
+`iohr` can reach the store.
+
+| Source | Name | Present when | Credential |
+|---|---|---|---|
+| 4.5 | The stored session | `login` | the chosen profile has `kind = "person"` and the store holds an entry for it | The profile's session, refreshed by the SDK itself (below); no child process |
+
+- `credential_sources` accepts `login`. An SDK that does not know the name fails with the
+  unknown-name `ConfigError` of section 5.1; name `login` only with an SDK that has it.
+- A profile with `kind = "person"` and no store entry is not an error for this source:
+  it is skipped, "no stored session for profile <name>", and the chain moves on to `cli`.
+  A store that cannot be opened at all is skipped the same way, with the reason.
+- `scopes` is listed in `ignored` for this source, as for `cli`: a person's session carries
+  its own scopes.
+
+**The profile table.** The SDK reads the table `iohr login` writes and nothing more, and
+writes the same keys. The file is the one of section 4.1 and holds no secret:
+
+```toml
+default = "work"
+
+[profiles.work]
+kind = "person"
+account = "acc_8d2e"
+account_pinned = true               # only when the account was chosen
+storage = "keyring"                 # or "file"
+issuer = "https://auth.inorbit.hr"
+client_id = "iohr-cli"
+```
+
+- `kind` is `person` or `token`; the `login` source applies to `person`. `account` is the
+  account id the calls count against; `storage` says where the session is kept, `keyring`
+  (the operating system's store) or `file` (owner-only files, chosen by
+  `iohr login --insecure-storage`); `issuer` is the sign-in service the session refreshes
+  with (default `https://auth.inorbit.hr`); `client_id` is the OAuth client the session
+  belongs to.
+- A writer changes only these keys, `default` and the `[ext]` table, and keeps every other
+  key, table and comment, as `iohr` does (section 4.2).
+- A secret in the table is a `ConfigError`, as in section 4.2.
+
+**The client.** `client_id` defaults to `iohr-cli`: a public client (no secret), PKCE
+required, loopback redirects on any port, refresh tokens that rotate. It can be set in
+code (`client_id`), in the environment (`INORBIT_LOGIN_CLIENT_ID`) or in the profile
+table, in the precedence of section 2.1 (code, then environment, then the profile).
+A session belongs to the client that made it, and the profile's `client_id` names that
+client: a session refreshes with the client id its profile records, so when the profile
+records one it is used for the refresh and the environment value applies only to a
+profile that records none (a sign-in made with code or the environment records its own
+in the profile). The Rust SDK reads `INORBIT_LOGIN_CLIENT_ID` today; a setting that
+disagrees with a stored session is never used to sign the person out.
+
+**The store.** One entry per profile and account.
+
+| Store | Where | Entry |
+|---|---|---|
+| `keyring` | the operating system's store (macOS Keychain, Windows Credential Manager, the Linux Secret Service), service `hr.inorbit.iohr` | user `<profile>@<account>` |
+| `file` | `secrets/<profile>.<account>` in the config directory of section 4.1, mode 0600 in a directory of mode 0700 | the file's content |
+
+- The account id is 1 to 128 ASCII letters, digits, `-` or `_`; a profile name is 1 to 64
+  lower-case letters, digits, `-` or `_`, starting with a letter or digit.
+- The value is one JSON object, `{"refresh_token", "access_token", "expires_at"}`, where
+  `expires_at` is Unix seconds, so a new process can call without refreshing. It is a
+  secret: never logged, never in an error, not `Serialize` in a language that has the
+  idea, zeroed on drop where the language can.
+- When the operating system's store is not available (a headless Linux host with no
+  Secret Service), a profile whose `storage` is `file` still works; a profile whose
+  `storage` is `keyring` is skipped with the reason. The SDK never falls back from
+  `keyring` to `file` by itself: that is a choice a person makes at sign-in.
+
+**Refresh and rotation.**
+
+- The access token is used while more than 60 s of its life is left. With less, the SDK
+  refreshes before the call: `POST` to the token endpoint with `grant_type=refresh_token`,
+  the profile's `client_id` and the stored refresh token. Section 5.3's single flight
+  applies: one refresh at a time per session.
+- The refresh token rotates: each refresh returns a new one and the old one stops working.
+  The new refresh token is written to the store **before** the new access token is used.
+- Two processes (`iohr` and an app) share one entry. Before refreshing, the SDK re-reads
+  the entry and takes a newer one another process wrote. When the service refuses the
+  refresh (`invalid_grant`), it re-reads the entry once more and, if the refresh token
+  there is not the one it sent, retries once with it. Only then is it an `AuthError`
+  saying to sign in again. The SDK never signs the person out for a refresh it lost.
+- **A rotated credential found in the store.** When the re-read entry holds a newer
+  access token that is still fresh (more than 60 s left), the SDK takes it as it is and
+  makes no refresh at all: another process already did it, and a second refresh would
+  rotate the refresh token again for nothing. The case does not depend on the order
+  reads happen in; it is a property of the entry's content (conformance case
+  `a-refresh-refused-after-another-process-rotated`).
+- A 401 from the API invalidates the cached access token (section 5.3).
+
+**Signing in and out.**
+
+- Browser sign-in: authorization code with PKCE `S256` only, on a listener bound to the
+  loopback address, an OS-picked port, one `GET /callback`, five minutes, `state` compared
+  in constant time (RFC 8252). The SDK never opens a browser unless the caller asks it
+  to; the helper that does is off when `IOHR_NO_BROWSER` has any non-empty value, and the
+  caller shows the URL instead.
+- Device sign-in: RFC 8628. Show the user code and the verification link, never the
+  device code; poll no faster than the service's interval, 5 s more after each
+  `slow_down`, until the code expires.
+- Sign-out revokes the refresh token at the revocation endpoint when the service has one,
+  then deletes the entry; a revocation that fails still deletes locally and says so.
+  Because the entry is shared, signing out of an app signs `iohr` out too.
+- Discovery's issuer must equal the configured one and every endpoint must be on its
+  origin; anything else is refused. Answers from the service are read with a size cap.
+
+**Never printed.** No access token, refresh token, authorization code, device code or
+store value appears in a log record, a URL, a `describe()`, a `Debug` or `toString`, or an
+error, in any language.
+
 ## 6. Transport
 
 ### 6.1 Timeouts
@@ -1087,7 +1258,10 @@ token or a key in a repository secret. [recipes.md](recipes.md) shows both.
   caller who needs others supplies an HTTP client.
 - Answers may be compressed: the SDK sends `Accept-Encoding: gzip` where the runtime
   decodes it, and the 16 MiB cap applies to the **decoded** body, so a small compressed
-  body cannot inflate past the cap. Request bodies are not compressed.
+  body cannot inflate past the cap. The cap is applied while the body is read: past it
+  the SDK stops reading, closes the connection and raises `TooLargeError`, so an
+  oversized answer, chunked or compressed, is never held whole. Request bodies are not
+  compressed.
 - Redirects are never followed. A `3xx` is returned as an `ApiError`, and the
   `Authorization` header is never sent to another origin. A caller-supplied client gets
   its redirect policy overridden where the language allows (Go copies the client today);

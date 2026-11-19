@@ -15,7 +15,10 @@ Each extension version is an OCI image index at
 - a config blob, media type `application/vnd.inorbit.iohr.extension.config.v1+json`:
   `name`, `version`, `entrypoint`, `scopes`, `description` and, for an extension that
   controls a system service, `privileges`: the Linux capabilities that service holds,
-  such as `["CAP_BPF", "CAP_PERFMON", "CAP_NET_ADMIN"]`;
+  such as `["CAP_BPF", "CAP_PERFMON", "CAP_NET_ADMIN"]`. An extension that offers a
+  runner host actions has the media type
+  `application/vnd.inorbit.iohr.extension.config.v2+json` instead, which adds
+  `host_actions`; a v1 config that declares them is refused;
 - one layer, `application/vnd.inorbit.iohr.extension.layer.v1.tar+gzip`, holding the
   program at `entrypoint`.
 
@@ -54,7 +57,10 @@ In this order, and nothing is written to disk until all of them pass:
    Alternatively, a signature by a key in `ext.trusted_keys` passes (see below).
 3. The config: the name and version are the ones asked for, the entrypoint is a
    relative path without `..`, every scope is `resource:action`, every privilege is a
-   capability the kernel defines (at most 16, none twice).
+   capability the kernel defines (at most 16, none twice), and every host action is
+   `<name>.<action>`, not one of the runner's own, with typed parameters, known systems,
+   a one-line effect that names only declared parameters, and a time limit of at most an
+   hour.
 4. The layer matches its digest and size; only the entrypoint is taken from it, and
    only as a regular file.
 
@@ -78,7 +84,8 @@ publishes, public and private, the private ones shared with it, the unpublished 
 `~/.inorbit/ext-dev` and what is installed, one row each with SOURCE and VISIBILITY. The
 folders are read from disk and never sent anywhere; `--json` prints the same rows.
 `iohr ext verify` repeats checks 2 and the program's hash offline, from the bundles kept
-at install. Every run of an extension re-hashes the program first.
+at install. Every run of an extension re-hashes the program first, and a runner repeats
+the whole offline verification before each host action an extension declares.
 
 ### An artifact that is not installed
 

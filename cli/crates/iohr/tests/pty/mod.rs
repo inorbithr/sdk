@@ -87,9 +87,11 @@ impl Session {
         }
     }
 
-    /// Reads the terminal until `done` holds for what is on screen, or panics after ten seconds.
+    /// Reads the terminal until `done` holds for what is on screen, or panics after a minute
+    /// (a hosted macOS runner can take tens of seconds to start a binary under load; a screen
+    /// that is right returns at once, so the limit only bounds a broken one).
     pub(crate) fn until(&mut self, what: &str, done: impl Fn(&vt100::Screen) -> bool) {
-        let end = Instant::now() + Duration::from_secs(10);
+        let end = Instant::now() + Duration::from_secs(60);
         while Instant::now() < end {
             if let Ok(bytes) = self.output.recv_timeout(Duration::from_millis(100)) {
                 self.take(&bytes);

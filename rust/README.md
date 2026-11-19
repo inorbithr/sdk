@@ -209,6 +209,26 @@ A surface for your own credentials, with exactly the operations they may call an
 compile-time refusal of the rest, comes from `iohr sdk generate` ([docs/design.md
 section 12](../docs/design.md#12-runtime-and-surface)).
 
+## Signing in as a person
+
+With the `login` feature, `Client::load()` also reads the session `iohr login` keeps (the
+last source of the chain), and a program can sign a person in itself: the browser flow
+(authorization code with PKCE on a loopback listener) or the device flow, then `Session`
+keeps the session in the keychain, an owner-only file or memory. The client refreshes the
+short access token with the rotating refresh token. The OAuth client is `iohr-cli` unless
+you set `INORBIT_LOGIN_CLIENT_ID` (the profile's own `client_id` wins for a session it
+made). `examples/rust/src/bin/login-device.rs` is a complete program, run by CI against
+the replay server:
+
+```rust
+let provider = Provider::discover(&issuer, DEFAULT_CLIENT_ID).await?;
+let device = Login::device(&provider).await?;
+println!("open {} and enter {}", device.verification_uri(), device.user_code());
+let granted = device.finish().await?; // polls at the service's interval
+```
+
+See [docs/config.md section 5.6](../docs/config.md) for the store, refresh and rotation rules.
+
 ## Features
 
 | Feature | Default | What it adds |
@@ -216,6 +236,7 @@ section 12](../docs/design.md#12-runtime-and-surface)).
 | `rustls` | on | HTTPS through rustls with the platform's trust roots; without it, plain-HTTP loopback only |
 | `tracing` | on | log records as `tracing` events, target `inorbithr` |
 | `otel` | off | OpenTelemetry spans and metrics through the `opentelemetry` API crate, from the global providers or `tracer_provider` / `meter_provider` |
+| `login` | off | `inorbithr::login`: the profile table of the `iohr` config file, PKCE, token claims, and the credential store (OS keychain, owner-only file, memory); pulls in the OS keychain crates, which the default build never compiles |
 | `encrypted-key` | off | a client key encrypted with `client_key_password` (PKCS#8) |
 
 ## Not here yet

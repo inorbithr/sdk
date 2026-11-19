@@ -443,6 +443,13 @@ class Resolution:
     credential: Credential | None
     file_path: str | None
 
+    def __repr__(self) -> str:
+        """The redacted document, the names of the values and the credential; never a value."""
+        return (
+            f"Resolution(doc={self.doc!r}, values={sorted(self.values)!r}, "
+            f"credential={self.credential!r}, file_path={self.file_path!r})"
+        )
+
 
 class ResolvedConfig:
     """A client's effective configuration and where each value came from (section 2.6)."""

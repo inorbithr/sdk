@@ -23,6 +23,94 @@ public class RuntimeTests
     }
 
     [Fact]
+    public void Credentials_never_serialise_their_secret()
+    {
+        var shown = new List<string>
+        {
+            JsonSerializer.Serialize(new Token("tok-s3cr3t", DateTimeOffset.UnixEpoch)),
+            JsonSerializer.Serialize(new ClientCredentialsOptions { KeyId = "ak_test", KeySecret = "s3cr3t", Scopes = ["identity:read"] }),
+            JsonSerializer.Serialize(new ClientOptions
+            {
+                Token = "tok-s3cr3t", KeyId = "ak_test", KeySecret = "s3cr3t", ClientKeyPassword = "pw-s3cr3t",
+                Proxy = "http://ana:pw-s3cr3t@proxy.example:3128",
+            }),
+            JsonSerializer.Serialize(new Dictionary<string, object> { ["token"] = new Token("tok-s3cr3t") }),
+        };
+        foreach (var json in shown)
+        {
+            Assert.DoesNotContain("s3cr3t", json, StringComparison.Ordinal);
+            Assert.Contains("redacted", json, StringComparison.Ordinal);
+        }
+
+        using var doc = JsonDocument.Parse(shown[2]);
+        Assert.Equal("<redacted>", doc.RootElement.GetProperty("Token").GetString());
+        Assert.Equal("<redacted>", doc.RootElement.GetProperty("KeySecret").GetString());
+        Assert.Equal("<redacted>", doc.RootElement.GetProperty("ClientKeyPassword").GetString());
+        Assert.Equal("http://<redacted>@proxy.example:3128", doc.RootElement.GetProperty("Proxy").GetString());
+        Assert.Equal("ak_test", doc.RootElement.GetProperty("KeyId").GetString());
+        Assert.Equal("<redacted>", JsonDocument.Parse(shown[0]).RootElement.GetProperty("Access").GetString());
+
+        // A log line through Microsoft.Extensions.Logging formats a token with ToString.
+        var logger = new CapturingLogger();
+#pragma warning disable CA1848, CA1873 // logged the way a caller's own code would
+        Microsoft.Extensions.Logging.LoggerExtensions.LogInformation(logger, "token {Token} options {Options}", new Token("tok-s3cr3t"), new ClientCredentialsOptions { KeyId = "ak_test", KeySecret = "s3cr3t", Scopes = ["identity:read"] });
+#pragma warning restore CA1848, CA1873
+        Assert.NotEmpty(logger.Lines);
+        Assert.All(logger.Lines, line => Assert.DoesNotContain("s3cr3t", line, StringComparison.Ordinal));
+    }
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        internal List<string> Lines { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Lines.Add(formatter(state, exception));
+            if (state is IEnumerable<KeyValuePair<string, object?>> pairs)
+            {
+                foreach (var (_, value) in pairs)
+                {
+                    Lines.Add(value?.ToString() ?? string.Empty);
+                    Lines.Add(JsonSerializer.Serialize(value));
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void Internal_plans_never_print_a_secret()
+    {
+        var plan = new CredentialPlan("env", "client_credentials") { KeyId = "ak_test", KeySecret = "s3cr3t", Token = "tok-s3cr3t" };
+        var proxy = new ProxyChoice("http://ana:pw-s3cr3t@proxy.example:3128", true);
+        foreach (var text in new[] { plan.ToString(), proxy.ToString(), (plan with { Kind = "static_token" }).ToString() })
+        {
+            Assert.DoesNotContain("s3cr3t", text, StringComparison.Ordinal);
+            Assert.Contains("<redacted>", text, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("ak_test", plan.ToString(), StringComparison.Ordinal);
+        Assert.Contains("proxy.example:3128", proxy.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("http://127.0.0.1:8080", true)]
+    [InlineData("http://127.1.2.3", true)]
+    [InlineData("http://[::1]:8080", true)]
+    [InlineData("http://localhost:3000", true)]
+    [InlineData("http://127.example.com", false)]
+    [InlineData("http://127.0.0.1.example.com", false)]
+    public void Plain_http_goes_only_to_this_machine(string url, bool allowed)
+    {
+        var ok = Record.Exception(() => Urls.Check("the base URL", new Uri(url), true)) is null;
+        Assert.Equal(allowed, ok);
+    }
+
+    [Fact]
     public void Every_known_code_has_its_status_and_an_unknown_one_is_kept()
     {
         Assert.Equal(19, new[]

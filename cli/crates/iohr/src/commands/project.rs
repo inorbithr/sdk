@@ -420,7 +420,7 @@ fn ask_question(
         let path = std::env::var_os("PATH").unwrap_or_default();
         let (choices, mut initial) = language_choices(
             tpl,
-            |n| ask::find_on_path(n, &path).is_some(),
+            |n| crate::paths::find_program(n, &path).is_some(),
             |v| {
                 let lang = Lang::of_toolchain(&v.toolchain)?;
                 toolchain::state(lang).map(|s| s.hint(lang))
@@ -1440,7 +1440,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         let missing: Vec<&String> = v
             .needs
             .iter()
-            .filter(|n| ask::find_on_path(n, &path).is_none())
+            .filter(|n| crate::paths::find_program(n, &path).is_none())
             .collect();
         if !missing.is_empty() {
             let w = format!(
@@ -2190,8 +2190,17 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 .find(|l| !l.trim().is_empty())
                 .map(|l| format!(" ({})", l.trim()))
                 .unwrap_or_default();
+            // The last lines of what it printed, so a failed build shows its compiler or
+            // restore error and not only the closing line.
+            let lines: Vec<&str> = s.output.lines().filter(|l| !l.trim().is_empty()).collect();
+            let tail = lines[lines.len().saturating_sub(200)..].join("\n");
+            let tail = if tail.is_empty() {
+                tail
+            } else {
+                format!("\n{tail}")
+            };
             Err(Error::Failed(format!(
-                "the smoke test failed: {}{last}",
+                "the smoke test failed: {}{last}{tail}",
                 s.said
             )))
         }

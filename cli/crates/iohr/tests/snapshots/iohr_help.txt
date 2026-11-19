@@ -42,6 +42,7 @@ Agents:
   runner       Run coordinator turns on this machine
   session      Open this project's session: one process hosts its Roles while iohr is open
   stop         Stop this project's session host
+  handoff      Read and tend the handoff note an agent run leaves when it stops early
   coordinator  List and file the coordinator's jobs and asks
   memory       Keep what a project knows as files, check it, and sync it when you choose
 

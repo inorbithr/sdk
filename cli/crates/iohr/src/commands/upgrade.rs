@@ -25,7 +25,8 @@ pub(crate) mod sign;
 pub(crate) use sign::SignWith;
 
 use crate::Env;
-use crate::cli::Global;
+use crate::cli::{Global, UpgradeArgs};
+use crate::commands::ext;
 use crate::context::{Ctx, run_profile};
 use crate::error::Error;
 use crate::ext::layer;
@@ -527,8 +528,106 @@ pub(crate) fn installed_version(path: &Path) -> Result<semver::Version, Error> {
         .ok_or_else(|| Error::Failed(format!("{} does not say its version", path.display())))
 }
 
-pub(crate) async fn run(g: &Global, env: &Env, check: bool, out: Out) -> Result<(), Error> {
+/// What upgrading the binary came to.
+#[derive(Debug, Serialize)]
+struct Binary {
+    current: String,
+    latest: String,
+    upgraded: bool,
+}
+
+/// `iohr upgrade`: the binary, then (unless `--no-extensions`) every installed extension.
+/// The extensions are tried even when the binary could not be upgraded (an APT copy waits
+/// for a person, the lookup failed): they come from another place. The exit is non-zero
+/// when either failed; an extension left for a person (new privileges) is not a failure.
+pub(crate) async fn run(g: &Global, env: &Env, args: &UpgradeArgs, out: Out) -> Result<(), Error> {
+    if args.check {
+        return check_only(g, env, out).await;
+    }
+    let binary = upgrade_binary(g, env).await;
+    let (rows, pass) = if args.no_extensions {
+        (None, Ok(()))
+    } else {
+        extension_pass(g, env, args.yes).await
+    };
+    if out.json {
+        let mut json = match &binary {
+            Ok(b) => serde_json::to_value(b).unwrap_or(Value::Null),
+            Err(_) => serde_json::json!({}),
+        };
+        if let (Some(rows), Some(map)) = (&rows, json.as_object_mut()) {
+            map.insert(
+                "extensions".into(),
+                serde_json::to_value(rows).unwrap_or(Value::Null),
+            );
+        }
+        Out::print_json(&json);
+    }
+    binary?;
+    pass
+}
+
+/// The extension pass of `iohr upgrade`: the rows (none when it could not start) and what
+/// to exit with.
+async fn extension_pass(
+    g: &Global,
+    env: &Env,
+    yes: bool,
+) -> (Option<Vec<ext::upgrades::ExtUpgrade>>, Result<(), Error>) {
+    let store = match ext::store(g) {
+        Ok(s) => s,
+        Err(e) => return (None, Err(e)),
+    };
+    match ext::upgrades::all(g, env, &store, None, None, yes).await {
+        Ok(rows) => {
+            if !rows.is_empty() {
+                Out::note(&ext::upgrades::summary(&rows));
+            }
+            let failed = ext::upgrades::failures(&rows);
+            let result = if failed > 0 {
+                Err(Error::Failed(format!(
+                    "{failed} extension(s) failed to upgrade; the others were upgraded"
+                )))
+            } else {
+                Ok(())
+            };
+            (Some(rows), result)
+        }
+        Err(e) => {
+            Out::note(&format!("extensions were not upgraded: {e}"));
+            (None, Err(e))
+        }
+    }
+}
+
+async fn upgrade_binary(g: &Global, env: &Env) -> Result<Binary, Error> {
     let (_, real, method) = detect_here()?;
+    let up = Upstream::from_process()?.signing(sign_setting(g, env).value);
+
+    let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))
+        .map_err(|e| Error::Failed(format!("this build's version: {e}")))?;
+    let latest = up.newest(&method).await?;
+    if latest <= current {
+        Out::note(&format!("iohr {current} is the newest release."));
+        return Ok(Binary {
+            current: current.to_string(),
+            latest: latest.to_string(),
+            upgraded: false,
+        });
+    }
+    up.install(&method, &real, &latest, g.verbose).await?;
+    if matches!(method, Method::InstallScript { .. }) {
+        Out::note(&format!("iohr is now {latest} (was {current})."));
+    }
+    Ok(Binary {
+        current: current.to_string(),
+        latest: latest.to_string(),
+        upgraded: true,
+    })
+}
+
+async fn check_only(g: &Global, env: &Env, out: Out) -> Result<(), Error> {
+    let (_, _, method) = detect_here()?;
     let up = Upstream::from_process()?.signing(sign_setting(g, env).value);
 
     let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))
@@ -536,43 +635,25 @@ pub(crate) async fn run(g: &Global, env: &Env, check: bool, out: Out) -> Result<
     let latest = up.newest(&method).await?;
     let update = latest > current;
 
-    if check {
-        let report = Report {
-            current: current.to_string(),
-            latest: latest.to_string(),
-            update_available: update,
-            command: command_for(&method),
-            install: method,
-        };
-        if out.json {
-            Out::print_json(&report);
-        } else {
-            Out::pairs(&[
-                ("current", report.current.clone()),
-                ("latest", report.latest.clone()),
-                (
-                    "update",
-                    if update { "available" } else { "none" }.to_owned(),
-                ),
-                ("command", report.command.clone()),
-            ]);
-        }
-        return Ok(());
-    }
-    if !update {
-        Out::note(&format!("iohr {current} is the newest release."));
-        if out.json {
-            Out::print_json(&serde_json::json!({
-                "current": current.to_string(), "latest": latest.to_string(),
-                "upgraded": false
-            }));
-        }
-        return Ok(());
-    }
-
-    up.install(&method, &real, &latest, g.verbose).await?;
-    if matches!(method, Method::InstallScript { .. }) {
-        Out::note(&format!("iohr is now {latest} (was {current})."));
+    let report = Report {
+        current: current.to_string(),
+        latest: latest.to_string(),
+        update_available: update,
+        command: command_for(&method),
+        install: method,
+    };
+    if out.json {
+        Out::print_json(&report);
+    } else {
+        Out::pairs(&[
+            ("current", report.current.clone()),
+            ("latest", report.latest.clone()),
+            (
+                "update",
+                if update { "available" } else { "none" }.to_owned(),
+            ),
+            ("command", report.command.clone()),
+        ]);
     }
     Ok(())
 }
@@ -617,11 +698,11 @@ pub(crate) fn sign_binary(env: &Env, path: &Path) -> Result<(), Error> {
 /// profile's `[profiles.<name>.runner]`, then `[runner]`. A config file that cannot be
 /// read leaves signing off: it never stops an upgrade.
 fn sign_setting(g: &Global, env: &Env) -> crate::runner::settings::Setting<SignWith> {
-    let none = iohr_auth::RunnerConfig::default();
+    let none = crate::auth::RunnerConfig::default();
     let ctx = Ctx::load(g).ok();
     let profile = ctx.as_ref().and_then(|c| {
         let name = run_profile(g, env, c)?;
-        let own = c.config.profile(&name)?.runner.as_ref()?;
+        let own = c.config.profile_runner(&name)?;
         Some((name, own))
     });
     crate::runner::settings::upgrade_sign_of(
@@ -804,7 +885,7 @@ fn replace_with(
         .parent()
         .ok_or_else(|| Error::Failed("the install path has no directory".into()))?;
     // A random name, made new on each write: never a file or link that was there.
-    let tmp = iohr_auth::temp_path(dir, "iohr.upgrade");
+    let tmp = inorbithr::login::temp_path(dir, "iohr.upgrade");
     let result = (|| -> Result<(), Error> {
         let fail = |what: &str, e: &dyn std::fmt::Display| {
             Error::Failed(format!(
@@ -820,7 +901,7 @@ fn replace_with(
                 }
                 _ => {}
             }
-            iohr_auth::create_new_private(&tmp, 0o700)
+            inorbithr::login::create_new_private(&tmp, 0o700)
                 .and_then(|mut f| f.write_all(program).and_then(|()| f.sync_all()))
                 .map_err(|e| fail("cannot write", &e))?;
             #[cfg(unix)]

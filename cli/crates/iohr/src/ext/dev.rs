@@ -13,7 +13,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use iohr_auth::Redacted;
+use inorbithr::Secret;
 use tokio::io::{AsyncBufReadExt as _, AsyncRead};
 
 use super::lint::lint;
@@ -89,25 +89,25 @@ pub(crate) fn secret_var(name: &str) -> String {
 
 /// Resolves each secret: `IOHR_EXT_SECRET_<NAME>` first, then the Keychain item
 /// (service [`SECRET_SERVICE`], account the reference).
-async fn secrets(source: &SourceManifest) -> Result<Vec<(String, Redacted<String>)>, Error> {
+async fn secrets(source: &SourceManifest) -> Result<Vec<(String, Secret<String>)>, Error> {
     let mut out = Vec::new();
     // One open of the Keychain for all of them, not one per secret.
-    let mut keychain: Option<std::sync::Arc<iohr_auth::KeyringStore>> = None;
+    let mut keychain: Option<std::sync::Arc<inorbithr::login::KeyringStore>> = None;
     for s in &source.secrets {
         let var = secret_var(&s.name);
         if let Some(v) = std::env::var(&var).ok().filter(|v| !v.is_empty()) {
-            out.push((s.env.clone(), Redacted::new(v)));
+            out.push((s.env.clone(), Secret::new(v)));
             continue;
         }
         let reference = s.reference.clone();
         let store = match &keychain {
             Some(k) => Ok(k.clone()),
-            None => iohr_auth::KeyringStore::open().map(std::sync::Arc::new),
+            None => inorbithr::login::KeyringStore::open().map(std::sync::Arc::new),
         };
         let found = match store {
             Ok(k) => {
                 keychain = Some(k.clone());
-                iohr_auth::off_thread(move || k.get_named(SECRET_SERVICE, &reference)).await
+                inorbithr::login::off_thread(move || k.get_named(SECRET_SERVICE, &reference)).await
             }
             Err(e) => Err(e),
         };
@@ -169,7 +169,7 @@ fn changed(before: &Snapshot, after: &Snapshot) -> Vec<String> {
 }
 
 fn private_dir(p: &Path) -> Result<(), Error> {
-    iohr_auth::create_private_dir(p)
+    inorbithr::login::create_private_dir(p)
         .map_err(|e| Error::Failed(format!("cannot create {}: {e}", p.display())))
 }
 

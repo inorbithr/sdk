@@ -12,7 +12,6 @@ use base64::Engine as _;
 
 use crate::access;
 use crate::attach;
-use crate::browser;
 use crate::card;
 use crate::error::Error;
 use crate::headless::OutputHow;
@@ -27,6 +26,7 @@ use crate::permissions::{
 use crate::prompt;
 use crate::steps::Step;
 use crate::ui::{Choice, Ui};
+use inorbithr::login::browser;
 
 /// Separates the answer, the command and the link in the hook's record. A control character
 /// no answer may contain (it is stripped from the answer), so one `$(...)` carries all three.

@@ -12,8 +12,8 @@
 
 use std::time::Duration;
 
+use inorbithr::login::Claims;
 use inorbithr::{ClientCredentials, Method, Secret, TokenProvider as _};
-use iohr_auth::{Claims, Redacted};
 use serde::Deserialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -218,7 +218,7 @@ async fn exchange(
         .and_then(|t| t.format(&Rfc3339).ok())
         .unwrap_or_default();
     Ok(Minted {
-        access_token: Redacted::new(token.expose().to_owned()),
+        access_token: Secret::new(token.expose().to_owned()),
         expires_at,
     })
 }
@@ -238,9 +238,10 @@ mod tests {
 
     use std::sync::Arc;
 
+    use crate::auth::StaticToken;
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use iohr_auth::{Redacted, StaticToken};
+    use inorbithr::Secret;
     use wiremock::matchers::{body_string_contains, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -262,9 +263,9 @@ mod tests {
     }
 
     fn api(server: &MockServer) -> Api {
-        let person = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(jwt(
-            &["iohr.api"],
-        )))));
+        let person = Arc::new(AnyCredential::Token(StaticToken::new(Secret::new(jwt(&[
+            "iohr.api",
+        ])))));
         Api::new(&server.uri(), person, false).unwrap()
     }
 

@@ -1,15 +1,29 @@
 //! Tokens from iohr's extension channel (the SDK's ADR 0012; PRD 0084 slice 1).
 //!
-//! iohr passes `IOHR_EXT_TOKEN_SOCKET` (a 0600 Unix socket). The program sends
-//! `POST /token {"scopes": [...]}` and gets `{"access_token", "expires_at"}` for scopes its
-//! manifest declares, and a refusal for any other. It is the only credential this project
-//! has: never read `IOHR_TOKEN` or run `iohr auth token`.
+//! iohr passes `IOHR_EXT_TOKEN_SOCKET` (a 0600 Unix socket, or a local named pipe on
+//! Windows). The program sends `POST /token {"scopes": [...]}` and gets
+//! `{"access_token", "expires_at"}` for scopes its manifest declares, and a refusal for any
+//! other. It is the only credential this project has: never read `IOHR_TOKEN` or run
+//! `iohr auth token`.
 
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
-use std::time::Duration;
 
 const MAX_ANSWER: u64 = 64 * 1024;
+
+#[cfg(unix)]
+fn connect(path: &str) -> std::io::Result<std::os::unix::net::UnixStream> {
+    let conn = std::os::unix::net::UnixStream::connect(path)?;
+    let timeout = Some(std::time::Duration::from_secs(10));
+    conn.set_read_timeout(timeout)?;
+    conn.set_write_timeout(timeout)?;
+    Ok(conn)
+}
+
+/// On Windows iohr serves a named pipe (`\\.\pipe\iohr-ext-…`), which opens like a file.
+#[cfg(windows)]
+fn connect(path: &str) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new().read(true).write(true).open(path)
+}
 
 /// iohr refused the request, or the channel could not be reached.
 #[derive(Debug)]
@@ -37,10 +51,7 @@ pub fn token(scopes: &[&str]) -> Result<String, Refused> {
         ));
     }
     let unreachable = |e: std::io::Error| Refused(format!("cannot reach iohr's token channel: {e}"));
-    let mut conn = UnixStream::connect(path.trim()).map_err(unreachable)?;
-    let timeout = Some(Duration::from_secs(10));
-    conn.set_read_timeout(timeout).map_err(unreachable)?;
-    conn.set_write_timeout(timeout).map_err(unreachable)?;
+    let mut conn = connect(path.trim()).map_err(unreachable)?;
     let list = scopes.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(",");
     let body = format!("{{\"scopes\":[{list}]}}");
     let request = format!(

@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::ask;
 use crate::error::Error;
 use crate::output::{Out, table_text};
 use crate::template::{self, Answer, Kind, Origin, Row, Spec, StepName, Template};
@@ -238,7 +237,7 @@ pub(crate) fn describe(t: &Template, is_default: bool) -> Shown {
                     ready: v
                         .needs
                         .iter()
-                        .all(|n| ask::find_on_path(n, &path).is_some()),
+                        .all(|n| crate::paths::find_program(n, &path).is_some()),
                     default: default.as_deref() == Some(v.id.as_str()),
                     files: t
                         .variant_files

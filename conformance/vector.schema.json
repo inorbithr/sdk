@@ -10,7 +10,7 @@
     "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
     "kind": { "enum": ["config", "config-path", "no-proxy", "rate-limit", "durations"], "description": "Also the directory the file sits in." },
     "summary": { "type": "string" },
-    "pending": { "type": "array", "items": { "enum": ["go", "rust", "ts", "py", "java", "csharp"] } },
+    "pending": { "type": "array", "items": { "enum": ["go", "rust", "ts", "py", "java", "csharp", "swift"] } },
     "notes": { "type": "string" },
     "input": {
       "type": "object",
@@ -24,7 +24,8 @@
         "files": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Other files written into `{dir}`." },
         "os": { "enum": ["linux", "macos", "windows"], "description": "Default linux." },
         "profile_type": { "type": "string", "description": "Resolve for a typed (generated) profile of this name instead of the public client." },
-        "cli": { "enum": ["present", "absent"], "description": "Whether `cli_path` resolves to an executable; default absent." }
+        "cli": { "enum": ["present", "absent"], "description": "Whether `cli_path` resolves to an executable; default absent." },
+        "login": { "type": "array", "items": { "type": "string" }, "description": "RFC 0231: the profiles the injected credential store holds an entry for (docs/config.md section 5.6); default none." }
       }
     },
     "expect": {

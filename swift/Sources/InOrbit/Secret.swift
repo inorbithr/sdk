@@ -21,15 +21,18 @@ public struct Secret: Sendable, Equatable, CustomStringConvertible, CustomDebugS
         value.isEmpty
     }
 
+    /// What every printer in the SDK shows in place of a secret.
+    static let marker = "<redacted>"
+
     public var description: String {
-        "<redacted>"
+        Self.marker
     }
 
     public var debugDescription: String {
-        "Secret(<redacted>)"
+        "Secret(\(Self.marker))"
     }
 
     public var customMirror: Mirror {
-        Mirror(self, children: ["value": "<redacted>"])
+        Mirror(self, children: ["value": Self.marker])
     }
 }

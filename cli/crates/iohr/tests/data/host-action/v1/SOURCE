@@ -1,0 +1,4 @@
+Defined here, in the SDK: runner/host-action/v1 is the runner's schema, and this directory is
+its source. The platform copies v1.json, examples/ and invalid/ from here with a SOURCE line of
+its own naming the commit it copied. ../schema/ stays the platform's runner/host-action/v0,
+copied from there; a v1 document with provider "builtin" is a v0 document plus that field.

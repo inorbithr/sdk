@@ -7,6 +7,7 @@
  */
 
 import { parse as parseToml, TomlDate } from "smol-toml";
+import { REDACTED } from "./auth.js";
 import { ConfigError, type ConfigProblem } from "./errors.js";
 import {
   currentOs,
@@ -18,7 +19,7 @@ import {
   type StatLike,
   workingDir,
 } from "./platform.js";
-import { type ProxyChoice, parseNoProxyEntry } from "./proxy.js";
+import { isLoopback, type ProxyChoice, parseNoProxyEntry } from "./proxy.js";
 
 /** The built-in pipeline, outermost first (config.md section 7.2). */
 export const BUILT_INS: readonly string[] = [
@@ -37,7 +38,6 @@ export const BUILT_INS: readonly string[] = [
 ];
 
 const MAX_FILE = 1024 * 1024;
-const REDACTED = "<redacted>";
 const CLI_KEYS = ["kind", "account", "storage", "issuer", "client_id"];
 const SOURCES = ["env", "workload", "file", "cli"] as const;
 
@@ -201,11 +201,6 @@ function hasUserinfo(raw: string): boolean {
   } catch {
     return false;
   }
-}
-
-function isLoopbackHost(host: string): boolean {
-  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
-  return h === "localhost" || h === "::1" || /^127\.\d+\.\d+\.\d+$/.test(h);
 }
 
 /** `dir` without the path separators it ends with. */
@@ -953,7 +948,7 @@ class Resolver {
         } catch {
           throw new Error(`${JSON.stringify(v)} is not an absolute URL`);
         }
-        if (!(u.protocol === "https:" || (u.protocol === "http:" && isLoopbackHost(u.hostname)))) {
+        if (!(u.protocol === "https:" || (u.protocol === "http:" && isLoopback(u.hostname)))) {
           throw new Error(
             `${JSON.stringify(v)} must use https (plain http is allowed only for localhost and loopback addresses)`,
           );

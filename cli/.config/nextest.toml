@@ -1,0 +1,15 @@
+# Tests that drive a real shell or program through a pseudo-terminal wait on short timers (a held
+# Esc, a redraw, a settle). On a busy macOS runner one of them runs late and fails: a different
+# test each release (project_init_once, then the Option+h split read). Run such a test again
+# before calling it failed. A pass on a later try is
+# reported as FLAKY, so it stays visible; a test that fails every try still fails the run.
+[[profile.default.overrides]]
+platform = { host = 'cfg(target_os = "macos")' }
+filter = 'binary(panel) | binary(panel_chat) | binary(panel_live) | binary(project_init_once) | binary(theme)'
+retries = 2
+
+# Run every test and list every failure in one pass. A Windows or macOS leg that only builds on a
+# release finds several breaks at once, and stopping at the first one costs a release run per
+# break.
+[profile.default]
+fail-fast = false
