@@ -40,7 +40,24 @@ compiled `iohr` and the replay server, the same two binaries six times a run. Lo
 - The supply-chain rules of 0005 are unchanged: pinned actions, least privilege, no
   credentials persisted; the nightly report job alone holds `issues: write`.
 
+## Amendment, 2026-11-19: caches are saved from `main` only
+
+The command-line cells took 36 to 44 minutes. The repository's Actions cache held
+10.85 GB, over its 10 GB limit, in 29 entries. About 7.8 GB of that was mise tool caches
+saved by pull-request merge refs and merge-queue refs. Those caches can be read only by the
+ref that saved them. Eviction then removed `main`'s Rust caches for macOS, Windows and Rust
+1.94, so those cells compiled from cold on every run. On macOS that took 12 minutes
+42 seconds before the first test.
+
+- Every cache step saves only on a push to `main` and restores on every run. The Rust cache
+  (`.github/actions/rust-cache`) already did this; every `jdx/mise-action` step now sets
+  `cache_save` the same way.
+- The trade-off is that a pull request that changes `mise.toml` installs its tools again on
+  each run, about one to two minutes per job.
+
 ## Sources
 
 - https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/storing-and-sharing-data-from-a-workflow
+- https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache
+- https://github.com/jdx/mise-action (inputs `cache` and `cache_save`)
 - https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#schedule
