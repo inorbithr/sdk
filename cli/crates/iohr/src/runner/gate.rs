@@ -532,6 +532,13 @@ pub(crate) mod tests {
     #[cfg(windows)]
     const SCRUBBED_OUT: &[u8] = b"clean\r\n";
 
+    /// Exits 0 only when the profile name arrived and the token did not.
+    #[cfg(not(windows))]
+    const PROFILE_ONLY: &str = r#"test "$IOHR_PROFILE" = runner && test -z "${IOHR_TOKEN:-}""#;
+    #[cfg(windows)]
+    const PROFILE_ONLY: &str =
+        "(if not \"%IOHR_PROFILE%\"==\"runner\" exit 1)& (if defined IOHR_TOKEN exit 1)& exit 0";
+
     #[tokio::test]
     async fn a_branch_merged_with_main_is_checked_and_reported_with_the_hash_of_the_output() {
         let (_root, _o, work) = repos();
@@ -706,8 +713,7 @@ pub(crate) mod tests {
         let mut env = parent();
         env.push(("IOHR_PROFILE".into(), "runner".into()));
         env.push(("IOHR_TOKEN".into(), "secret-value".into()));
-        let cmd = r#"test "$IOHR_PROFILE" = runner && test -z "${IOHR_TOKEN:-}""#;
-        let got = check(&work, cmd, LIMIT, env, MainFrom::Checkout)
+        let got = check(&work, PROFILE_ONLY, LIMIT, env, MainFrom::Checkout)
             .await
             .unwrap();
         assert_eq!(got.exit_code, 0);
