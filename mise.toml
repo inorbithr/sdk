@@ -91,7 +91,7 @@ git diff --exit-code -- go rust typescript python java csharp swift dart || {
 
 [tasks."repo:check"]
 shell = "bash -e -o pipefail -c"
-description = "Spelling, workflow lint and workflow security audit, the examples gate tests"
+description = "Spelling, workflow lint and workflow security audit, the examples gate and gate record tests"
 run = [
   "typos",
   "actionlint",
@@ -101,6 +101,7 @@ run = [
   "python3 tools/test_cli_policy.py",
   "python3 tools/test_pr_preflight.py",
   "python3 tools/test_terminal_themes.py",
+  "python3 tools/test_gate_record.py",
   "python3 tools/terminal-themes.py --offline",
 ]
 
