@@ -559,19 +559,19 @@ fn reader<R: std::io::Read + Send + 'static>(from: R) -> mpsc::Receiver<Vec<u8>>
     read_loop(from, |_, _| {})
 }
 
-/// The person's keys. A lone Esc read while `hold` is set waits up to [`ESC_HOLD`] for the next
+/// The person's keys. A lone Esc read while `hold` is set waits up to `wait` for the next
 /// key and goes out with it in one read, as a terminal sends Meta: Esc then `h` written apart is
 /// Option+h. The wait is here and not in the loop because only this thread can see a key that is
 /// still in the terminal: on a loaded host the loop's timer could fire before this thread had read
 /// the `h`, and the Esc went to the shell, which took ESC-h as its own.
-fn key_reader<R>(from: R, hold: Arc<AtomicBool>) -> mpsc::Receiver<Vec<u8>>
+fn key_reader<R>(from: R, hold: Arc<AtomicBool>, wait: Duration) -> mpsc::Receiver<Vec<u8>>
 where
     R: std::io::Read + std::os::fd::AsFd + Send + 'static,
 {
     read_loop(from, move |from, chunk| {
         if OpenKey::starts_hide(chunk)
             && hold.load(Ordering::Relaxed)
-            && readable_within(from.as_fd(), ESC_HOLD)
+            && readable_within(from.as_fd(), wait)
         {
             let mut next = [0u8; 4096];
             loop {
@@ -685,8 +685,20 @@ fn launch(
     })
 }
 
-/// How long a lone Esc is held for an `h` that follows it (Option+h written in two reads).
+/// How long a lone Esc is held for an `h` that follows it (Option+h written in two reads), unless
+/// `[panel] esc_hold_ms` says otherwise.
 const ESC_HOLD: Duration = Duration::from_millis(40);
+
+/// The longest `[panel] esc_hold_ms` is taken as: past it a lone Esc would feel stuck.
+const ESC_HOLD_MAX: Duration = Duration::from_secs(5);
+
+/// The Esc hold from `[panel] esc_hold_ms` or `IOHR_PANEL_ESC_HOLD_MS`: [`ESC_HOLD`] when
+/// neither is set or the value is not a number, capped at [`ESC_HOLD_MAX`].
+fn esc_hold(env: Option<&str>, config: Option<u64>) -> Duration {
+    env.and_then(|v| v.trim().parse::<u64>().ok())
+        .or(config)
+        .map_or(ESC_HOLD, |ms| Duration::from_millis(ms).min(ESC_HOLD_MAX))
+}
 
 /// What the loop holds besides the proxy: the shell's input and the reads in flight.
 struct Session {
@@ -1202,11 +1214,12 @@ struct Settings {
     mouse: MouseMode,
     open_key: OpenKey,
     chat: boxed::Setting,
+    esc_hold: Duration,
 }
 
 impl Settings {
-    /// `[panel] mouse` (or `IOHR_PANEL_MOUSE`), `[ask] menu_key`, and `$TERM_PROGRAM`. A config
-    /// that cannot be read is the defaults.
+    /// `[panel] mouse`, `chat` and `esc_hold_ms` (or their `IOHR_PANEL_*`), `[ask] menu_key`, and
+    /// `$TERM_PROGRAM`. A config that cannot be read is the defaults.
     fn read(g: &Global) -> Self {
         let config = crate::context::Ctx::load(g).ok().map(|c| c.config);
         let mouse = std::env::var("IOHR_PANEL_MOUSE")
@@ -1225,6 +1238,10 @@ impl Settings {
             mouse: MouseMode::parse(mouse.as_deref()),
             open_key: OpenKey::here(ask_ctrl_g),
             chat: boxed::Setting::parse(chat.as_deref()),
+            esc_hold: esc_hold(
+                std::env::var("IOHR_PANEL_ESC_HOLD_MS").ok().as_deref(),
+                config.as_ref().and_then(|c| c.panel.esc_hold_ms),
+            ),
         }
     }
 }
@@ -1343,7 +1360,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
             .map_err(|e| io_err("cannot share the pty", e))?,
     );
     let esc_hold = Arc::new(AtomicBool::new(false));
-    let mut from_user = key_reader(std::io::stdin(), esc_hold.clone());
+    let mut from_user = key_reader(std::io::stdin(), esc_hold.clone(), settings.esc_hold);
     let (exit_tx, mut exit_rx) = mpsc::channel::<Result<(), Error>>(1);
     std::thread::spawn(move || {
         let r = child
@@ -1598,7 +1615,12 @@ mod tests {
     fn a_held_escape_goes_out_with_the_h_written_after_it() {
         use std::io::Write as _;
         let (mut keys, terminal) = std::os::unix::net::UnixStream::pair().unwrap();
-        let mut rx = key_reader(terminal, Arc::new(AtomicBool::new(true)));
+        // A hold far longer than the pause, so a loaded host stretching the sleep cannot fail it.
+        let mut rx = key_reader(
+            terminal,
+            Arc::new(AtomicBool::new(true)),
+            Duration::from_secs(5),
+        );
         keys.write_all(b"\x1b").unwrap();
         std::thread::sleep(Duration::from_millis(10));
         keys.write_all(b"h").unwrap();
@@ -1610,12 +1632,25 @@ mod tests {
         use std::io::Write as _;
         for hold in [true, false] {
             let (mut keys, terminal) = std::os::unix::net::UnixStream::pair().unwrap();
-            let mut rx = key_reader(terminal, Arc::new(AtomicBool::new(hold)));
+            let mut rx = key_reader(terminal, Arc::new(AtomicBool::new(hold)), ESC_HOLD);
             keys.write_all(b"\x1b").unwrap();
             assert_eq!(rx.blocking_recv(), Some(b"\x1b".to_vec()), "hold {hold}");
             keys.write_all(b"h").unwrap();
             assert_eq!(rx.blocking_recv(), Some(b"h".to_vec()), "hold {hold}");
         }
+    }
+
+    #[test]
+    fn the_escape_hold_comes_from_the_env_then_the_config_and_is_capped() {
+        assert_eq!(esc_hold(None, None), ESC_HOLD);
+        assert_eq!(esc_hold(None, Some(250)), Duration::from_millis(250));
+        assert_eq!(esc_hold(Some("120"), Some(250)), Duration::from_millis(120));
+        assert_eq!(esc_hold(Some(" 0 "), None), Duration::ZERO);
+        assert_eq!(
+            esc_hold(Some("soon"), Some(250)),
+            Duration::from_millis(250)
+        );
+        assert_eq!(esc_hold(None, Some(600_000)), ESC_HOLD_MAX);
     }
 
     #[test]
