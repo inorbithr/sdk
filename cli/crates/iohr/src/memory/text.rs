@@ -2,9 +2,8 @@
 //! duplicates, content words for recall, and the check that refuses a secret.
 //!
 //! Ported as small pure functions from the desktop app's memory crate (`text.rs`: `normalize`,
-//! `shingles`, `fnv`, `jaccard`, `content_words`, `word_hits`; `privacy.rs`: the generic secret
-//! pattern). Only the generic parts: nothing here names anyone's private material. Text is
-//! never logged.
+//! `shingles`, `fnv`, `jaccard`, `content_words`, `word_hits`). The secret shapes are kept once,
+//! in `crate::privacy`, with the rest of the filter. Text is never logged.
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -15,16 +14,6 @@ static NON_WORD: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"[^\p{L}\p{N}#/._ -]+").ok());
 static WORD: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"[\p{L}\p{N}][\p{L}\p{N}'._/#-]*").ok());
-static SECRET: LazyLock<Option<Regex>> = LazyLock::new(|| {
-    Regex::new(
-        r"(?x)
-        sk-ant-[A-Za-z0-9_-]{8,} | sk-[A-Za-z0-9]{20,} | gh[pousr]_[A-Za-z0-9]{20,} | github_pat_[A-Za-z0-9_]{20,}
-      | AKIA[0-9A-Z]{16} | xox[abpr]-[A-Za-z0-9-]{10,} | -----BEGIN[ A-Z]*PRIVATE\ KEY----- | eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}
-      | (?i:(password|passwd|secret|api[_-]?key|token)\s*[:=]\s*\S{6,})",
-    )
-    .ok()
-});
-
 const FILLER: &[&str] = &[
     "please", "and", "also", "ok", "okay", "so", "but", "then", "now", "yes", "well", "hey",
 ];
@@ -44,7 +33,7 @@ const STOP: &[&str] = &[
 /// block, `password: ...`). Memory never keeps one: it is committed with the project.
 #[must_use]
 pub fn has_secret(text: &str) -> bool {
-    SECRET.as_ref().is_some_and(|r| r.is_match(text))
+    crate::privacy::has_secret(text)
 }
 
 /// The normal form used for exact duplicates: lower case, punctuation gone, fillers at the

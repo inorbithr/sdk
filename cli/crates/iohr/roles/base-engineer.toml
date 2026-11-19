@@ -1,9 +1,14 @@
-# The root of the tree, imported only when the account has none (the lint wants exactly one).
-# An account that already has a root keeps it, and the built-ins hang under that one.
+# The root of the tree, imported when the account has none (the lint wants exactly one) and
+# upgraded when the account's root is this one, not edited in InOrbit. An account with another
+# root keeps it, and the built-ins hang under that one.
+# Never a pack and never routed to: its lines reach every role by inheritance (the pack,
+# `--role` and InOrbit's brief all put them first). A line every engineer needs goes here once,
+# not into each language role.
 name = "base-engineer"
 parent = ""
 title = "Base engineer"
-version = 2
+version = 3
+checked = "2026-11-06"
 domain = ["engineering", "software"]
 model = "sonnet"
 
@@ -24,3 +29,9 @@ place = "core"
 section = "Always"
 text = "Before you add or bump a dependency, pick its latest stable release (no pre-release, yanked or unmaintained version) and record the version and the date you checked. The security role's supply-chain lines say where to check."
 cites = ["https://docs.github.com/en/code-security/security-advisories", "https://osv.dev/", "https://scorecard.dev/"]
+
+[[line]]
+place = "core"
+section = "Distributed systems"
+text = "Put a timeout on every remote call. Retry at one layer only, with a limit and exponential backoff with jitter: retries at every layer multiply load."
+cites = ["https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"]

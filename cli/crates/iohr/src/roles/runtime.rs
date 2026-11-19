@@ -2,7 +2,8 @@
 //! find the Role, take its text as the run's brief and its model as the fallback model.
 //!
 //! The Role comes from the project first (`atlas/roles/<name>.md`, the pack `iohr project init`
-//! writes and the person may edit), then from the account (`GET /v1/coordinator/personalities/{name}`).
+//! writes and the person may edit), then from the account (`GET /v1/coordinator/personalities/{name}`, the wire's
+//! old word, [`roles::WIRE_ROLES_PATH`]), then from the catalogue built into the binary.
 //! The text is the Role's own core, or, when a job is named, the brief InOrbit compiles for that
 //! job (`POST .../brief`, `GetJobBrief`: the core, then the recall lines that match the job).
 //! Everything is bounded by [`TEXT_MAX`]. The job's text never travels in a URL.
@@ -22,11 +23,12 @@ use crate::error::Error;
 use crate::output::Out;
 use crate::roles::{self, notes};
 
-/// The most characters of a Role's text a run carries (about 2000 tokens).
+/// The most characters of a Role's text a run carries (about 2000 tokens), cut on a character
+/// boundary with a note. The one limit: the headless `<role>` block uses it too, so a text
+/// is never cut twice (it was cut here at 8,000 characters and again there at 4 KiB).
 pub(crate) const TEXT_MAX: usize = 8_000;
 /// The recall budget asked of `GetJobBrief`, in tokens.
 const RECALL_BUDGET: u32 = 500;
-const PATH: &str = "/v1/coordinator/personalities";
 
 /// Where the Role was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,16 +102,17 @@ struct Pack {
     text: String,
 }
 
-/// `text` cut to [`TEXT_MAX`] characters on a character boundary, with a note when it was cut.
+/// `text` cut to [`TEXT_MAX`] characters on a character boundary, the note included, with a
+/// note when it was cut. Bounding a bounded text changes nothing, so it is never cut twice.
 pub(crate) fn bound(text: &str) -> String {
+    let text = text.trim();
     if text.chars().count() <= TEXT_MAX {
-        return text.trim().to_owned();
+        return text.to_owned();
     }
-    let cut: String = text.chars().take(TEXT_MAX).collect();
-    format!(
-        "{}\n[the Role's text was cut at {TEXT_MAX} characters]",
-        cut.trim_end()
-    )
+    let note = format!("\n[the Role's text was cut at {TEXT_MAX} characters]");
+    let keep = TEXT_MAX - note.chars().count();
+    let cut: String = text.chars().take(keep).collect();
+    format!("{}{note}", cut.trim_end())
 }
 
 /// The pack's own text: its core section (the lines always in the brief) when it has one,
@@ -168,7 +171,8 @@ fn project_role(root: &Path, name: &str) -> Option<Pack> {
 /// The Role in the account's `GetPersonality` answer: its model and its compiled core.
 fn account_pack(v: &Value) -> Option<Pack> {
     let model = v
-        .pointer("/personality/model")
+        .get(roles::WIRE_ROLE_KEY)
+        .and_then(|p| p.get("model"))
         .and_then(Value::as_str)
         .map(str::to_owned);
     let core = v.get("core").and_then(Value::as_str).unwrap_or_default();
@@ -239,7 +243,7 @@ pub(crate) async fn resolve(g: &Global, env: &Env, l: Lookup<'_>) -> Result<Appl
         None
     };
     if let (None, Some(s)) = (&found, &session) {
-        let path = format!("{PATH}/{name}");
+        let path = format!("{}/{name}", roles::WIRE_ROLES_PATH);
         match s.api.send(Method::Get, &path, &[], None).await {
             Ok(raw) => {
                 let v: Value = raw.json()?;
@@ -275,7 +279,7 @@ pub(crate) async fn resolve(g: &Global, env: &Env, l: Lookup<'_>) -> Result<Appl
     };
     if let (Some(j), Some(s)) = (job, &session) {
         let body = json!({"job_id": j, "recall_budget": RECALL_BUDGET});
-        let path = format!("{PATH}/{name}/brief");
+        let path = format!("{}/{name}/brief", roles::WIRE_ROLES_PATH);
         match s.api.send(Method::Post, &path, &[], Some(&body)).await {
             Ok(raw) => {
                 let v: Value = raw.json()?;
@@ -341,8 +345,9 @@ mod tests {
         let long = "é".repeat(TEXT_MAX + 50);
         let b = bound(&long);
         assert!(b.starts_with('é'));
-        assert_eq!(b.chars().filter(|c| *c == 'é').count(), TEXT_MAX);
+        assert_eq!(b.chars().count(), TEXT_MAX, "the note is inside the limit");
         assert!(b.ends_with("characters]"));
+        assert_eq!(bound(&b), b, "a bounded text is never cut again");
         assert_eq!(bound("  short \n"), "short");
     }
 
@@ -388,7 +393,7 @@ mod tests {
     fn a_role_of_the_catalogue_resolves_with_no_pack_and_no_account() {
         let p = catalogue_role("security").unwrap();
         assert_eq!(p.model.as_deref(), Some("sonnet"));
-        assert!(!p.text.is_empty() && p.text.chars().count() <= TEXT_MAX + 60);
+        assert!(!p.text.is_empty() && p.text.chars().count() <= TEXT_MAX);
         assert!(catalogue_role("nobody").is_none());
     }
 

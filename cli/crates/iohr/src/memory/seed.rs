@@ -14,23 +14,29 @@ pub fn readme_path() -> String {
 }
 
 /// The seed memories of a project of `lang`: the recall lines of the roles it gets
-/// (`security` and its language's engineer), each as a fact that names its source.
+/// (`security` and its language's engineer) and of the roles they inherit from, each as a fact
+/// that names its source and the day it was checked.
 #[must_use]
 pub fn entries(lang: Option<&str>) -> Vec<Entry> {
     let mut out: Vec<Entry> = Vec::new();
-    for p in roles::selection(lang) {
-        for l in p.lines.iter().filter(|l| l.place == "recall") {
-            let why = format!(
-                "seed from the {} role (catalogue v{}); source {}",
-                p.title,
-                p.version,
-                l.cites.first().map_or("", String::as_str)
-            );
-            let mut e = Entry::new(&l.text, Kind::Fact, &why, Vec::new(), false);
-            // A built-in fact was last checked when the catalogue was, not when it was seeded.
-            e.checked = Some(roles::CHECKED.to_owned());
-            if !out.iter().any(|o| o.id == e.id) {
-                out.push(e);
+    for chosen in roles::selection(lang) {
+        let mut chain = roles::ancestors(&chosen);
+        chain.push(chosen);
+        for p in &chain {
+            for l in p.lines.iter().filter(|l| l.place == "recall") {
+                let why = format!(
+                    "seed from the {} role (catalogue v{}); source {}",
+                    p.title,
+                    p.version,
+                    l.cites.first().map_or("", String::as_str)
+                );
+                let mut e = Entry::new(&l.text, Kind::Fact, &why, Vec::new(), false);
+                // A built-in fact was last checked when its role (or the line) was, not when
+                // it was seeded.
+                e.checked = Some(l.checked_on(p).to_owned());
+                if !out.iter().any(|o| o.id == e.id) {
+                    out.push(e);
+                }
             }
         }
     }

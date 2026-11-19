@@ -13,16 +13,31 @@ project's local, file-based memory. Back to the [iohr overview](../README.md).
   `typescript-engineer` or `go-engineer`. `atlas init` reads the language from
   `inorbit.toml` or the build file.
 
-Each file has front matter (`name`, `parent`, `domain`, the catalogue it came from) and its
-lines: a core of at most 700 tokens, and recall lines found by topic, each with the primary
-source it comes from (NIST SSDF, OWASP ASVS, the Rust API guidelines, the PEPs and the
-like). The catalogue is data in the binary, labelled origin `doctrine`, and `inorbit.toml`
-records the names in `[roles]`.
+Each file has front matter (`name`, `parent`, `domain`, the catalogue it came from and the
+day it was checked) and its lines: a core, and recall lines found by topic, each with the
+primary source it comes from (NIST SSDF, OWASP ASVS, the Rust API guidelines, the PEPs and
+the like). The catalogue is data in the binary, labelled origin `doctrine`, and
+`inorbit.toml` records the names in `[roles]`.
+
+Every role hangs under `base-engineer`, the root. Its lines are the ones every engineer
+needs (a timeout on every remote call, for one), kept there once rather than copied into
+each role. `base-engineer` is never a pack in `atlas/roles/` and never a role a question is
+routed to: its lines reach every role by inheritance. Each pack lists them first, under
+"(inherited from base-engineer)", then the role's own; `--role` gives the same lines, and
+InOrbit builds a role's brief from the same chain, root first. The core a role brings,
+inherited lines included, stays within 700 tokens.
+
+A pack is written from the catalogue. Editing one changes what `--role` gives in this
+project, because the project's pack is read first (see below), but `iohr sync` does not
+send the edit: InOrbit gets the catalogue's lines. To change a role for your whole account,
+change it in InOrbit.
 
 ### Importing them into your account
 
 Signed in, init imports them into your account and prints one line each: `written v1`,
-`upgraded v1 → v2`, `unchanged` or `left alone`.
+`upgraded v1 → v2`, `unchanged`, `left alone` or `failed`. An upgrade nobody asked for
+always says why it was safe, for example
+`security: upgraded v1 → v2 (an older built-in, not edited in InOrbit)`.
 
 - A role already in your account that an earlier project put there is read from its
   version history. When every version of it was an import and its lines are an older
@@ -34,8 +49,23 @@ Signed in, init imports them into your account and prints one line each: `writte
 - Provenance is read from that history; there is no built-in marker on the server, so a
   role whose history cannot be read stays `left alone`. The catalogue never replaces your
   changes on its own.
-- When the account has no root role, `base-engineer` comes with them.
+- A role your account has at the version this project imported, while the catalogue has
+  moved on, is upgraded and the line says so (`catalogue v2 → v3, not edited in InOrbit
+  since the import`).
+- A role under another parent than the one it should hang under is a change, under the
+  same rules as a changed line: sent back under the root when nobody edited it in InOrbit
+  (`parent security → base-engineer`), left alone with the `--upgrade` hint when someone did.
+- When the account has no root role, `base-engineer` comes with them. When its root is an
+  older, unedited `base-engineer`, it is upgraded the same way, on its own if nothing else
+  goes; a root of your own is never touched, and the roles hang under it.
+- Before anything is sent, iohr checks each role the way InOrbit's import will (the privacy
+  filter over names, section titles, lines and sources, a known model, no "ignore" or
+  "override" in a child's core). A role that would be refused is not sent and its line is
+  `failed`, naming the line and the reason, never the refused text.
 - Only the account owner or an admin may import.
+
+`iohr sync` imports the same way and never passes `--upgrade`: it upgrades only the copies
+nobody edited in InOrbit, and leaves an edited one alone with the hint.
 
 Signed out, offline or refused, init still succeeds, says so once and keeps the files;
 `iohr sync` (or `iohr atlas roles import`) imports later. `--json` reports each role.
@@ -47,8 +77,11 @@ as a hidden alias of `iohr atlas roles`.
 
 ### Dates on facts
 
-Every built-in fact carries `checked: 2026-11-06`, the day it was last read against its
-primary source. Every prompt that asks a model to research or write facts
+Every built-in role says the day it was last read against its primary sources
+(`checked = "2026-11-06"` in the catalogue, `checked:` in the pack's front matter); a line
+read on another day carries its own date, which the pack shows under its source. Seed
+memories carry the same dates. The catalogue's tests require a date on every role and
+refuse one in the future. Every prompt that asks a model to research or write facts
 (`project init`, `--describe`, the agent step) ends with the system clock's date: "Today is
 YYYY-MM-DD. Use the newest edition or version published as of today; name it with its
 publication date; if you are unsure a newer one exists, say so."
@@ -68,7 +101,8 @@ starts (exit 2).
 What the role changes:
 
 - **Its text.** Claude Code gets the role's core (the "Core" section of the file, or the
-  account's compiled core, at most 8,000 characters, cut with a note when longer) through
+  account's compiled core, at most 8,000 characters, cut once on a character boundary
+  with a note when longer, and never cut again downstream) through
   `--append-system-prompt`; the streamed `?` run puts it first in the prompt in a `<role>`
   block. Codex has no system-prompt flag, so the text leads the question. The role guides
   how the agent works; it never widens the run's permissions, edits or limits.

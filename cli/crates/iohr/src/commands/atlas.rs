@@ -422,7 +422,8 @@ pub(crate) fn project_meta(root: &Path) -> (String, String) {
 }
 
 /// Moves an older `atlas/personalities/` to `atlas/roles/` and says so in one line (not in
-/// `--json`, which the caller adds to its own object). Runs before anything is written.
+/// `--json`, which the caller adds to its own object). Runs before anything is written, in
+/// `iohr atlas init`, `iohr project init`, `iohr atlas roles` and `iohr sync` alike.
 pub(crate) fn move_legacy_roles(root: &Path, out: Out) -> Result<Option<String>, Error> {
     let moved = roles::migrate_legacy(root).map_err(Error::Failed)?;
     if let Some(line) = moved.as_deref().filter(|_| !out.json) {
@@ -440,8 +441,8 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
     let (name, template) = project_meta(&root);
     let created_at = super::project::now();
     let bin = super::shell::running_bin();
-    // The language the project declares, else the one its build file shows.
-    let lang = roles::detect_language(&root);
+    // No hint here: the language the project declares, else the one its build file shows.
+    let lang = roles::language(&root, None);
     let mut written = atlas::ensure(
         &root,
         &atlas::Meta {
@@ -522,9 +523,10 @@ pub(crate) fn roles_result(report: &Report) -> (Mark, String) {
             format!(" ({n})")
         }
     };
-    let fix = report.message.clone().unwrap_or_else(|| {
-        "the roles stay in atlas/roles/; run `iohr login`, then `iohr sync` imports them".to_owned()
-    });
+    let fix = report
+        .message
+        .clone()
+        .unwrap_or_else(|| roles::kept_local("run `iohr login` first"));
     if report.outcomes.iter().any(|o| o.action == "failed") {
         (
             Mark::Warn,
