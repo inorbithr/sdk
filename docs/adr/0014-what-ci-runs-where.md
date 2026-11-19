@@ -19,9 +19,10 @@ compiled `iohr` and the replay server, the same two binaries six times a run. Lo
 | release-please pull requests | the component's own whole matrix; the rest by path filters | every supported version for that component | Linux, Windows, macOS for that component |
 
 - A change that touches the command line (`cli/**`, `rust/**`, `spec/**`, `mise.toml` or the
-  workflow) also runs its newest-Rust cell on Windows and macOS, so a platform break fails the
-  pull request and not the merge queue. The merge queue skips those cells and the Swift macOS
-  cell (amendment of 2026-11-19 below).
+  workflow) also runs its newest-Rust cell on macOS, so a macOS break fails the pull request
+  and not the merge queue. Its Windows cell runs nightly and on the `iohr` release pull
+  request only. The merge queue skips the macOS cell and the Swift macOS cell (amendments of
+  2026-11-19 below).
 - A `tools` job builds `iohr` and the replay server once on Linux and hands them to every
   Linux language job as an artifact; the tasks take them through `IOHR_BIN` and
   `REPLAY_PREBUILT` and build them themselves when those are unset, as on a laptop.
@@ -69,6 +70,27 @@ Trade-offs:
   merged tree, and so does the nightly.
 - A release pull request no longer proves the other languages on macOS and Windows. They
   have not changed in that pull request, and the nightly runs them every day.
+
+## Amendment, 2026-11-19: Windows leaves pull requests
+
+The owner works on macOS and does not ship a Windows build to anyone yet (decision of
+2026-11-19 on the macOS question). The command line's Windows cell was the only Windows job
+an ordinary pull request ran; the language Windows cells already ran only nightly and on
+release pull requests.
+
+Changes:
+
+- The command line's Windows cell runs in a full run (nightly at 03:23 UTC, by hand) and on
+  the `iohr` release pull request. Pull requests, pushes to `main` and the merge queue no
+  longer run it.
+- The command line's macOS cell is unchanged: it runs on every pull request and push to
+  `main` that touches the command line, and the merge queue skips it.
+
+Trade-offs:
+
+- A break that only shows on Windows reaches `main` and shows up in the nightly run, at most
+  a day later, and always before an `iohr` release, because its release pull request runs the
+  Windows cell. This is less coverage per pull request, so it was the owner's decision.
 
 ## Sources
 

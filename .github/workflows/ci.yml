@@ -3,13 +3,14 @@ name: ci
 # Where each check runs (ADR 0014):
 # - pull requests and pushes to main: Linux, the oldest and newest supported version of
 #   each language, only the languages a change touches;
-#   The command line also runs on Windows and macOS when it is touched;
+#   The command line also runs on macOS when it is touched (Windows only nightly and on its
+#   release pull request);
 # - nightly (and by hand): every language, every supported version, Linux, Windows and
 #   macOS; a failure opens or updates an issue;
 # - release-please pull requests: their own component's whole matrix, as nightly runs it, so
 #   no release ships untested; the other languages follow the path filters;
-# - the merge queue: as a pull request, without the macOS and Windows cells the pull request
-#   already passed (the push to main runs them again).
+# - the merge queue: as a pull request, without the macOS cells the pull request already
+#   passed (the push to main runs them again).
 on:
   push:
     branches: [main]
@@ -572,12 +573,13 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         rust: ["1.94", "1.99.0"]
-        # Windows and macOS run wherever the job runs (cli/**, rust/**, spec/**, mise.toml or this
-        # workflow changed, or a full run), so a platform break fails the pull request, not the
-        # merge queue. The merge queue skips them: the pull request passed them, and the push to
-        # main runs them again (ADR 0014, 2026-11-19). The init smoke test of every template
-        # (tests/templates.rs) is in cli:test.
-        include: ${{ fromJSON(github.event_name != 'merge_group' && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || '[]') }}
+        # macOS runs wherever the job runs (cli/**, rust/**, spec/**, mise.toml or this workflow
+        # changed), so a macOS break fails the pull request, not the merge queue. The merge queue
+        # skips it: the pull request passed it, and the push to main runs it again. Windows runs
+        # only in a full run (nightly, by hand) and on the iohr release pull request (ADR 0014,
+        # amendments of 2026-11-19). The init smoke test of every template (tests/templates.rs)
+        # is in cli:test.
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'cli') && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || github.event_name != 'merge_group' && '[{"os":"macos-latest","rust":"1.99.0"}]' || '[]') }}
     env:
       MISE_RUST_VERSION: ${{ matrix.rust }}
       # macOS and Windows runners have a credential store: its test must run, not skip
