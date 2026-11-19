@@ -6,7 +6,10 @@ name: ci
 #   The command line also runs on Windows and macOS when it is touched;
 # - nightly (and by hand): every language, every supported version, Linux, Windows and
 #   macOS; a failure opens or updates an issue;
-# - release-please pull requests: the same as nightly, so no release ships untested.
+# - release-please pull requests: their own component's whole matrix, as nightly runs it, so
+#   no release ships untested; the other languages follow the path filters;
+# - the merge queue: as a pull request, without the macOS and Windows cells the pull request
+#   already passed (the push to main runs them again).
 on:
   push:
     branches: [main]
@@ -39,20 +42,22 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      # Everything runs on the full runs; otherwise the path filters decide.
-      full: ${{ steps.full.outputs.full }}
-      go: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.go == 'true' }}
-      rust: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.rust == 'true' }}
-      ts: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.ts == 'true' }}
-      py: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.py == 'true' }}
-      java: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.java == 'true' }}
-      csharp: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.csharp == 'true' }}
-      swift: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.swift == 'true' }}
-      dart: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.dart == 'true' }}
-      cli: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.cli == 'true' }}
-      ui: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.ui == 'true' }}
+      # The full runs (nightly, by hand) run every language's whole matrix. A release-please pull
+      # request runs the whole matrix of its own component only (ADR 0014, 2026-11-19). Otherwise
+      # the path filters decide.
+      wide: ${{ steps.full.outputs.wide }}
+      go: ${{ contains(fromJSON(steps.full.outputs.wide), 'go') || steps.filter.outputs.go == 'true' }}
+      rust: ${{ contains(fromJSON(steps.full.outputs.wide), 'rust') || steps.filter.outputs.rust == 'true' }}
+      ts: ${{ contains(fromJSON(steps.full.outputs.wide), 'ts') || steps.filter.outputs.ts == 'true' }}
+      py: ${{ contains(fromJSON(steps.full.outputs.wide), 'py') || steps.filter.outputs.py == 'true' }}
+      java: ${{ contains(fromJSON(steps.full.outputs.wide), 'java') || steps.filter.outputs.java == 'true' }}
+      csharp: ${{ contains(fromJSON(steps.full.outputs.wide), 'csharp') || steps.filter.outputs.csharp == 'true' }}
+      swift: ${{ contains(fromJSON(steps.full.outputs.wide), 'swift') || steps.filter.outputs.swift == 'true' }}
+      dart: ${{ contains(fromJSON(steps.full.outputs.wide), 'dart') || steps.filter.outputs.dart == 'true' }}
+      cli: ${{ contains(fromJSON(steps.full.outputs.wide), 'cli') || steps.filter.outputs.cli == 'true' }}
+      ui: ${{ contains(fromJSON(steps.full.outputs.wide), 'ui') || steps.filter.outputs.ui == 'true' }}
       any: >-
-        ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.go == 'true' ||
+        ${{ steps.full.outputs.wide != '[]' || steps.filter.outputs.go == 'true' ||
         steps.filter.outputs.rust == 'true' || steps.filter.outputs.ts == 'true' ||
         steps.filter.outputs.py == 'true' || steps.filter.outputs.java == 'true' ||
         steps.filter.outputs.csharp == 'true' || steps.filter.outputs.swift == 'true' ||
@@ -63,10 +68,30 @@ jobs:
           EVENT: ${{ github.event_name }}
           HEAD_REF: ${{ github.head_ref }}
         run: |
+          full=false wide='[]'
           case "$EVENT:$HEAD_REF" in
-            schedule:*|workflow_dispatch:*|pull_request:release-please--*) echo "full=true" >> "$GITHUB_OUTPUT" ;;
-            *) echo "full=false" >> "$GITHUB_OUTPUT" ;;
+            schedule:*|workflow_dispatch:*)
+              full=true
+              wide='["go","rust","ts","py","java","csharp","swift","dart","cli","ui"]' ;;
+            # release-please--branches--main--components--<component>, one per package in
+            # release-please-config.json.
+            pull_request:release-please--*)
+              case "${HEAD_REF##*--components--}" in
+                go|go/otel) wide='["go"]' ;;
+                rust) wide='["rust"]' ;;
+                typescript) wide='["ts"]' ;;
+                python) wide='["py"]' ;;
+                java) wide='["java"]' ;;
+                csharp) wide='["csharp"]' ;;
+                swift) wide='["swift"]' ;;
+                dart) wide='["dart"]' ;;
+                iohr) wide='["cli"]' ;;
+                # A component this list does not know yet runs everything, as before.
+                *) full=true wide='["go","rust","ts","py","java","csharp","swift","dart","cli","ui"]' ;;
+              esac ;;
           esac
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "wide=$wide" >> "$GITHUB_OUTPUT"
       - if: steps.full.outputs.full != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -191,7 +216,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         go: ["1.26.11", "1.27.4"]
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","go":"1.27.4"},{"os":"macos-latest","go":"1.27.4"}]' || '[]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'go') && '[{"os":"windows-latest","go":"1.27.4"},{"os":"macos-latest","go":"1.27.4"}]' || '[]') }}
     env:
       MISE_GO_VERSION: ${{ matrix.go }}
       # Linux cells use the tools job's binaries; Windows and macOS build their own.
@@ -244,7 +269,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         rust: ["1.94", "1.99.0"]
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || '[]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'rust') && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || '[]') }}
     env:
       MISE_RUST_VERSION: ${{ matrix.rust }}
       IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
@@ -294,8 +319,8 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         # The oldest and newest supported versions; the full runs add the ones between.
-        node: ${{ fromJSON(needs.changes.outputs.full == 'true' && '["22","24","26"]' || '["22","26"]') }}
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","node":"26"}]' || '[]') }}
+        node: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'ts') && '["22","24","26"]' || '["22","26"]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'ts') && '[{"os":"windows-latest","node":"26"}]' || '[]') }}
     env:
       MISE_NODE_VERSION: ${{ matrix.node }}
       IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
@@ -343,8 +368,8 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         # The oldest and newest supported versions; the full runs add the ones between.
-        python: ${{ fromJSON(needs.changes.outputs.full == 'true' && '["3.11","3.12","3.13","3.14"]' || '["3.11","3.14"]') }}
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","python":"3.14"}]' || '[]') }}
+        python: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'py') && '["3.11","3.12","3.13","3.14"]' || '["3.11","3.14"]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'py') && '[{"os":"windows-latest","python":"3.14"}]' || '[]') }}
     env:
       MISE_PYTHON_VERSION: ${{ matrix.python }}
       UV_PYTHON: ${{ matrix.python }}
@@ -397,7 +422,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         java: ["temurin-17.0.20+8", "temurin-21.0.12+8.0.LTS"]
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","java":"temurin-17.0.20+8"}]' || '[]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'java') && '[{"os":"windows-latest","java":"temurin-17.0.20+8"}]' || '[]') }}
     env:
       MISE_JAVA_VERSION: ${{ matrix.java }}
       IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
@@ -443,7 +468,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest"}]' || '[]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'csharp') && '[{"os":"windows-latest"}]' || '[]') }}
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
@@ -483,9 +508,10 @@ jobs:
   swift:
     name: swift (macos-latest)
     needs: [changes, tools]
-    if: needs.changes.outputs.swift == 'true'
+    if: needs.changes.outputs.swift == 'true' && github.event_name != 'merge_group'
     # Xcode's toolchain builds the package for Apple platforms; the Linux cell below proves
-    # FoundationNetworking. One macOS cell, as Swift's first platform is Apple's.
+    # FoundationNetworking. One macOS cell, as Swift's first platform is Apple's. The merge
+    # queue skips it, as it skips the command line's macOS cell (ADR 0014, 2026-11-19).
     runs-on: macos-latest
     permissions:
       contents: read
@@ -548,10 +574,10 @@ jobs:
         rust: ["1.94", "1.99.0"]
         # Windows and macOS run wherever the job runs (cli/**, rust/**, spec/**, mise.toml or this
         # workflow changed, or a full run), so a platform break fails the pull request, not the
-        # merge queue. The init smoke test of every template (tests/templates.rs) is in cli:check.
-        include:
-          - { os: windows-latest, rust: "1.99.0" }
-          - { os: macos-latest, rust: "1.99.0" }
+        # merge queue. The merge queue skips them: the pull request passed them, and the push to
+        # main runs them again (ADR 0014, 2026-11-19). The init smoke test of every template
+        # (tests/templates.rs) is in cli:check.
+        include: ${{ fromJSON(github.event_name != 'merge_group' && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || '[]') }}
     env:
       MISE_RUST_VERSION: ${{ matrix.rust }}
       # macOS and Windows runners have a credential store: its test must run, not skip
