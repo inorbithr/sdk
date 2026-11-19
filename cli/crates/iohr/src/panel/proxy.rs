@@ -620,6 +620,11 @@ fn launch(
 /// How long a lone Esc is held for an `h` that follows it (Option+h written in two reads).
 const ESC_HOLD: Duration = Duration::from_millis(40);
 
+/// How late the hold's timer may fire before the loop is taken to have been starved (a loaded
+/// host gave the panel no time slice): then the `h` may be waiting unread, so the hold runs once
+/// more instead of releasing the Esc to the shell.
+const ESC_LATE: Duration = Duration::from_millis(15);
+
 /// What the loop holds besides the proxy: the shell's input and the reads in flight.
 struct Session {
     proxy: Proxy,
@@ -657,6 +662,8 @@ struct Session {
     /// A lone Esc held until this moment, to see whether `h` follows in the next read (Option+h
     /// from a terminal that writes Esc and `h` apart).
     esc_held: Option<Instant>,
+    /// The held Esc has already had its second hold after a late timer.
+    esc_extended: bool,
 }
 
 impl Session {
@@ -874,6 +881,7 @@ impl Session {
         }
         if OpenKey::starts_hide(bytes) && self.can_hold_esc() {
             self.esc_held = Some(Instant::now() + ESC_HOLD);
+            self.esc_extended = false;
             return;
         }
         self.route_input(bytes);
@@ -892,9 +900,17 @@ impl Session {
 
     /// The held Esc's time is up: it was a key of its own.
     fn esc_released(&mut self) {
-        if self.esc_held.take().is_some() {
-            self.route_input(&[0x1b]);
+        let Some(due) = self.esc_held else { return };
+        let now = Instant::now();
+        // The timer fired well after its moment: the loop was starved, and the `h` written a few
+        // milliseconds after the Esc may be in the reader's hands and not yet here. Hold once more.
+        if !self.esc_extended && now.saturating_duration_since(due) > ESC_LATE {
+            self.esc_extended = true;
+            self.esc_held = Some(now + ESC_HOLD);
+            return;
         }
+        self.esc_held = None;
+        self.route_input(&[0x1b]);
     }
 
     fn route_input(&mut self, bytes: &[u8]) {
@@ -1329,6 +1345,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         shell_pid,
         shares: 0,
         esc_held: None,
+        esc_extended: false,
     };
     session.redraw();
     session.refresh();

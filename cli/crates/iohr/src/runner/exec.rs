@@ -646,10 +646,10 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
     const API_KEY: &str = r#"{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty"}"#;
     const STORED: &str = "sk-ant-api03-STORED-KEY-never-printed";
 
-    /// RFC 0189: the model's `cargo` builds into its repository's shared directory, so
-    /// jobs of one repository do not each keep a `target/` of their own.
+    /// RFC 0189: the model's `cargo` builds into a directory of its job's checkout, which
+    /// the hygiene sweep removes with the checkout (no lock shared between jobs).
     #[tokio::test]
-    async fn a_turn_in_a_worktree_builds_into_its_repository_shared_directory() {
+    async fn a_turn_in_a_worktree_builds_into_its_own_job_directory() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().canonicalize().unwrap();
         let e = exec(&state, SUB);
@@ -666,7 +666,10 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         let f = e.execute(p).await;
         assert_eq!(f.outcome, "replied", "{}", f.detail);
         let env = std::fs::read_to_string(state.join("env.txt")).unwrap();
-        let want = format!("CARGO_TARGET_DIR={}", state.join("target/o/r").display());
+        let want = format!(
+            "CARGO_TARGET_DIR={}",
+            state.join("target/o/r/job_1").display()
+        );
         assert!(
             env.lines().any(|l| l == want),
             "{want} not in the child's environment"
