@@ -376,6 +376,8 @@ mod tests {
         }
     }
 
+    // The profile joins Unix paths; Windows joins with a backslash and has no sandbox.
+    #[cfg(unix)]
     #[test]
     fn the_macos_profile_denies_writes_then_allows_only_the_turns_folders() {
         let p = macos_profile(&paths());
@@ -399,6 +401,8 @@ mod tests {
         assert!(git > allow, "{p}");
     }
 
+    // The profile joins Unix paths; Windows joins with a backslash and has no sandbox.
+    #[cfg(unix)]
     #[test]
     fn the_macos_profile_hides_secrets_and_the_config_folder_but_not_the_workdir() {
         let p = macos_profile(&paths());
@@ -462,6 +466,8 @@ mod tests {
         assert_eq!(r, "#\"^/h/\\.claude\\.json\"");
     }
 
+    // The profile joins Unix paths; Windows joins with a backslash and has no sandbox.
+    #[cfg(unix)]
     #[test]
     fn bwrap_mounts_the_root_read_only_and_the_turns_folders_writable_after() {
         let a = bwrap_args(&paths());
