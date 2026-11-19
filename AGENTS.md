@@ -47,6 +47,8 @@ once, then:
 
 - `mise run ci:changed`: what CI runs for your changes since `origin/main` (same path
   rules). Run it before a push and before saying a change is done.
+- `mise run pr:preflight`: every check this branch's pull request will fail (title, the
+  `PRD:`/`Implements: RFC`/`ADR:`/`Monitors:` lines, the legs it runs), before you open it.
 - `mise run ci`: every check in every language; before a release, or when in doubt.
 - `mise run <lang>:check`: format check, lint, type check and unit tests for one
   language (`go`, `rust`, `ts`, `py`, `java`, `csharp`, `swift`, `dart`), or `cli:check` for the command line.
@@ -100,7 +102,7 @@ A task for a language whose package does not exist yet prints a skip line and ex
   `feat(go): ...`, `fix(py): ...`, `docs: ...`, `ci: ...`, `spec: ...`. Scopes:
   `go`, `rust`, `ts`, `py`, `java`, `csharp`, `swift`, `dart`, `cli`, `spec`, `conformance`, `examples`,
   `ci`, `docs`,
-  `repo`.
+  `repo`, `deps` (the list `.github/workflows/pr-title.yml` checks).
   Release notes and version bumps are generated from these.
 - One logical change per commit. A breaking change says `!` and has a `BREAKING CHANGE:`
   footer.

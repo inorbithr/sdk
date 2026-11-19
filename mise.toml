@@ -62,6 +62,10 @@ depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:serve
 description = "What CI would run for your changes since origin/main, with CI's path rules; run it before a push (`-- --dry-run` prints the plan)"
 run = "bash tools/ci-changed.sh"
 
+[tasks."pr:preflight"]
+description = "Every check this branch's pull request will fail: title, document lines, the legs it runs (advisory in CI; ADR 0019)"
+run = "python3 tools/pr-preflight.py"
+
 [tasks.check]
 description = "Format check, lint, types and unit tests for every language, the command line and the web UI"
 depends = ["go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "dart:check", "cli:check", "ui:check"]
@@ -95,6 +99,7 @@ run = [
   "python3 tools/check-repo.py",
   "python3 tools/test_examples_gate.py",
   "python3 tools/test_cli_policy.py",
+  "python3 tools/test_pr_preflight.py",
   "python3 tools/test_terminal_themes.py",
   "python3 tools/terminal-themes.py --offline",
 ]
