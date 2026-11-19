@@ -600,7 +600,7 @@ stale; step 1 and the `checked` day reduce that but do not remove it.
 
 - Does the scientist's condition-style check need a second `[[check]]` kind, or will a prose
   checklist do until the coordinator reads it?
-- Which model ids form the eval arms, and how are live runs paid for? Cost: owner to assess.
+- Which model ids form the eval arms, and how are live runs paid for? The maintainers decide the budget.
 - Should the 1,400 limit count security beside a language engineer (see Risks)?
 - Where do PRD 0088.1 and ADR 0221 put the scorer code, and can the template's scorer be shared
   without the `@@MODULE@@` placeholders?
