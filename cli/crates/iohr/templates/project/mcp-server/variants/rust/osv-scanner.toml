@@ -1,0 +1,12 @@
+# OSV-Scanner config for this template's Cargo.lock, which the repository scans like any other
+# lockfile (OSV-Scanner reads only the osv-scanner.toml next to a lockfile). It is repository audit
+# config, not template content: build.rs leaves every osv-scanner.toml out of the embedded
+# templates, so `iohr project init` never writes it into a project.
+
+# chrono is unmaintained (https://github.com/chronotope/chrono/issues/1768): an informational
+# notice with no affected function and no fixed version. rmcp 3.9.0 and schemars pull it. Review
+# by the expiry (owner decision apr_01M7QSBFYXJDK7GTWHAARM4MPB).
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+ignoreUntil = 2027-02-18
+reason = "chrono unmaintained, informational with no affected functions; held by rmcp 3.9.0 and schemars"

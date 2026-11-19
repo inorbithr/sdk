@@ -481,6 +481,11 @@ fn evals_and_mcp_server_carry_what_their_readme_promises_and_leave_no_placeholde
             "mcp-server/{lang}: the official SDK is pinned exactly"
         );
         assert!(dir.join(lock).is_file(), "mcp-server/{lang}: {lock}");
+        // The repository's audit config beside a template lockfile stays in the repository.
+        assert!(
+            !dir.join("osv-scanner.toml").exists(),
+            "mcp-server/{lang}: osv-scanner.toml is repository config"
+        );
         assert!(file(&dir, "README.md").contains("2026-07-28"), "{lang}");
         assert!(!holds(&dir, "@@"), "mcp-server/{lang}: placeholder left");
     }
