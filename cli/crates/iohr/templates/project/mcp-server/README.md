@@ -42,7 +42,8 @@ To use it, add it to a host's MCP configuration as a command, for example in a p
 The 2026-07-28 revision removed the `initialize` handshake: a client calls `server/discover` (or
 simply calls), results carry a `resultType`, and lists say how long to keep them (`ttlMs`,
 `cacheScope`). The SDK also still answers `initialize`, so a host that has not moved yet works
-too. The test checks both. The SDK is pinned to an exact version; Dependabot proposes each
+too. Where the SDK speaks the new revision the test checks both; where it does not yet
+(Java, Swift, Dart) it checks `initialize`, and the variant's comment in `template.toml` says so. The SDK is pinned to an exact version; Dependabot proposes each
 update, and the test says whether the new one still passes.
 
 ## Tools you add

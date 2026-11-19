@@ -1,21 +1,20 @@
 [workspace]
 resolver = "3"
-members = ["crates/iohr", "crates/iohr-auth", "crates/iohr-openapi", "crates/iohr-codegen", "crates/iohr-lab", "crates/iohr-atlas-core"]
+members = ["crates/iohr", "crates/iohr-openapi", "crates/iohr-codegen", "crates/iohr-lab", "crates/iohr-atlas-core"]
 # Built with nightly by `mise run cli:fuzz`.
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.1.0-alpha.39"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.94"
 license = "Apache-2.0"
 repository = "https://github.com/inorbithr/sdk"
-homepage = "https://docs.inorbit.hr"
+homepage = "https://developers.inorbit.hr"
 publish = false
 
 [workspace.dependencies]
 iohr-atlas-core = { path = "crates/iohr-atlas-core", version = "0.1.0-alpha.39" }
-iohr-auth = { path = "crates/iohr-auth" }
 iohr-codegen = { path = "crates/iohr-codegen" }
 iohr-lab = { path = "crates/iohr-lab" }
 iohr-openapi = { path = "crates/iohr-openapi" }
@@ -33,7 +32,6 @@ etcetera = "0.11"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 getrandom = "0.4"
 heck = "0.5"
-keyring-core = "1"
 minijinja = { version = "3", features = ["serde"] }
 prettyplease = "0.3"
 quote = "1"
@@ -74,15 +72,8 @@ url = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
 # The terminal panel keeps a model of the child's screen: what lies under the floating box (its
 # shadow) and whether the child is on the alternate screen (ADR 0225).
-vt100 = { version = "0.16", default-features = false }
+vt100 = { version = "0.18", default-features = false }
 zeroize = "1"
-
-apple-native-keyring-store = { version = "1", features = ["keychain"] }
-# The version apple-native-keyring-store already uses: `QuietStore` switches the Keychain's
-# dialogs off through it.
-security-framework = "3.7"
-windows-native-keyring-store = "1"
-zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
 tempfile = "3"
 proptest = "1"

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- .NET 10 is the current LTS (.NET 8 reaches end of support in November 2026). -->
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>@@MODULE@@</RootNamespace>
+    <AssemblyName>@@NAME@@</AssemblyName>
+    <!-- The tests are in the same assembly's reach, and the suite has no dependency: base class library only. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CA1515;CA1707;CA1716</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="@@MODULE@@.Tests" />
+  </ItemGroup>
+</Project>

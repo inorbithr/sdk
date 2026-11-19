@@ -298,7 +298,7 @@ public struct DecodeError: InOrbitError {
     public internal(set) var idempotencyKey: String?
 }
 
-/// A stream event was larger than 1 MiB.
+/// An answer was larger than 16 MiB, or a stream event larger than 1 MiB.
 public struct TooLargeError: InOrbitError {
     public var kind: ErrorKind { .tooLarge }
     public let message: String

@@ -35,6 +35,42 @@ fn run(home: &Path, cwd: &Path, args: &[&str]) -> Output {
         .env("GOCACHE", home.join("gocache"))
         .env("GOFLAGS", "-modcacherw")
         .env("UV_CACHE_DIR", home.join("uv"))
+        // Java, .NET, Dart and Swift keep their packages in the private home too, so a cold
+        // cache proves the lockfile and the pin, not what an earlier build left behind.
+        .env(
+            "MAVEN_OPTS",
+            format!("-Dmaven.repo.local={}", home.join("m2").display()),
+        )
+        .env("DOTNET_CLI_HOME", home.join("dotnet"))
+        .env("NUGET_PACKAGES", home.join("nuget"))
+        // NuGet on .NET reads its user config folder from APPDATA and its caches from
+        // LOCALAPPDATA (NuGet.Common `NuGetEnvironment`); without them every Windows restore
+        // stops with "Value cannot be null. (Parameter 'path1')". Unix NuGet ignores both.
+        .env("APPDATA", home.join("appdata"))
+        .env("LOCALAPPDATA", home.join("localappdata"))
+        .env("DOTNET_NOLOGO", "1")
+        .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+        .env("PUB_CACHE", home.join("pub"))
+        // On Windows `rustc` finds the MSVC linker through the Visual Studio installer
+        // (its COM server under `ProgramData`, then `vswhere` under `ProgramFiles(x86)`);
+        // without these a Rust variant fails to link its tests. None is set elsewhere.
+        .envs(
+            [
+                "JAVA_HOME",
+                "DOTNET_ROOT",
+                "ProgramData",
+                "ProgramFiles",
+                "ProgramFiles(x86)",
+                "ProgramW6432",
+                "CommonProgramFiles",
+                "CommonProgramFiles(x86)",
+                "SystemDrive",
+                "windir",
+                "PROCESSOR_ARCHITECTURE",
+            ]
+            .into_iter()
+            .filter_map(|k| std::env::var_os(k).map(|v| (k, v))),
+        )
         .stdin(Stdio::null())
         .output()
         .unwrap()
@@ -55,13 +91,32 @@ fn on_path(program: &str) -> bool {
     })
 }
 
+/// Whether the program is on the PATH and starts: a version-manager shim (mise's `dotnet`)
+/// is a file on the PATH that refuses to run outside a folder that sets a version, and a
+/// language whose toolchain does not run is skipped like one that is missing, never faked.
+fn toolchain_runs(program: &str) -> bool {
+    on_path(program)
+        && (program != "dotnet"
+            || Command::new("dotnet")
+                .arg("--version")
+                .current_dir(std::env::temp_dir())
+                .stdin(Stdio::null())
+                .output()
+                .is_ok_and(|o| o.status.success()))
+}
+
 /// Whether the package registry a variant installs from answers (TCP connect, 5 s).
 fn registry_reachable(lang: &str) -> bool {
     use std::net::ToSocketAddrs;
-    let host = if lang == "python" {
-        "pypi.org:443"
-    } else {
-        "registry.npmjs.org:443"
+    let host = match lang {
+        "python" => "pypi.org:443",
+        "go" => "proxy.golang.org:443",
+        "rust" => "static.crates.io:443",
+        "java" => "repo1.maven.org:443",
+        "csharp" => "api.nuget.org:443",
+        "swift" => "github.com:443",
+        "dart" => "pub.dev:443",
+        _ => "registry.npmjs.org:443",
     };
     host.to_socket_addrs().is_ok_and(|mut a| {
         a.any(|addr| {
@@ -227,14 +282,47 @@ fn the_enterprise_floor_is_written_on_every_template_but_blank() {
         ("service", "go"),
         ("service", "python"),
         ("service", "rust"),
+        ("service", "java"),
+        ("service", "csharp"),
+        ("service", "dart"),
+        ("service", "swift"),
         ("cli", "go"),
         ("cli", "rust"),
+        ("cli", "typescript"),
+        ("cli", "java"),
+        ("cli", "csharp"),
+        ("cli", "dart"),
+        ("cli", "swift"),
         ("agent", "python"),
+        ("agent", "typescript"),
+        ("agent", "go"),
+        ("agent", "rust"),
+        ("agent", "java"),
+        ("agent", "csharp"),
+        ("agent", "swift"),
+        ("agent", "dart"),
         ("mcp-server", "python"),
         ("mcp-server", "typescript"),
+        ("mcp-server", "go"),
+        ("mcp-server", "rust"),
+        ("mcp-server", "java"),
+        ("mcp-server", "csharp"),
+        ("mcp-server", "swift"),
+        ("mcp-server", "dart"),
         ("evals", "python"),
+        ("evals", "typescript"),
+        ("evals", "go"),
+        ("evals", "rust"),
+        ("evals", "java"),
+        ("evals", "csharp"),
+        ("evals", "dart"),
+        ("evals", "swift"),
         ("extension", "python"),
         ("extension", "typescript"),
+        ("extension", "java"),
+        ("extension", "csharp"),
+        ("extension", "dart"),
+        ("extension", "swift"),
     ] {
         let (_h, dir, out) = init(template, Some(lang), false, &[]);
         assert!(out.status.success(), "{template}/{lang}: {}", text(&out));
@@ -359,6 +447,32 @@ fn evals_and_mcp_server_carry_what_their_readme_promises_and_leave_no_placeholde
             "package-lock.json",
             "\"@modelcontextprotocol/server\": \"2.4.0\"",
         ),
+        (
+            "go",
+            "go.mod",
+            "go.sum",
+            "github.com/modelcontextprotocol/go-sdk v1.8.0",
+        ),
+        (
+            "rust",
+            "Cargo.toml",
+            "Cargo.lock",
+            "rmcp = { version = \"=3.9.0\"",
+        ),
+        ("java", "pom.xml", "pom.xml", "<version>2.1.0</version>"),
+        (
+            "csharp",
+            "src/App/App.csproj",
+            "src/App/packages.lock.json",
+            "[2.4.0]",
+        ),
+        (
+            "swift",
+            "Package.swift",
+            "Package.resolved",
+            "exact: \"0.12.1\"",
+        ),
+        ("dart", "pubspec.yaml", "pubspec.lock", "dart_mcp: 0.5.2"),
     ] {
         let (_h, dir, out) = init("mcp-server", Some(lang), false, &[]);
         assert!(out.status.success(), "mcp-server/{lang}: {}", text(&out));
@@ -367,6 +481,11 @@ fn evals_and_mcp_server_carry_what_their_readme_promises_and_leave_no_placeholde
             "mcp-server/{lang}: the official SDK is pinned exactly"
         );
         assert!(dir.join(lock).is_file(), "mcp-server/{lang}: {lock}");
+        // The repository's audit config beside a template lockfile stays in the repository.
+        assert!(
+            !dir.join("osv-scanner.toml").exists(),
+            "mcp-server/{lang}: osv-scanner.toml is repository config"
+        );
         assert!(file(&dir, "README.md").contains("2026-07-28"), "{lang}");
         assert!(!holds(&dir, "@@"), "mcp-server/{lang}: placeholder left");
     }
@@ -400,27 +519,66 @@ fn every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here(
         ("service", "python", &["python3"]),
         ("service", "typescript", &["node"]),
         ("service", "rust", &["cargo"]),
+        ("service", "java", &["javac", "java"]),
+        ("service", "csharp", &["dotnet"]),
+        ("service", "dart", &["dart"]),
+        ("service", "swift", &["swift"]),
         ("cli", "go", &["go"]),
         ("cli", "python", &["python3"]),
         ("cli", "rust", &["cargo"]),
+        ("cli", "typescript", &["node"]),
+        ("cli", "java", &["javac", "java"]),
+        ("cli", "csharp", &["dotnet"]),
+        ("cli", "dart", &["dart"]),
+        ("cli", "swift", &["swift"]),
+        ("blank", "java", &["javac", "java"]),
+        ("blank", "csharp", &["dotnet"]),
+        ("blank", "dart", &["dart"]),
+        ("blank", "swift", &["swift"]),
         ("agent", "python", &["uv"]),
         ("agent", "typescript", &["node"]),
+        ("agent", "go", &["go"]),
+        ("agent", "rust", &["cargo"]),
+        ("agent", "java", &["mvn", "java"]),
+        ("agent", "csharp", &["dotnet"]),
+        ("agent", "swift", &["swift"]),
+        ("agent", "dart", &["dart"]),
         ("mcp-server", "python", &["uv"]),
         ("mcp-server", "typescript", &["node", "npm"]),
+        ("mcp-server", "go", &["go"]),
+        ("mcp-server", "rust", &["cargo"]),
+        ("mcp-server", "java", &["mvn", "java"]),
+        ("mcp-server", "csharp", &["dotnet"]),
+        ("mcp-server", "swift", &["swift"]),
+        ("mcp-server", "dart", &["dart"]),
         ("evals", "python", &["python3"]),
+        ("evals", "typescript", &["node"]),
+        ("evals", "go", &["go"]),
+        ("evals", "rust", &["cargo"]),
+        ("evals", "java", &["javac", "java"]),
+        ("evals", "csharp", &["dotnet"]),
+        ("evals", "dart", &["dart"]),
+        ("evals", "swift", &["swift"]),
         ("extension", "python", &["python3"]),
         ("extension", "typescript", &["node"]),
         ("extension", "go", &["go"]),
         ("extension", "rust", &["cargo"]),
+        ("extension", "java", &["javac", "java"]),
+        ("extension", "csharp", &["dotnet"]),
+        ("extension", "dart", &["dart"]),
+        ("extension", "swift", &["swift"]),
     ];
     let mut ran = 0;
     for (template, lang, needs) in table {
-        if !needs.iter().all(|p| on_path(p)) {
+        if !needs.iter().all(|p| toolchain_runs(p)) {
             continue;
         }
         // An MCP server's smoke installs the official SDK from its registry (a cold cache in
         // this test's private home), so it needs the network; without it the row is skipped.
-        if *template == "mcp-server" && !registry_reachable(lang) {
+        // The C# and Dart evals restore their pinned test packages once, so they need it too.
+        let restores = *template == "mcp-server"
+            || (*template == "evals" && matches!(*lang, "csharp" | "dart"));
+        if restores && !registry_reachable(lang) {
             eprintln!("{template}/{lang}: skipped, its package registry is not reachable");
             continue;
         }

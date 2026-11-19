@@ -1,0 +1,14 @@
+[package]
+name = "@@NAME@@"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "@@LICENSE@@"
+description = "@@DESCRIPTION@@"
+publish = false
+
+# The standard library alone: no dependency to pin or audit.
+[dependencies]
+
+[lints.clippy]
+unwrap_used = "deny"

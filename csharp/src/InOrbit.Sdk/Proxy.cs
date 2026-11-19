@@ -142,7 +142,7 @@ internal sealed partial class NoProxy
             return null;
         }
 
-        if (!proxy.Explicit && IsLoopback(url.Host))
+        if (!proxy.Explicit && Urls.IsLoopback(url.Host))
         {
             return null;
         }
@@ -155,17 +155,6 @@ internal sealed partial class NoProxy
         // The user-info is the proxy's credentials (SdkProxy.Credentials), never part of its address.
         var u = new Uri(proxy.Url);
         return u.UserInfo.Length == 0 ? u : new UriBuilder(u) { UserName = string.Empty, Password = string.Empty }.Uri;
-    }
-
-    internal static bool IsLoopback(string host)
-    {
-        var h = host.Trim('[', ']').ToLowerInvariant();
-        if (h == "localhost")
-        {
-            return true;
-        }
-
-        return Ip(h) is { } ip && (ip.V6 ? ip.Value == BigInteger.One : ip.Value >> 24 == 127);
     }
 
     /// <summary>An IPv4 or IPv6 literal (brackets allowed), as a number.</summary>

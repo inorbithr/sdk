@@ -1,4 +1,4 @@
-# The bar: what the suite must reach to pass. `python -m @@MODULE@@` exits 1 when any line
+# The bar: what the suite must reach to pass. `@@RUN@@` exits 1 when any line
 # here is missed, and CI (`.github/workflows/evals.yml`) fails the pull request on it. Change a
 # line in its own pull request, with the reason, so the history of the bar is readable.
 #

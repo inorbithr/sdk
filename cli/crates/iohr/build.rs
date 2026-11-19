@@ -4,6 +4,9 @@
 //! A path component `dot-X` is written as `.X` (a template folder cannot hold a live
 //! `.github/`), one named `gitignore` as `.gitignore`, and a file ending in `.tmpl` without
 //! it (`Cargo.toml.tmpl`: a live `Cargo.toml` in a template folder is a package of its own).
+//!
+//! An `osv-scanner.toml` is left out: it is the repository's audit config for the lockfile beside
+//! it (OSV-Scanner reads it only from that folder), never part of a project the template writes.
 
 #![allow(
     clippy::unwrap_used,
@@ -24,7 +27,7 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, String)>) {
         let p = e.path();
         if e.file_type().expect("file type").is_dir() {
             walk(root, &p, out);
-        } else {
+        } else if e.file_name() != "osv-scanner.toml" {
             let rel = p.strip_prefix(root).expect("inside root");
             let path = rel
                 .components()

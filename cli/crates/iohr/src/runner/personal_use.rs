@@ -81,7 +81,7 @@ pub(crate) fn save(config_dir: &Path, a: &Accepted) -> Result<(), String> {
     let p = path(config_dir);
     let fail = |e: &std::io::Error| format!("cannot write {}: {}", p.display(), e.kind());
     let dir = p.parent().unwrap_or(config_dir);
-    iohr_auth::create_private_dir(dir).map_err(|e| fail(&e))?;
+    inorbithr::login::create_private_dir(dir).map_err(|e| fail(&e))?;
     let tmp = dir.join(".personal-use.json.tmp");
     let body = serde_json::to_vec(a).map_err(|e| e.to_string())?;
     {

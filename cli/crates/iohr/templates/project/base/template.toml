@@ -52,3 +52,33 @@ CI_TEST = "go vet ./... && go test ./..."
 CI_SETUP = """      - name: Toolchain (the runner's rustup, stable)
         run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable"""
 CI_TEST = "cargo test --locked"
+
+# Java, C#, Swift and Dart (PRD 0088.1). The setup actions are pinned by commit like the
+# others. Conventions the templates of these languages keep so the shared CI and release can
+# name things: Java is a Maven project (`pom.xml` at the root), C# keeps its program in
+# `src/App/App.csproj` and its tests in `tests/App.Tests/`, Swift is a SwiftPM package whose
+# executable product is `@@NAME@@`, Dart keeps its program in `bin/main.dart`.
+[lang_vars.java]
+CI_SETUP = """      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21\""""
+CI_TEST = "mvn --batch-mode --no-transfer-progress test"
+
+[lang_vars.csharp]
+CI_SETUP = """      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x\""""
+CI_TEST = "dotnet test --nologo"
+
+[lang_vars.swift]
+CI_SETUP = """      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "6.1\""""
+CI_TEST = "swift test"
+
+[lang_vars.dart]
+CI_SETUP = """      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: stable"""
+CI_TEST = "dart pub get --enforce-lockfile && dart analyze && dart test"

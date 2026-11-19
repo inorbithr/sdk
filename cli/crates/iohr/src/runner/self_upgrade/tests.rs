@@ -38,6 +38,11 @@ struct Fake {
     /// Whether a swap went through (a failed one leaves the old file).
     swapped: Arc<AtomicBool>,
     looks: Arc<AtomicUsize>,
+    /// How many extension passes ran.
+    ext_passes: Arc<AtomicUsize>,
+    /// What each extension pass says (nothing unless a test sets it, so the other
+    /// tests count only the binary's own lines).
+    ext_says: Arc<Mutex<Vec<String>>>,
     /// Whether the drain was wanted at each download.
     wanted_at_prepare: Arc<Mutex<Vec<bool>>>,
     /// When each swap ran.
@@ -58,6 +63,8 @@ impl Fake {
             says: Arc::new(Mutex::new(Ok(v(latest)))),
             swapped: Arc::default(),
             looks: Arc::default(),
+            ext_passes: Arc::default(),
+            ext_says: Arc::default(),
             wanted_at_prepare: Arc::default(),
             installs: Arc::default(),
             wanted_at_install: Arc::default(),
@@ -119,6 +126,10 @@ impl Source for Fake {
         } else {
             self.on_disk.lock().unwrap().clone()
         }
+    }
+    async fn extensions(&self) -> Vec<String> {
+        self.ext_passes.fetch_add(1, Ordering::SeqCst);
+        self.ext_says.lock().unwrap().clone()
     }
 }
 
@@ -219,6 +230,8 @@ async fn only_a_strictly_newer_release_is_chosen() {
         ("0.1.0-alpha.27", "0.1.0-alpha.26", false),
         ("0.1.0-alpha.9", "0.1.0-alpha.10", true),
         ("0.1.0-alpha.99", "0.1.0", true),
+        ("0.1.0-alpha.39", "0.1.0", true),
+        ("0.1.0", "0.1.0-alpha.39", false),
         ("0.1.0", "0.1.0-rc.1", false),
         ("0.1.0", "0.1.1", true),
     ];
@@ -648,6 +661,45 @@ async fn a_ledger_that_cannot_be_written_stops_the_restart() {
     let (_, log) = lines();
     let got = r.up.upgrade(&ver, &here, r.stop.subscribe(), &log).await;
     assert!(got.unwrap_err().contains("not restarting: disk full"));
+}
+
+/// The runner's own upgrade also upgrades the extensions, on every look, whether or not
+/// the binary has a newer release, and reports it; with upgrades off, it does not.
+#[tokio::test(start_paused = true)]
+async fn each_look_runs_the_extension_pass_and_logs_it() {
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.28",
+        "0.1.0-alpha.28",
+        Supervisor::Systemd,
+        RestartMode::Exit,
+    );
+    *r.fake.ext_says.lock().unwrap() =
+        vec!["extensions: 1 upgraded, 0 current, 0 refused, 1 failed".into()];
+    let (all, log) = lines();
+    let run = r.up.run(r.stop.subscribe(), &log);
+    let _ = tokio::time::timeout(2 * HOUR, run).await;
+    assert!(r.fake.ext_passes.load(Ordering::SeqCst) >= 2);
+    assert!(
+        all.lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.contains("1 upgraded") && l.contains("1 failed")),
+        "{:?}",
+        all.lock().unwrap()
+    );
+
+    let off = rig(
+        script_dir(),
+        "0.1.0-alpha.28",
+        "0.1.0-alpha.28",
+        Supervisor::Systemd,
+        RestartMode::Exit,
+    );
+    off.policy.send_modify(|p| p.enabled = false);
+    let (_, log) = lines();
+    let _ = tokio::time::timeout(2 * HOUR, off.up.run(off.stop.subscribe(), &log)).await;
+    assert_eq!(off.fake.ext_passes.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test(start_paused = true)]

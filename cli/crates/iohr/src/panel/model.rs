@@ -17,6 +17,7 @@ mod auto;
 mod entry;
 mod incidents;
 mod reader;
+mod share;
 mod work;
 
 use time::OffsetDateTime;
@@ -28,6 +29,8 @@ use super::workloads::{Snapshot, Workload};
 use crate::card::Rgb;
 use crate::commands::asks::{PanelAsk, PanelAuto};
 use crate::commands::incident_settings::PanelIncidents;
+use share::Share;
+pub(super) use share::Told;
 
 /// Where a piece of data stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +146,12 @@ pub(super) enum Effect {
     },
     /// Interrupt the session (the person confirmed).
     StopWork(String),
+    /// Show this terminal on the phone (the Mac app's terminal host does the sharing).
+    ShareOn,
+    /// Stop showing it.
+    ShareOff,
+    /// The person turned typing from the phone on (`true`) or off: what the link offers.
+    Typing(bool),
     /// Fold the chat box or bring it back (Option+h, Alt+h off macOS; Ctrl-] too).
     ChatToggle,
     /// Stop the panel: the shell goes on without it.
@@ -157,6 +166,8 @@ const MENU: &[(&str, char, View)] = &[
     ("Incidents", 'i', View::Incidents),
     ("Run", 'r', View::Run),
     ("Status", 's', View::Status),
+    ("Share to phone", 'h', View::Menu),
+    ("Let phone type", 't', View::Menu),
     ("Chat box", 'c', View::Rest),
     ("Help", '?', View::Help),
     ("Stop panel", 'x', View::Rest),
@@ -187,6 +198,8 @@ pub(super) struct Model {
     /// The page open in `View::Reader`.
     reader: Option<reader::Reader>,
     note: Option<String>,
+    /// This terminal on the phone (RFC 0193), as the Mac app last said.
+    share: share::Share,
     stub: bool,
     /// What the sessions registry and the coordinator's picture gave.
     pub(super) work: Source<Snapshot>,
@@ -216,6 +229,7 @@ impl Model {
             entry: None,
             reader: None,
             note: None,
+            share: share::Share::Off,
             stub,
             work: Source::Loading,
             work_rows: Vec::new(),
@@ -414,10 +428,16 @@ impl Model {
         if i == MENU.len() - 1 {
             return Effect::Stop;
         }
-        if key == 'c' {
-            // The box folds or comes back and the menu closes, so the result is in view.
-            self.view = View::Rest;
-            return Effect::ChatToggle;
+        match key {
+            // Share and typing act in place: the menu stays open on the row.
+            'h' => return self.share_toggle(),
+            't' => return self.typing_toggle(),
+            'c' => {
+                // The box folds or comes back and the menu closes, so the result is in view.
+                self.view = View::Rest;
+                return Effect::ChatToggle;
+            }
+            _ => {}
         }
         self.view = view;
         self.note = None;
@@ -545,6 +565,11 @@ impl Model {
         let mut spans = self.mode_spans();
         spans.push(sp("   ", TXT));
         spans.extend(self.waiting_spans());
+        let shared = self.share_spans();
+        if !shared.is_empty() {
+            spans.push(sp("   ", TXT));
+            spans.extend(shared);
+        }
         spans.extend([
             sp("   ", TXT),
             sp(self.open_key.label(), KEY),
@@ -570,11 +595,13 @@ impl Model {
             self.incidents_menu_right(),
             ("›".into(), MUTE),
             ("›".into(), MUTE),
+            self.share_menu_right(),
+            self.typing_menu_right(),
             (HIDE_LABEL.into(), MUTE),
             (String::new(), MUTE),
             (String::new(), MUTE),
         ];
-        let body = MENU
+        let mut body: Vec<Line> = MENU
             .iter()
             .zip(rights)
             .enumerate()
@@ -583,6 +610,20 @@ impl Model {
                 selected: i == self.menu_sel,
             })
             .collect();
+        // What sharing last said (no Mac app, the Mac's answer), wrapped, never cut.
+        if let Some(line) = self.share_line() {
+            let tint = if matches!(self.share, Share::Shared { .. }) {
+                MUTE
+            } else {
+                AMBER
+            };
+            for row in reader::wrap(&line, width.saturating_sub(4).max(8)) {
+                body.push(Line {
+                    spans: vec![sp(&format!("  {row}"), tint)],
+                    selected: false,
+                });
+            }
+        }
         let footer = vec![
             sp("↑↓", KEY),
             sp(" move   ", MUTE),
@@ -717,6 +758,7 @@ impl Model {
             row(HIDE_LABEL, "fold or bring back the chat box"),
             row("a d q o", "phone-approve, deny, ask, read"),
             row("d y", "deny an ask, then confirm"),
+            row("h t", "share to phone, let the phone type"),
             row("", "your command line is kept as is"),
         ];
         (
@@ -836,6 +878,33 @@ mod tests {
                 .map(|s| s.text.as_str()),
             Some(" · stub")
         );
+    }
+
+    /// Terminals that send Option-i as the dead key `ˆ` commit it with the next key the person
+    /// presses, so it can arrive in the same read as Down (observed through the reader and the
+    /// model: `ˆ` then `ESC [ B` closed the menu and the Down was lost). Beside other input it is
+    /// that key's companion, not a press of the menu key.
+    #[test]
+    fn down_moves_the_open_menu_when_a_dead_key_arrives_in_the_same_read() {
+        use super::super::input::{Input, Reader};
+        let mut m = model(1);
+        let mut r = Reader::default();
+        m.key(Key::Menu);
+        for read in ["\u{2c6}\x1b[B", "\x1b[B\u{2c6}"] {
+            for i in r.feed(read.as_bytes()) {
+                if let Input::Key(k) = i {
+                    m.key(k);
+                }
+            }
+            assert!(m.open(), "{read:?} closed the menu");
+        }
+        assert_eq!(m.menu_sel, 2, "both Downs moved the selection");
+        for i in r.feed("\u{2c6}".as_bytes()) {
+            if let Input::Key(k) = i {
+                m.key(k);
+            }
+        }
+        assert!(!m.open(), "the dead key alone is still the menu key");
     }
 
     #[test]

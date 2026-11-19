@@ -1356,7 +1356,7 @@ public final class Client {
                 throw new ConfigException(what + " is not usable: " + e.getMessage());
             }
             String host = url.getHost() == null ? "" : url.getHost().replaceAll("^\\[|\\]$", "");
-            boolean loopback = host.equals("localhost") || host.equals("::1") || host.startsWith("127.");
+            boolean loopback = Config.isLoopback(host);
             if (!("https".equals(url.getScheme()) || ("http".equals(url.getScheme()) && loopback)) || host.isEmpty()) {
                 throw new ConfigException(what + " is not usable: it must use https (plain http only to this machine)");
             }

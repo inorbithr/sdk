@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
-use iohr_auth::Kind;
+use inorbithr::login::Kind;
 
 use super::forward::Limits;
 use super::{Reply, Request, decoded_path, percent_decode, same_bytes};

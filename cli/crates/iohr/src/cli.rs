@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
-use iohr_auth::ProfileName;
+use inorbithr::login::ProfileName;
 
 use inorbithr::DEFAULT_BASE_URL;
 
@@ -61,7 +61,7 @@ pub struct Global {
     #[arg(long, global = true, env = "IOHR_ISSUER", hide = true)]
     issuer: Option<String>,
     /// The OAuth client the command line signs in as.
-    #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
+    #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = inorbithr::login::DEFAULT_CLIENT_ID, hide = true)]
     pub client_id: String,
     /// Sign in as someone other than a person (`iohr runner` and `iohr coordinator` only).
     ///
@@ -195,7 +195,7 @@ impl Global {
         self.issuer
             .as_deref()
             .or(self.environment().issuer.as_deref())
-            .unwrap_or(iohr_auth::DEFAULT_ISSUER)
+            .unwrap_or(inorbithr::login::DEFAULT_ISSUER)
     }
 
     /// Refuses an environment whose address is a placeholder, unless the caller named
@@ -255,6 +255,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "runner",
             "session",
             "stop",
+            "handoff",
             "coordinator",
             "memory",
         ],
@@ -466,12 +467,11 @@ pub enum Command {
     /// `brew upgrade inorbithr/tap/iohr` (and says `brew trust inorbithr/tap` when
     /// Homebrew refuses the tap); a copy from the install script is downloaded, checked
     /// against the release's checksums and attestations and replaced in place; anything
-    /// else gets the command to run. `--check` only reports. Needs no sign-in.
-    Upgrade {
-        /// Only say whether a newer release exists and what would run; change nothing.
-        #[arg(long)]
-        check: bool,
-    },
+    /// else gets the command to run. Then every installed extension is upgraded to its
+    /// newest release, one at a time: one that fails does not stop the others, and one
+    /// whose release declares new privileges is left for a person unless --yes (or a
+    /// terminal) confirms them. `--check` only reports. Needs no sign-in.
+    Upgrade(UpgradeArgs),
     /// Sign a built iohr the way releases are signed (the preview install, `cli:preview-install`).
     ///
     /// Signs the binary at PATH with this Mac's Apple Development or Developer ID
@@ -570,6 +570,15 @@ pub enum Command {
     /// to `.inorbit/permissions.log` (the tool and the rule, never output or file contents).
     #[command(subcommand)]
     Permissions(PermissionsCommand),
+    /// Read and tend the handoff note an agent run leaves when it stops early.
+    ///
+    /// When `iohr ask --allow-edits` or `iohr project init` stops at its turn or time cap, or
+    /// fails, `.inorbit/handoff.md` says what was asked, which files changed and what is left.
+    /// A second stop folds the first to one line, and the oldest runs are folded into a count,
+    /// so the note stays short. The next `iohr ask --allow-edits` in the folder goes on from
+    /// it and removes it when it ends well. Local files only, no sign-in, no network.
+    #[command(subcommand)]
+    Handoff(HandoffCommand),
     /// Runs your shell with the floating InOrbit panel over it (menu, approvals, workloads).
     ///
     /// `--demo` fills the panel with labelled stub data; `--demo --variant rail|accordion|band`
@@ -681,6 +690,21 @@ pub enum LabCommand {
     /// front matter, status logs, and the redaction rules on public documents. Reads
     /// only the files named, makes no network call, needs no sign-in.
     Check(LabCheck),
+}
+
+/// The flags of `iohr upgrade`.
+#[derive(Debug, Args)]
+pub struct UpgradeArgs {
+    /// Only say whether a newer release exists and what would run; change nothing.
+    #[arg(long)]
+    pub check: bool,
+    /// Upgrade iohr only, not the installed extensions.
+    #[arg(long)]
+    pub no_extensions: bool,
+    /// Confirm the new privileges of an extension release without asking (needed
+    /// without a terminal).
+    #[arg(long, short = 'y')]
+    pub yes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -799,8 +823,8 @@ pub enum RunnerCommand {
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
         capacity: Option<u32>,
         /// The turn classes to take, comma separated: `coordinate`, `build` (default:
-        /// `[runner] kinds`, else both). Build turns pause while /mnt/build has under
-        /// 100 GB free.
+        /// `[runner] kinds`, else both). With `[runner] build_volume` set, build turns
+        /// pause while it has under `build_volume_min_free_gb` (default 100) GB free.
         #[arg(long, value_delimiter = ',')]
         kinds: Option<Vec<String>>,
         /// Never look for a newer iohr or restart into one (default: `[runner]
@@ -916,6 +940,20 @@ pub enum RunnerCommand {
         /// ask nothing.
         #[arg(long, conflicts_with_all = ["proof", "label"])]
         show: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Revoke a runner: it claims and reports nothing from then on (`RevokeRunner`).
+    ///
+    /// Looks the runner up in the account first and refuses an id that is not there or
+    /// is already revoked. A runner that is online is refused unless `--force-online`:
+    /// revoking a live runner stops its work.
+    Revoke {
+        /// The runner's id (`rnr_` and 26 characters), from `iohr runner status`.
+        runner_id: String,
+        /// Revoke it although it is online.
+        #[arg(long)]
+        force_online: bool,
         #[command(flatten)]
         account: AccountArg,
     },
@@ -2006,6 +2044,16 @@ pub enum PermissionsCommand {
         /// The command, the file or the address.
         input: String,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HandoffCommand {
+    /// Print the note of this project, or say there is none.
+    Show,
+    /// Fold the note's earlier runs to the newest few (the oldest become a count).
+    Compact,
+    /// Delete the note: the work is done, or you do not want the next run to go on from it.
+    Clear,
 }
 
 #[derive(Debug, Subcommand)]

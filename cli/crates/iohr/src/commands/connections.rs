@@ -2,7 +2,7 @@
 //! catalogue with a key or by signing in at the provider (platform RFC 0044).
 //!
 //! A secret field is read without echo, from a file or from standard input, never from
-//! an argument; it is held as [`Redacted`] until the one request that carries it and is
+//! an argument; it is held as [`Secret`] until the one request that carries it and is
 //! never printed. Signing in opens the provider in a browser and waits on the
 //! platform's connect session.
 
@@ -10,14 +10,14 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use inorbithr::Method;
-use iohr_auth::{Kind, Redacted};
+use inorbithr::Secret;
+use inorbithr::login::Kind;
 use serde::Serialize;
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::Env;
-use crate::browser;
 use crate::cli::{
     AccountArg, ConnectionStatus, ConnectionsAdd, ConnectionsCommand, ConnectionsReconnect, Global,
     SecretInput, UseStatus,
@@ -29,6 +29,7 @@ use crate::error::Error;
 use crate::output::Out;
 use crate::prompt;
 use crate::ui::Listed;
+use inorbithr::login::browser;
 
 /// How often a connect session is asked whether the person has finished.
 const POLL: Duration = Duration::from_secs(2);
@@ -331,7 +332,7 @@ fn print_connection(c: &Value) {
 // --- add and reconnect ---------------------------------------------------------------
 
 /// The body of `CreateConnection`; the credentials are borrowed from their
-/// [`Redacted`] holders, never copied into a JSON value.
+/// [`Secret`] holders, never copied into a JSON value.
 #[derive(Serialize)]
 struct Create<'a> {
     kind: &'a str,
@@ -350,7 +351,7 @@ struct Recredential<'a> {
     credentials: BTreeMap<&'a str, &'a str>,
 }
 
-fn exposed(secrets: &BTreeMap<String, Redacted<String>>) -> BTreeMap<&str, &str> {
+fn exposed(secrets: &BTreeMap<String, Secret<String>>) -> BTreeMap<&str, &str> {
     secrets
         .iter()
         .map(|(k, v)| (k.as_str(), v.expose().as_str()))
@@ -531,7 +532,7 @@ fn check_choice(f: &Value, v: &str) -> Result<(), Error> {
 
 /// The mode's secret fields, each from `--secret-file`, `--secret-stdin` or a prompt
 /// without echo.
-fn secrets(mode: &Value, input: &SecretInput) -> Result<BTreeMap<String, Redacted<String>>, Error> {
+fn secrets(mode: &Value, input: &SecretInput) -> Result<BTreeMap<String, Secret<String>>, Error> {
     let wanted: Vec<Value> = fields(mode, "fields")
         .into_iter()
         .filter(is_secret)
@@ -553,7 +554,7 @@ fn secrets(mode: &Value, input: &SecretInput) -> Result<BTreeMap<String, Redacte
             )))
         }
     };
-    let mut got: BTreeMap<String, Redacted<String>> = BTreeMap::new();
+    let mut got: BTreeMap<String, Secret<String>> = BTreeMap::new();
     for p in &input.files {
         let Some((k, path)) = p.split_once('=') else {
             return Err(Error::Usage(format!(

@@ -68,6 +68,7 @@ stable one ([releasing](../../docs/releasing.md)). Until then, use the PowerShel
 ```sh
 iohr upgrade            # update the way this copy was installed
 iohr upgrade --check    # only say whether a newer release exists and what would run
+iohr upgrade --no-extensions   # update iohr only, leave extensions alone
 ```
 
 `iohr upgrade` needs no sign-in and follows how `iohr` was installed:
@@ -77,6 +78,11 @@ iohr upgrade --check    # only say whether a newer release exists and what would
 | Homebrew | Runs `brew upgrade inorbithr/tap/iohr`, and tells you to run `brew trust inorbithr/tap` when Homebrew refuses the tap |
 | The install script | Downloads the new archive, checks it against `SHA256SUMS` and its GitHub build attestation, and replaces the binary in place. The attestation is checked inside `iohr`, so the GitHub CLI is not needed; a release without one, or signed by anything but this repository's release workflow on `main`, is refused |
 | APT, or anything else | Prints the command to run |
+
+Then it upgrades every installed extension, one at a time, as `iohr ext upgrade` does. A
+failure does not stop the others, and the exit is non-zero when one failed. A release that
+asks for new privileges waits for `--yes` or an answer at a terminal. `--check` looks at
+`iohr` only.
 
 A machine that runs `iohr runner run` can upgrade itself; see
 [Runner, staying current](runner.md#staying-current).

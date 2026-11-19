@@ -1,8 +1,10 @@
 {
   "name": "inorbithr-sdk",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  // Pinned by digest: the image (ubuntu-24.04) and the mise feature (1.0.0). Move both
+  // with the digest a registry reports for the new tag.
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04@sha256:d94c97dd9cacf183d0a6fd12a8e87b526e9e928307674ae9c94139139c0c6eae",
   "features": {
-    "ghcr.io/devcontainers-extra/features/mise:1": {}
+    "ghcr.io/devcontainers-extra/features/mise@sha256:5c389ab1e3c8e44e5e0ff119f6868d54dbb781bc860bd8587dc66209cb8c4a8c": {}
   },
   "postCreateCommand": "mise trust && mise install",
   "customizations": {

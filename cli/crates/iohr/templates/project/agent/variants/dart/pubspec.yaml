@@ -1,0 +1,11 @@
+name: @@MODULE@@
+description: @@DESCRIPTION@@
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.7.0
+
+# The agent needs no package at run time: the Dart SDK alone.
+dev_dependencies:
+  test: 1.25.15

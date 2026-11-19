@@ -77,7 +77,7 @@ pub(crate) struct ClaudeExec {
     pub(crate) runner_id: String,
     pub(crate) user: String,
     /// The sign-in `claude` gets from iohr: an API key from the credential store, or
-    /// none (its own sign-in). Redacted in `Debug`.
+    /// none (its own sign-in). Secret in `Debug`.
     auth: claude::Auth,
     /// What this machine allows, as config.toml says now (SIGHUP reloads it).
     local: watch::Receiver<LocalAuth>,
@@ -197,8 +197,9 @@ impl ClaudeExec {
     }
 
     /// The turn's command: its model's `cargo` builds into its repository's shared
-    /// directory, not into a `target/` of the job's checkout (RFC 0189). `checkout` is
-    /// relative to the working directory.
+    /// directory, not into a `target/` of the job's checkout (RFC 0189), and its `mise`
+    /// reads the checkout's own configuration (`env::trusted`). `checkout` is relative to
+    /// the working directory; anything else gets neither.
     fn turn_command(&self, args: &[String], checkout: &str) -> Command {
         let mut cmd = self.command(args);
         cmd.current_dir(&self.workdir);
@@ -207,9 +208,13 @@ impl ClaudeExec {
             && rel
                 .components()
                 .all(|c| matches!(c, std::path::Component::Normal(_)))
-            && let Some(t) = hygiene::target_for(&self.workdir, &self.workdir.join(rel))
         {
-            cmd.env(hygiene::TARGET_VAR, t);
+            let dir = self.workdir.join(rel);
+            let (k, v) = env::trusted(&dir);
+            cmd.env(k, v);
+            if let Some(t) = hygiene::target_for(&self.workdir, &dir) {
+                cmd.env(hygiene::TARGET_VAR, t);
+            }
         }
         cmd
     }
@@ -666,10 +671,15 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             env.lines().any(|l| l == want),
             "{want} not in the child's environment"
         );
+        let trust = format!("MISE_TRUSTED_CONFIG_PATHS={}", checkout.display());
+        assert!(
+            env.lines().any(|l| l == trust),
+            "{trust} not in the child's environment"
+        );
     }
 
     /// A pack with no checkout, or one that climbs out of the working directory, gets no
-    /// shared directory.
+    /// shared directory and no mise trust.
     #[tokio::test]
     async fn a_turn_with_no_worktree_gets_no_shared_build_directory() {
         for checkout in ["", "../x"] {
@@ -681,6 +691,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             assert_eq!(f.outcome, "replied", "{}", f.detail);
             let env = std::fs::read_to_string(dir.path().join("env.txt")).unwrap();
             assert!(!env.contains("CARGO_TARGET_DIR"), "{checkout:?}");
+            assert!(!env.contains("MISE_TRUSTED_CONFIG_PATHS"), "{checkout:?}");
         }
     }
 
@@ -877,9 +888,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
     async fn a_stored_key_reaches_claude_alone_and_never_prints() {
         let dir = tempfile::tempdir().unwrap();
         let e = exec(dir.path(), API_KEY)
-            .with_auth(claude::Auth::ApiKey(iohr_auth::Redacted::new(
-                STORED.into(),
-            )))
+            .with_auth(claude::Auth::ApiKey(inorbithr::Secret::new(STORED.into())))
             .with_local(watch::channel(LocalAuth::default()).1);
         assert!(matches!(e.auth, claude::Auth::ApiKey(_)));
         assert!(e.env_is_clean());
@@ -908,9 +917,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         // Under `plan` the stored key stays out: claude runs on its own sign-in.
         let dir = tempfile::tempdir().unwrap();
         let e = exec(dir.path(), SUB)
-            .with_auth(claude::Auth::ApiKey(iohr_auth::Redacted::new(
-                STORED.into(),
-            )))
+            .with_auth(claude::Auth::ApiKey(inorbithr::Secret::new(STORED.into())))
             .with_local(
                 watch::channel(LocalAuth {
                     claude: provider::AuthPolicy::Plan,

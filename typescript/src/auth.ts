@@ -8,6 +8,7 @@
  * @module
  */
 
+import { readCapped } from "./body.js";
 import { AuthError, InOrbitError } from "./errors.js";
 import { builtin, fs } from "./platform.js";
 import { backoffMs, retryAfterMs, retryableStatus, sleep } from "./retry.js";
@@ -20,10 +21,12 @@ export const DEFAULT_TOKEN_URL = "https://auth.inorbit.hr/oauth2/token";
 
 const TOKEN_RETRIES = 2;
 const TOKEN_TIMEOUT_MS = 30_000;
-const REDACTED = "<redacted>";
 const SOFT_EXPIRY_RETRY_MS = 5_000;
 const FILE_CHECK_MS = 60_000;
 const CLI_TIMEOUT_MS = 10_000;
+
+/** What every printer in the SDK shows in place of a secret. */
+export const REDACTED = "<redacted>";
 
 /** A bearer token and, when known, when it stops working (milliseconds since the epoch). */
 export interface Token {
@@ -31,6 +34,44 @@ export interface Token {
   readonly access: string;
   /** When it expires, if the provider knows. */
   readonly expiresAt?: number;
+}
+
+/** A token the SDK hands out: JSON, `util.inspect` and template strings show the marker. */
+class Bearer implements Token {
+  readonly #access: string;
+  readonly expiresAt?: number;
+
+  constructor(access: string, expiresAt: number | undefined) {
+    this.#access = access;
+    if (expiresAt !== undefined) {
+      this.expiresAt = expiresAt;
+    }
+  }
+
+  /** The token. Never log it. */
+  get access(): string {
+    return this.#access;
+  }
+
+  /** Never the token. */
+  toJSON(): { access: string; expiresAt?: number } {
+    return this.expiresAt === undefined
+      ? { access: REDACTED }
+      : { access: REDACTED, expiresAt: this.expiresAt };
+  }
+
+  /** Never the token. */
+  toString(): string {
+    return `Token(${REDACTED})`;
+  }
+}
+
+/**
+ * `access` as a token whose printed forms never show it: the access is kept off the
+ * object's own properties, so spreads, `Object.keys` and loggers never see it [SR-10].
+ */
+export function bearer(access: string, expiresAt?: number): Token {
+  return new Bearer(access, expiresAt);
 }
 
 /** Hands out a valid token; told when the API refused the last one. */
@@ -52,7 +93,7 @@ export class StaticToken implements TokenProvider {
 
   /** The token. */
   token(): Promise<Token> {
-    return Promise.resolve({ access: this.#token });
+    return Promise.resolve(bearer(this.#token));
   }
 
   /** Never the token. */
@@ -139,7 +180,8 @@ export class CachedToken implements TokenProvider {
     const fetchedAt = Date.now();
     let token: Token;
     try {
-      token = await this.#source.token();
+      const t = await this.#source.token();
+      token = t instanceof Bearer ? t : bearer(t.access, t.expiresAt);
     } catch (e) {
       this.#options.onRefresh?.(e);
       throw e;
@@ -278,7 +320,12 @@ export class ClientCredentials implements TokenProvider {
         await sleep(retryAfterMs(resp.headers) ?? backoffMs(attempt));
         continue;
       }
-      const text = await resp.text();
+      let text: string;
+      try {
+        text = new TextDecoder().decode(await readCapped(resp.body));
+      } catch (e) {
+        throw new AuthError(`the token endpoint: ${describe(e)}`, "", { cause: e });
+      }
       if (resp.status < 200 || resp.status >= 300) {
         const refusal = parseObject(text);
         const error =
@@ -299,7 +346,7 @@ export class ClientCredentials implements TokenProvider {
         throw new AuthError("the token endpoint: the token answer could not be read");
       }
       const expiresIn = typeof answer.expires_in === "number" ? answer.expires_in : 900;
-      return { access: answer.access_token, expiresAt: Date.now() + expiresIn * 1000 };
+      return bearer(answer.access_token, Date.now() + expiresIn * 1000);
     }
   }
 
@@ -377,7 +424,7 @@ export class TokenFile implements TokenProvider {
           throw new Error("the file is empty");
         }
         const expiresAt = jwtExpiry(access);
-        this.#token = expiresAt === undefined ? { access } : { access, expiresAt };
+        this.#token = bearer(access, expiresAt);
         this.#stamp = stamp;
       }
     } catch (e) {
@@ -536,8 +583,8 @@ export class CliToken implements TokenProvider {
           typeof answer.expires_at === "string" ? Date.parse(answer.expires_at) : Number.NaN;
         resolve(
           Number.isFinite(expires)
-            ? { access: answer.access_token, expiresAt: expires }
-            : { access: answer.access_token },
+            ? bearer(answer.access_token, expires)
+            : bearer(answer.access_token),
         );
       });
     });
@@ -626,6 +673,7 @@ export function describe(e: unknown): string {
 
 // Node's `util.inspect` (and `console.log`) print what `toJSON` does: never a secret.
 for (const cls of [
+  Bearer,
   StaticToken,
   ClientCredentials,
   CachedToken,
@@ -634,8 +682,8 @@ for (const cls of [
   ChainedCredential,
 ]) {
   Object.defineProperty(cls.prototype, Symbol.for("nodejs.util.inspect.custom"), {
-    value(this: { toJSON(): string }): string {
-      return this.toJSON();
+    value(this: { toString(): string }): string {
+      return this.toString();
     },
   });
 }

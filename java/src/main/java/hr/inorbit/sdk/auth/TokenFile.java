@@ -27,7 +27,7 @@ public final class TokenFile implements TokenProvider {
 
     private final Path path;
     private final Object lock = new Object();
-    private Token token;
+    private transient Token token;
     private Object stamp;
     private long checked;
     private boolean forced = true;

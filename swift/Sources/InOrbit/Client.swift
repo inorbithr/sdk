@@ -153,10 +153,55 @@ final class Core: Sendable {
 
     /// Only `https://`, except on loopback [SR-07].
     static func checkURL(_ url: URL, _ name: String) throws {
-        let host = url.host ?? ""
-        let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
-        if url.scheme == "https" || (url.scheme == "http" && loopback) { return }
+        if url.scheme == "https" || (url.scheme == "http" && isLoopback(url.host ?? "")) { return }
         throw ConfigError(message: "\(name) must be an https:// URL (http:// only on loopback)")
+    }
+
+    /// Whether `host` is `localhost` or a loopback address (`127.0.0.0/8`, `::1`), brackets
+    /// allowed. A name that only starts like one (`127.example.com`) is not.
+    static func isLoopback(_ host: String) -> Bool {
+        var h = host.lowercased()
+        if h.hasPrefix("["), h.hasSuffix("]"), h.count >= 2 { h = String(h.dropFirst().dropLast()) }
+        if h == "localhost" { return true }
+        if let v4 = ipv4(h) { return v4[0] == 127 }
+        if let v6 = ipv6(h) { return v6 == [0, 0, 0, 0, 0, 0, 0, 1] }
+        return false
+    }
+
+    /// A dotted-quad IPv4 literal's four bytes, or `nil`.
+    static func ipv4(_ s: String) -> [UInt8]? {
+        let parts = s.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return nil }
+        var out: [UInt8] = []
+        for p in parts {
+            guard (1...3).contains(p.count), p.allSatisfy({ $0.isASCII && $0.isNumber }), let n = UInt8(p) else {
+                return nil
+            }
+            out.append(n)
+        }
+        return out
+    }
+
+    /// An IPv6 literal's eight groups (`::` expanded), or `nil`.
+    static func ipv6(_ s: String) -> [UInt16]? {
+        guard s.contains(":") else { return nil }
+        let halves = s.components(separatedBy: "::")
+        guard halves.count <= 2 else { return nil }
+        func groups(_ t: String) -> [UInt16]? {
+            if t.isEmpty { return [] }
+            var out: [UInt16] = []
+            for g in t.split(separator: ":", omittingEmptySubsequences: false) {
+                guard (1...4).contains(g.count), g.allSatisfy(\.isHexDigit), let n = UInt16(g, radix: 16) else {
+                    return nil
+                }
+                out.append(n)
+            }
+            return out
+        }
+        guard let head = groups(halves[0]) else { return nil }
+        if halves.count == 1 { return head.count == 8 ? head : nil }
+        guard let tail = groups(halves[1]), head.count + tail.count < 8 else { return nil }
+        return head + Array(repeating: 0, count: 8 - head.count - tail.count) + tail
     }
 
     static func userAgent(suffix: String?) -> String {
@@ -278,6 +323,8 @@ final class Core: Sendable {
                 response = try await withTimeout(call.timeout) { try await transport.send(request) }
             } catch is CancellationError {
                 throw CancellationError()
+            } catch is BodyTooLarge {
+                throw tooLarge(call)
             } catch {
                 let wait = RetryPolicy.delay(retry: retry, retryAfter: nil)
                 if mayRetry(retry, call, wait: wait) {
@@ -287,6 +334,8 @@ final class Core: Sendable {
                 }
                 throw failure(error, op, call)
             }
+            // A caller's own transport reads the whole answer; refuse it here all the same.
+            if response.body.count > maxBody { throw tooLarge(call) }
             let raw = RawResponse(
                 status: response.head.status, headers: response.head.headers, body: response.body,
                 requestId: call.requestId, attempts: attempts, idempotencyKey: call.idempotencyKey)
@@ -307,6 +356,12 @@ final class Core: Sendable {
             }
             throw error
         }
+    }
+
+    func tooLarge(_ call: Call) -> TooLargeError {
+        TooLargeError(
+            message: "the answer is larger than 16 MiB; refusing to read it (request id \(call.requestId))",
+            requestId: call.requestId, idempotencyKey: call.idempotencyKey)
     }
 
     func failure(_ error: any Error, _ op: Codegen.Operation, _ call: Call) -> any Error {

@@ -1,0 +1,21 @@
+{
+  "provider": {
+    "extension": "example",
+    "version": "1.2.0",
+    "manifest_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "action": "example.restart-worker",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "p0": "x",
+    "p1": "x",
+    "p2": "x",
+    "p3": "x",
+    "p4": "x",
+    "p5": "x",
+    "p6": "x",
+    "p7": "x",
+    "p8": "x"
+  },
+  "effect": "Restarts worker build-1 after 30 seconds."
+}

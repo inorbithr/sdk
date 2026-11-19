@@ -91,8 +91,6 @@ internal static partial class Settings
         "auth", "rate_limit", "attempt_tracing", "logging", "hooks", "timeout",
     ];
 
-    internal const string Redacted = "<redacted>";
-
     internal static readonly string[] Sources = ["env", "workload", "file", "cli"];
 
     internal static readonly Setting[] Catalogue =
@@ -332,10 +330,18 @@ internal sealed record CredentialPlan(string Source, string Kind)
     public string? Profile { get; init; }
 
     public string? Program { get; init; }
+
+    /// <summary>Never the token or the key secret.</summary>
+    public override string ToString() =>
+        $"CredentialPlan {{ Source = {Source}, Kind = {Kind}, Token = {Redaction.Shown(Token)}, Path = {Path}, KeyId = {KeyId}, KeySecret = {Redaction.Shown(KeySecret)}, KeySecretFile = {KeySecretFile}, Profile = {Profile}, Program = {Program} }}";
 }
 
 /// <summary>The proxy, with whether it was set on purpose (code, <c>INORBIT_PROXY</c>, the file) or came from the standard variables.</summary>
-internal sealed record ProxyChoice(string Url, bool Explicit);
+internal sealed record ProxyChoice(string Url, bool Explicit)
+{
+    /// <summary>Never the proxy's password: the URL's user-info is redacted.</summary>
+    public override string ToString() => $"ProxyChoice {{ Url = {Redaction.Userinfo(Url)}, Explicit = {Explicit} }}";
+}
 
 /// <summary>A resolved configuration: the values a client is built from, and its description.</summary>
 internal sealed record Resolution(
@@ -504,28 +510,7 @@ internal sealed class Resolver
         }
     }
 
-    private static string RedactUserinfo(string raw)
-    {
-        var i = raw.IndexOf("://", StringComparison.Ordinal);
-        if (i < 0)
-        {
-            return raw;
-        }
-
-        var rest = raw[(i + 3)..];
-        var end = rest.IndexOfAny(['/', '?', '#']);
-        var authority = end < 0 ? rest : rest[..end];
-        var at = authority.LastIndexOf('@');
-        return at < 0 ? raw : $"{raw[..i]}://{Settings.Redacted}@{rest[(at + 1)..]}";
-    }
-
     private static bool HasUserinfo(string raw) => Uri.TryCreate(raw, UriKind.Absolute, out var u) && u.UserInfo.Length > 0;
-
-    private static bool IsLoopbackHost(string host)
-    {
-        var h = host.Trim('[', ']').ToLowerInvariant();
-        return h == "localhost" || (System.Net.IPAddress.TryParse(h, out var ip) && System.Net.IPAddress.IsLoopback(ip));
-    }
 
     private string? Var(string k) => _env.TryGetValue(k, out var v) && v.Length > 0 ? v : null;
 
@@ -1006,7 +991,7 @@ internal sealed class Resolver
                         throw new FormatException($"{Quote(v)} is not an absolute URL");
                     }
 
-                    if (!(u.Scheme == Uri.UriSchemeHttps || (u.Scheme == Uri.UriSchemeHttp && IsLoopbackHost(u.Host))))
+                    if (!(u.Scheme == Uri.UriSchemeHttps || (u.Scheme == Uri.UriSchemeHttp && Urls.IsLoopback(u.Host))))
                     {
                         throw new FormatException($"{Quote(v)} must use https (plain http is allowed only for localhost and loopback addresses)");
                     }
@@ -1031,7 +1016,7 @@ internal sealed class Resolver
                 }
 
             case Settings.Ty.Secret:
-                return raw.Value is string secret ? (Settings.Redacted, secret) : throw new FormatException("must be a string");
+                return raw.Value is string secret ? (Redaction.Marker, secret) : throw new FormatException("must be a string");
 
             case Settings.Ty.Str:
                 {
@@ -1052,7 +1037,7 @@ internal sealed class Resolver
                         return ("off", "off");
                     }
 
-                    var shown = RedactUserinfo(v);
+                    var shown = Redaction.Userinfo(v);
                     if (!Uri.TryCreate(v, UriKind.Absolute, out var u))
                     {
                         throw new FormatException($"{Quote(shown)} is not an absolute URL");
@@ -1105,7 +1090,7 @@ internal sealed class Resolver
         else if (CodeString("token") is { } token)
         {
             plan = new("code", "static_token") { Token = token };
-            Show("token", Settings.Redacted, "code");
+            Show("token", Redaction.Marker, "code");
         }
         else if (CodeString("token_file") is { } tokenFile)
         {
@@ -1119,7 +1104,7 @@ internal sealed class Resolver
             if (CodeString("key_secret") is { } secret)
             {
                 plan = new("code", "client_credentials") { KeyId = keyId, KeySecret = secret };
-                Show("key_secret", Settings.Redacted, "code");
+                Show("key_secret", Redaction.Marker, "code");
             }
             else
             {
@@ -1153,7 +1138,7 @@ internal sealed class Resolver
         else if (CodeString("token") is { } token)
         {
             plan = new("code", "static_token") { Token = token };
-            Show("token", Settings.Redacted, "code");
+            Show("token", Redaction.Marker, "code");
         }
         else if (CodeString("token_file") is { } tokenFile)
         {
@@ -1193,7 +1178,7 @@ internal sealed class Resolver
             if (secret is not null)
             {
                 plan = new("code", "client_credentials") { KeyId = keyId, KeySecret = secret };
-                Show("key_secret", Settings.Redacted, "code");
+                Show("key_secret", Redaction.Marker, "code");
             }
             else
             {
@@ -1247,7 +1232,7 @@ internal sealed class Resolver
 
                 if (token is not null)
                 {
-                    Show("token", Settings.Redacted, Src("TOKEN"));
+                    Show("token", Redaction.Marker, Src("TOKEN"));
                     plan = new("env", "static_token") { Token = token };
                 }
                 else if (tokenFile is not null)
@@ -1285,7 +1270,7 @@ internal sealed class Resolver
                     Show("key_id", keyId, Src("KEY_ID"));
                     if (secret is not null)
                     {
-                        Show("key_secret", Settings.Redacted, Src("KEY_SECRET"));
+                        Show("key_secret", Redaction.Marker, Src("KEY_SECRET"));
                         plan = new("env", "client_credentials") { KeyId = keyId, KeySecret = secret };
                     }
                     else

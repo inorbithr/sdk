@@ -81,15 +81,17 @@ impl Session {
             master: File::from(master),
             child,
             output,
-            screen: vt100::Parser::new(ROWS, COLS, 0),
+            screen: vt100::Parser::new(nz(ROWS), nz(COLS), 0),
             transcript: String::new(),
             raw: Vec::new(),
         }
     }
 
-    /// Reads the terminal until `done` holds for what is on screen, or panics after ten seconds.
+    /// Reads the terminal until `done` holds for what is on screen, or panics after a minute
+    /// (a hosted macOS runner can take tens of seconds to start a binary under load; a screen
+    /// that is right returns at once, so the limit only bounds a broken one).
     pub(crate) fn until(&mut self, what: &str, done: impl Fn(&vt100::Screen) -> bool) {
-        let end = Instant::now() + Duration::from_secs(10);
+        let end = Instant::now() + Duration::from_secs(60);
         while Instant::now() < end {
             if let Ok(bytes) = self.output.recv_timeout(Duration::from_millis(100)) {
                 self.take(&bytes);
@@ -142,6 +144,11 @@ impl Drop for Session {
     }
 }
 
+/// A terminal size as vt100 takes it.
+fn nz(n: u16) -> std::num::NonZeroU16 {
+    std::num::NonZeroU16::new(n).unwrap()
+}
+
 pub(crate) fn row(screen: &vt100::Screen, r: u16) -> String {
     screen.rows(0, COLS).nth(usize::from(r)).unwrap_or_default()
 }
@@ -154,7 +161,7 @@ pub(crate) fn any(screen: &vt100::Screen, text: &str) -> bool {
 /// What a terminal of this size that kept `scrollback` lines held when it had been fed `raw`:
 /// the lines that scrolled off (oldest first) and the rows of the screen.
 pub(crate) fn with_history(raw: &[u8], scrollback: usize) -> (Vec<String>, Vec<String>) {
-    let mut term = vt100::Parser::new(ROWS, COLS, scrollback);
+    let mut term = vt100::Parser::new(nz(ROWS), nz(COLS), scrollback);
     term.process(raw);
     term.screen_mut().set_scrollback(usize::MAX);
     let top = term.screen().scrollback();

@@ -718,17 +718,21 @@ pub const TOOLCHAIN_MINIMUM: &str = "The one exception is the language's own min
      scaffold wrote, the installed toolchain above, never raise it to a newer release, which \
      would not build here. A newer toolchain goes in your summary as a suggestion.";
 
+/// Seconds a toolchain's version command may take. A version prints at once; a proxy that
+/// starts installing what it runs (a version manager on a fresh machine) is stopped instead.
+const VERSION_SECS: u64 = 5;
+
 /// What `command` prints first, for the agent's prompt (`rustc 1.99.0 (b940084d7 2026-09-28)`),
-/// else nothing: a toolchain that will not run is told nothing rather than guessed. A version
-/// command is a read, so a dry run runs it too.
+/// else nothing: a toolchain that will not run, or does not answer within [`VERSION_SECS`], is
+/// told nothing rather than guessed. A version command is a read, so a dry run runs it too.
 #[must_use]
 pub fn toolchain_line(command: &[String]) -> Option<String> {
     let (prog, args) = command.split_first()?;
-    let o = Command::new(prog).args(args).output().ok()?;
-    if !o.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&o.stdout);
+    let stdout = crate::memory::drift::output_within(
+        Command::new(prog).args(args),
+        std::time::Duration::from_secs(VERSION_SECS),
+    )?;
+    let text = String::from_utf8_lossy(&stdout);
     let first = text.lines().map(str::trim).find(|l| !l.is_empty())?;
     Some(first.chars().take(120).collect())
 }
@@ -889,7 +893,7 @@ pub fn smoke(dir: &Path, state: &Path, name: &str, runner: Option<&Runner>) -> S
         if prog.contains('/') {
             Some(PathBuf::from(prog))
         } else {
-            crate::ask::find_on_path(prog, &path)
+            crate::paths::find_program(prog, &path)
         }
     };
     if let Some(Err(fail)) = your_env_step(
@@ -938,17 +942,39 @@ pub fn smoke(dir: &Path, state: &Path, name: &str, runner: Option<&Runner>) -> S
 /// What the demo child may inherit: the runner's own allowlist (`PATH`, the temp directory,
 /// and on Windows `SYSTEMROOT` and the rest Node and Winsock need to start), without the
 /// XDG directories, which would point the demo at the real configuration. The unix `PATH`
-/// stays the fixed system one.
+/// stays the fixed system one. Windows also keeps [`DEMO_WINDOWS_FOLDERS`], which the
+/// runner's provider allowlist does not carry.
 fn demo_base_env() -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
     // The fixed system path on unix; Windows keeps the runner's own, where its tools live.
-    let fixed = cfg!(unix);
-    let mut env: Vec<_> = crate::runner::env::scrub(std::env::vars_os())
+    demo_env_from(std::env::vars_os(), cfg!(unix))
+}
+
+/// The Program Files folders. `NuGet` reads them from the environment for its machine-wide
+/// config and stops every restore with "Value cannot be null. (Parameter 'path1')" when
+/// they are missing. They name system folders and never carry a credential.
+const DEMO_WINDOWS_FOLDERS: &[&str] = &["PROGRAMFILES", "PROGRAMFILES(X86)"];
+
+/// [`demo_base_env`] over `vars`; `fixed` is the unix case (the fixed `PATH`, no Windows
+/// folders).
+fn demo_env_from<I>(vars: I, fixed: bool) -> Vec<(std::ffi::OsString, std::ffi::OsString)>
+where
+    I: IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+{
+    let vars: Vec<_> = vars.into_iter().collect();
+    let upper = |k: &std::ffi::OsString| k.to_string_lossy().to_ascii_uppercase();
+    let mut env: Vec<_> = crate::runner::env::scrub(vars.iter().cloned())
         .into_iter()
         .filter(|(k, _)| {
-            let up = k.to_string_lossy().to_ascii_uppercase();
+            let up = upper(k);
             !(up.starts_with("XDG_") || fixed && up == "PATH")
         })
         .collect();
+    if !fixed {
+        env.extend(
+            vars.into_iter()
+                .filter(|(k, _)| DEMO_WINDOWS_FOLDERS.contains(&upper(k).as_str())),
+        );
+    }
     if fixed {
         env.push((
             "PATH".into(),
@@ -1398,7 +1424,7 @@ mod tests {
 
     /// The program a variant needs, on this machine's PATH?
     fn have(program: &str) -> bool {
-        crate::ask::find_on_path(program, &std::env::var_os("PATH").unwrap_or_default()).is_some()
+        crate::paths::find_program(program, &std::env::var_os("PATH").unwrap_or_default()).is_some()
     }
 
     #[test]
@@ -1504,7 +1530,7 @@ mod tests {
     fn the_blank_template_is_a_plain_project_and_its_smoke_test_is_its_own_test() {
         let tpl =
             template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
-        assert_eq!(tpl.live_variants().len(), 5);
+        assert_eq!(tpl.live_variants().len(), 9);
         for v in tpl.live_variants() {
             let (files, runner) = rendered_in("blank", "my-shop", &v.id);
             let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
@@ -1592,6 +1618,35 @@ mod tests {
         assert!(one_line_description(None).contains("iohr project init"));
     }
 
+    /// The demo child keeps the Program Files folders on Windows, which `NuGet` needs for a
+    /// restore, and still drops credentials; unix keeps neither and gets the fixed `PATH`.
+    #[test]
+    fn the_demo_env_keeps_program_files_on_windows_only() {
+        let vars = || {
+            [
+                ("ProgramFiles", r"C:\Program Files"),
+                ("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                ("PATH", r"C:\tools"),
+                ("GH_TOKEN", "t"),
+                ("XDG_CONFIG_HOME", "/x"),
+            ]
+            .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v)))
+        };
+        let names = |env: Vec<(std::ffi::OsString, std::ffi::OsString)>| -> Vec<String> {
+            let mut n: Vec<String> = env
+                .into_iter()
+                .map(|(k, _)| k.to_string_lossy().into_owned())
+                .collect();
+            n.sort();
+            n
+        };
+        assert_eq!(
+            names(demo_env_from(vars(), false)),
+            ["PATH", "ProgramFiles", "ProgramFiles(x86)"]
+        );
+        assert_eq!(names(demo_env_from(vars(), true)), ["PATH"]);
+    }
+
     /// Every live language of the demo: its files render, its manifest passes the lint, its
     /// smoke test reads one heartbeat, and its own self-test passes. Skipped (said on stderr)
     /// when the toolchain is not on this machine.
@@ -1623,15 +1678,59 @@ mod tests {
             let (state, _) = register_step(&dir, &st, "my-shop", "demo", "").unwrap();
             let said = smoke(&dir, &state, "my-shop", runner.as_ref());
             assert!(said.ok, "{}: {} / {}", v.id, said.said, said.output);
-            let b = said.heartbeat.unwrap();
+            let b = said.heartbeat.unwrap_or_else(|| {
+                panic!("{}: no heartbeat: {} / {}", v.id, said.said, said.output)
+            });
             assert_eq!(b["id"], "local/my-shop", "{}", v.id);
             assert_eq!(b["beats"], 1, "{}", v.id);
             assert_eq!(b["token"], "refused", "{}", v.id);
             // The project's own test, the way its README says.
-            let test = &v.test;
-            let (prog, args) = test.split_first().unwrap();
             std::fs::create_dir_all(tmp.path().join("tstate")).unwrap();
             std::fs::create_dir_all(tmp.path().join("tcache")).unwrap();
+            // The rendered test command (`@@MODULE@@` filled in), with its paths expanded.
+            let test: Vec<String> = runner
+                .as_ref()
+                .unwrap()
+                .test
+                .iter()
+                .map(|w| {
+                    paths_in(
+                        w,
+                        &dir,
+                        &tmp.path().join("tstate"),
+                        &tmp.path().join("tcache"),
+                    )
+                })
+                .collect();
+            let (prog, args) = test.split_first().unwrap();
+            // A compiled language builds first, into the same cache, the way its README says.
+            let rt = runner.as_ref().unwrap();
+            if let Some((bp, bargs)) = rt.build.split_first() {
+                let bargs: Vec<String> = bargs
+                    .iter()
+                    .map(|w| {
+                        paths_in(
+                            w,
+                            &dir,
+                            &tmp.path().join("tstate"),
+                            &tmp.path().join("tcache"),
+                        )
+                    })
+                    .collect();
+                let built = Command::new(bp)
+                    .args(&bargs)
+                    .current_dir(&dir)
+                    .env("CARGO_TARGET_DIR", tmp.path().join("tt"))
+                    .output()
+                    .unwrap();
+                assert!(
+                    built.status.success(),
+                    "{} build: {}{}",
+                    v.id,
+                    String::from_utf8_lossy(&built.stdout),
+                    String::from_utf8_lossy(&built.stderr)
+                );
+            }
             let out = Command::new(prog)
                 .args(args)
                 .current_dir(&dir)

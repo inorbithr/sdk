@@ -1132,7 +1132,9 @@ impl Screen {
 mod tests {
     use std::sync::Arc;
 
-    use iohr_auth::{Redacted, StaticToken};
+    use inorbithr::Secret;
+
+    use crate::auth::StaticToken;
     use wiremock::matchers::{body_partial_json, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -1267,7 +1269,7 @@ mod tests {
     }
 
     fn api(server: &MockServer) -> Api {
-        let cred = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+        let cred = Arc::new(AnyCredential::Token(StaticToken::new(Secret::new(
             "person-token".to_owned(),
         ))));
         Api::new(&server.uri(), cred, false).unwrap()

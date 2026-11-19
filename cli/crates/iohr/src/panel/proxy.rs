@@ -36,7 +36,8 @@ use tokio::time::Instant;
 use super::cells::{self, Floating, Hit, Rect};
 use super::chat::{self, Chat};
 use super::input::{Input, MOUSE_OFF, MOUSE_ON, Mouse, MouseMode, OpenKey, Reader};
-use super::model::{Ask, Effect, Key, Model, Source, View};
+use super::model::{Ask, Effect, Key, Model, Source, Told, View};
+use super::phone::{self, Phone};
 use super::screen::{Boundary, Screen};
 use super::workloads::{self, Snapshot};
 use super::{act, input};
@@ -468,7 +469,16 @@ impl Proxy {
 
     /// One chunk of the shell's output, with the stop sequence (`iohr stop` run inside the panel)
     /// taken out: the panel is lifted and the shell goes on.
+    #[cfg(test)]
     fn shell_output(&mut self, chunk: &[u8]) -> Vec<u8> {
+        let chunk = self.strip_control(chunk);
+        self.child_output(&chunk)
+    }
+
+    /// `chunk` without the hook's reports to the chat box and the panel's own stop and resume
+    /// sequences (which set `stopped`): what the shell printed, for the terminal and for the
+    /// phone alike.
+    fn strip_control(&mut self, chunk: &[u8]) -> Vec<u8> {
         // The hook's reports to the chat box come out first (a start a chunk ended in the middle
         // of is held for the next one, which is also where a stop sequence's start is rejoined).
         let (mut chunk, msgs) = if self.chat.enabled {
@@ -488,7 +498,7 @@ impl Proxy {
             self.stopped = stop;
             chunk.drain(at..at + seq.len());
         }
-        self.child_output(&chunk)
+        chunk
     }
 
     /// A change of the panel with no output from the shell.
@@ -638,6 +648,12 @@ struct Session {
     held: Option<link::Session>,
     /// A rejoin in flight (starting a host takes seconds).
     rejoin_fetch: Option<Fetch<Joined>>,
+    /// The link to the Mac app's terminal host while this terminal is shown on the phone.
+    phone: Option<Phone>,
+    /// The shell's process id, which the app reads Claude's presence from.
+    shell_pid: u32,
+    /// Shares started so far: each one's session id is new, a host may not have dropped the last.
+    shares: u32,
     /// A lone Esc held until this moment, to see whether `h` follows in the next read (Option+h
     /// from a terminal that writes Esc and `h` apart).
     esc_held: Option<Instant>,
@@ -703,6 +719,13 @@ impl Session {
                 }
             }
             Effect::Stop => self.proxy.stopped = true,
+            Effect::ShareOn => self.share_on(),
+            Effect::ShareOff => self.phone = None,
+            Effect::Typing(on) => {
+                if let Some(p) = &self.phone {
+                    p.send(phone::Cmd::Typing(on));
+                }
+            }
             Effect::ChatToggle => self.proxy.chat.toggle(),
             Effect::Question { id, text } => {
                 if self.stub {
@@ -992,8 +1015,12 @@ impl Session {
     /// panel back, a host is joined again.
     fn shell_wrote(&mut self, bytes: &[u8]) {
         let was_stopped = self.proxy.stopped;
-        let out = self.proxy.shell_output(bytes);
+        let chunk = self.proxy.strip_control(bytes);
+        let out = self.proxy.child_output(&chunk);
         self.emit(&out);
+        if let Some(p) = &self.phone {
+            p.send(phone::Cmd::Output(chunk));
+        }
         if was_stopped && !self.proxy.stopped {
             self.resumed();
         }
@@ -1040,6 +1067,66 @@ impl Session {
         let (rows, cols) = host_size();
         let bytes = self.proxy.resize(rows, cols);
         self.emit(&bytes);
+    }
+
+    /// Shows this terminal on the phone: hands the shell to the Mac app's terminal host. What
+    /// the host finds out (no app, the Mac's answers) comes back as reports.
+    fn share_on(&mut self) {
+        let Some(dir) = workloads::home_root().map(|h| h.join("term")) else {
+            let eff = self.proxy.model.share_told(Told::Lost(
+                "Cannot find your home folder, so the Mac app cannot be reached.".into(),
+            ));
+            self.apply(eff);
+            return;
+        };
+        self.shares += 1;
+        let start = phone::Start {
+            session: format!("iohr-panel-{}-{}", std::process::id(), self.shares),
+            cwd: std::env::current_dir()
+                .map(|d| d.display().to_string())
+                .unwrap_or_default(),
+            cols: u16::try_from(self.proxy.pty_size.1).unwrap_or(80),
+            rows: u16::try_from(self.proxy.pty_size.0).unwrap_or(24),
+            pid: self.shell_pid,
+            screen: self.proxy.screen.snapshot(),
+            typing: self.proxy.model.typing_wanted(),
+        };
+        self.phone = Some(Phone::start(dir, start, phone::LOOK));
+    }
+
+    /// What the link to the host said: the Mac's answers go to the model, what the phone typed
+    /// (both locks open, checked by the link) goes to the shell. A lost link is dropped.
+    fn phone_said(&mut self, report: Option<phone::Report>) {
+        match report {
+            Some(phone::Report::Write(bytes)) => {
+                let _ = self.master.write_all(&bytes);
+                return;
+            }
+            Some(phone::Report::Told(told)) => {
+                if matches!(told, Told::Lost(_)) {
+                    self.phone = None;
+                }
+                let eff = self.proxy.model.share_told(told);
+                self.apply(eff);
+            }
+            None => {
+                self.phone = None;
+                let eff = self
+                    .proxy
+                    .model
+                    .share_told(Told::Lost(phone::LOST.to_owned()));
+                self.apply(eff);
+            }
+        }
+        self.redraw();
+    }
+}
+
+/// The next thing the link said; never, while there is no link.
+async fn phone_report(phone: &mut Option<Phone>) -> Option<phone::Report> {
+    match phone {
+        Some(p) => p.reports.recv().await,
+        None => std::future::pending().await,
     }
 }
 
@@ -1196,6 +1283,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         cols,
         question_file.as_ref().map(|f| f.0.as_path()),
     )?;
+    let shell_pid = child.id();
 
     let _raw = RawMode::enter()?;
     let mut from_child = reader(
@@ -1237,6 +1325,9 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         project: config.project.take(),
         held: None,
         rejoin_fetch: None,
+        phone: None,
+        shell_pid,
+        shares: 0,
         esc_held: None,
     };
     session.redraw();
@@ -1289,6 +1380,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
             result = poll(&mut session.read_fetch) => session.read_done(result),
             () = poll(&mut session.host_gone) => session.host_ended(),
             joined = poll(&mut session.rejoin_fetch) => session.rejoined(joined),
+            report = phone_report(&mut session.phone) => session.phone_said(report),
         }
     }
 
@@ -1410,6 +1502,7 @@ fn deny(g: Global, env: Env, id: String) -> Fetch<(String, Result<(), Error>)> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::screen::clamp;
     use super::*;
 
     fn proxy(mouse: MouseMode) -> Proxy {
@@ -1422,7 +1515,7 @@ mod tests {
 
     /// The rows of a terminal of `rows` x `cols` that has been fed `bytes`.
     fn rows_of(rows: u16, cols: u16, bytes: &[&[u8]]) -> Vec<String> {
-        let mut parser = vt100::Parser::new(rows, cols, 0);
+        let mut parser = vt100::Parser::new(clamp(usize::from(rows)), clamp(usize::from(cols)), 0);
         for b in bytes {
             parser.process(b);
         }
@@ -1440,9 +1533,9 @@ mod tests {
         let badge = narrow.iter().position(|r| r.contains("iohr")).unwrap();
         let old_at = narrow[badge].find("iohr").unwrap();
         // A wider terminal keeps the cells as they were.
-        let mut wide = vt100::Parser::new(24, 60, 0);
+        let mut wide = vt100::Parser::new(clamp(24), clamp(60), 0);
         wide.process(&term_bytes);
-        wide.screen_mut().set_size(24, 100);
+        wide.screen_mut().set_size(clamp(24), clamp(100));
         let mut after = Vec::new();
         after.extend(p.resize(24, 100));
         wide.process(&after);
@@ -1479,6 +1572,7 @@ mod tests {
     /// Every line the terminal holds, scrolled-off ones first, then the screen's rows.
     fn history_and_screen(term: &mut vt100::Parser) -> (Vec<String>, Vec<String>) {
         let (rows, cols) = term.screen().size();
+        let (rows, cols) = (rows.get(), cols.get());
         let mut off = Vec::new();
         let mut at = usize::MAX;
         term.screen_mut().set_scrollback(usize::MAX);
@@ -1505,7 +1599,7 @@ mod tests {
     #[test]
     fn card_output_scrolling_past_the_box_never_stacks_it() {
         let mut p = boxed_proxy(24, 100);
-        let mut term = vt100::Parser::new(24, 100, 1000);
+        let mut term = vt100::Parser::new(clamp(24), clamp(100), 1000);
         let feed = |term: &mut vt100::Parser, bytes: Vec<u8>| term.process(&bytes);
         // The hook's first report opens the box and reserves its rows.
         feed(&mut term, p.shell_output(b"$ "));
@@ -1532,7 +1626,7 @@ mod tests {
     #[test]
     fn a_scroll_region_reset_never_frees_the_box_s_rows() {
         let mut p = boxed_proxy(24, 100);
-        let mut term = vt100::Parser::new(24, 100, 1000);
+        let mut term = vt100::Parser::new(clamp(24), clamp(100), 1000);
         term.process(&p.shell_output(b"$ "));
         assert!(p.reserved);
         p.chat.message(chat::Msg::Busy, std::time::Instant::now());

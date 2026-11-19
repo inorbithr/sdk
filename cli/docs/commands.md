@@ -56,13 +56,14 @@ ends its `--help` with real examples.
 |---|---|---|
 | `iohr ask ...` | Ask your own AI agent about this folder | [Asking your agent](ask.md) |
 | `iohr asks count \| list \| show \| approve \| deny \| question \| decide \| key ...` | The asks agents file for you | [Asks](ask.md#the-asks-agents-file-for-you) |
+| `iohr handoff show \| compact \| clear [--json]` | The note an agent run leaves in `.inorbit/handoff.md` when it stops early (`ask --allow-edits` or `project init`): what was asked, the files changed, what is left, and one line per earlier run (newest 6, older ones counted). `show` prints it, `compact` re-folds it, `clear` deletes it; the next `ask --allow-edits` goes on from it. No sign-in, no network | [Projects](projects.md#describe-it-your-agent-builds-it) |
 | `iohr permissions list \| allow \| deny \| remove \| check` | What your agent may run or open when you ask it something | [Permissions](ask.md#permission-rules) |
 | `iohr context [DIR] [--full] [--json]` | The IO.md files a `?` or `??` question would load from DIR (default: here), the way a `CLAUDE.md` works: a table of each file with its bytes, how many were sent and why one was cut or left out, farthest first and the nearest winning; `--full` adds the text that would be sent, `--json` the same as data. Reads files only; asks no model and sends nothing | [IO.md](projects.md#iomd-instructions-for-the-folder) |
 | `iohr shell hook zsh` | The `?` prompt for zsh | [The `?` prompt](ask.md#the--prompt-in-zsh) |
 | `iohr theme list \| show NAME` | The terminal themes of the InOrbit app (`inorbit`, `solarized-dark`, `nord`, `light`), the one that is on, and a theme's colours, font and cursor; local, no sign-in | [The terminal theme](terminal-theme.md) |
 | `iohr theme install NAME [--terminal] [--prompt] [--replace-prompt]` | Writes the Terminal.app profile `~/.inorbit/term/themes/NAME.terminal` and remembers the theme; `--terminal` opens the profile, `--prompt` turns on the zsh prompt, `--replace-prompt` replaces a prompt you set yourself | [The terminal theme](terminal-theme.md) |
 | `iohr theme off` | Turns the prompt off and forgets the chosen theme; an imported profile stays | [The terminal theme](terminal-theme.md) |
-| `iohr runner register \| run \| status \| config show \| gate-report \| run-key \| api-key \| personal-use` | This machine as a coordinator runner | [Runner](runner.md) |
+| `iohr runner register \| run \| status \| revoke \| config show \| gate-report \| run-key \| api-key \| personal-use` | This machine as a coordinator runner | [Runner](runner.md) |
 | `iohr session [DIR]`, `iohr stop [DIR]` | Open and stop a project's session | [Sessions](session-and-panel.md) |
 | `iohr coordinator ...` | The coordinator's jobs, asks and plans | [below](#iohr-coordinator) |
 | `iohr memory ...` | Memory kept as local files | [Memory](roles-and-memory.md#memory) |
@@ -76,7 +77,7 @@ ends its `--help` with real examples.
 | `iohr tunnel` | A loopback SSH pipe into an environment's edge | [below](#iohr-tunnel) |
 | `iohr browser install [--print]` | Install InOrbit Trails, the browser extension | [below](#iohr-browser-install) |
 | `iohr doctor [--fix]` | Check this machine for the known problems (signed out, MCP bridge down, low disk, unreadable `config.toml`), say how to fix each, exit 1 on a failure. `--fix`, or `[doctor] auto_fix = true`, runs the safe fixes (restart a stopped bridge); the `?` card shows what it found | [below](#iohr-doctor) |
-| `iohr upgrade [--check]` | Update `iohr` the way it was installed | [Upgrade](install.md#upgrade) |
+| `iohr upgrade [--check] [--no-extensions] [--yes]` | Update `iohr` the way it was installed, then every installed extension; `--no-extensions` leaves extensions alone | [Upgrade](install.md#upgrade) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell | |
 | `iohr help [COMMAND]` | The help | [below](#the-help) |
 

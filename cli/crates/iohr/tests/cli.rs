@@ -1323,7 +1323,7 @@ async fn login_still_succeeds_on_the_personal_account_when_the_account_list_cann
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn logout_keeps_the_profile_when_revoking_fails() {
+async fn logout_deletes_locally_and_says_so_when_revoking_fails() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
     let r = Run {
@@ -1352,9 +1352,12 @@ async fn logout_keeps_the_profile_when_revoking_fails() {
     )
     .unwrap();
     let out = r.run(&["logout"]);
-    assert_eq!(code(&out), 1, "{}", text(&out));
-    assert!(text(&out).contains("Nothing was removed"));
-    assert!(dir.path().join(format!("secrets/me.{ACCOUNT}")).exists());
+    // RFC 0231: a failed revoke never keeps the secret on this machine, and says so.
+    assert_eq!(code(&out), 0, "{}", text(&out));
+    assert!(text(&out).contains("not revoked"), "{}", text(&out));
+    assert!(!dir.path().join(format!("secrets/me.{ACCOUNT}")).exists());
+    let config = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    assert!(!config.contains("[profiles.me]"), "{config}");
 }
 
 /// A document with a stamp, as the gateway answers `/v1/openapi.json`.

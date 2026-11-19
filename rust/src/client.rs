@@ -17,7 +17,7 @@ use crate::auth::{
     CliToken, ClientCredentials, DEFAULT_TOKEN_URL, DynProvider, StaticToken, TokenFile,
     TokenProvider,
 };
-use crate::config::{LoadOptions, ResolvedConfig, Settings, show_duration};
+use crate::config::{LoadOptions, ResolvedConfig, Settings, is_loopback, show_duration};
 use crate::error::{ConfigError, Error, Headers, RawResponse};
 use crate::extsock::{API_ENV as EXT_API_ENV, ExtSocketToken, SOCKET_ENV as EXT_SOCKET_ENV};
 use crate::hooks::{Attempt, Hook};
@@ -27,7 +27,7 @@ use crate::middleware::{
 };
 use crate::profile::{Profile, Public, env_prefix};
 use crate::ratelimit::{Latest, RateLimit, RateLimitMode};
-use crate::secret::Secret;
+use crate::secret::{REDACTED, Secret};
 use crate::socket::{Ctx as SocketCtx, Hub};
 use crate::stream::{EventStream, Guard, QUEUE, Streams, read_sse};
 use crate::transport::Transport;
@@ -100,7 +100,7 @@ impl fmt::Display for Method {
 ///     .query("limit", "5");
 /// assert_eq!(op.path(), "/v1/radar/digests");
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Operation<'a> {
     name: &'static str,
     method: Method,
@@ -113,6 +113,37 @@ pub struct Operation<'a> {
     scopes: &'static [&'static str],
     rpc: Option<&'static str>,
     fields: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The call's shape: its name, method, path, the names of its query parameters and
+/// fields, and the body's size. Never a query value, a field value or the body, which
+/// may carry secrets.
+impl fmt::Debug for Operation<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Operation")
+            .field("name", &self.name)
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .field(
+                "query",
+                &self
+                    .query
+                    .iter()
+                    .map(|(k, _)| k.as_ref())
+                    .collect::<Vec<_>>(),
+            )
+            .field(
+                "body",
+                &self.body.as_ref().map(|b| format!("{} bytes", b.len())),
+            )
+            .field("idempotent", &self.idempotent)
+            .field("idempotency_key", &self.idempotency_key)
+            .field("template", &self.template)
+            .field("scopes", &self.scopes)
+            .field("rpc", &self.rpc)
+            .field("fields", &self.fields.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 impl<'a> Operation<'a> {
@@ -808,12 +839,7 @@ fn check_url(what: &'static str, raw: &str, origin_only: bool) -> Result<Url, Co
         what,
         reason: e.to_string(),
     })?;
-    let loopback = match url.host() {
-        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-        Some(url::Host::Domain(d)) => d == "localhost",
-        None => false,
-    };
+    let loopback = url.host_str().is_some_and(is_loopback);
     match url.scheme() {
         "https" => {}
         "http" if loopback => {}
@@ -855,6 +881,8 @@ enum Credential {
         program: PathBuf,
         profile: String,
     },
+    /// A person's stored sign-in (`login` source).
+    Login(Box<crate::config::LoginTarget>),
 }
 
 /// Configures a [`Client`]: [`build`](Self::build) reads only what is set here;
@@ -1131,7 +1159,7 @@ impl<P: Profile> ClientBuilder<P> {
         self
     }
 
-    /// The credential sources `load` may use, of `env`, `workload`, `file` and `cli`;
+    /// The credential sources `load` may use, of `env`, `workload`, `file`, `login` and `cli`;
     /// code is always allowed.
     #[must_use]
     pub fn credential_sources(
@@ -1334,7 +1362,7 @@ impl<P: Profile> ClientBuilder<P> {
             "token_provider",
             self.provider.as_ref().map(|_| json!("custom")),
         );
-        put("token", self.token.as_ref().map(|_| json!("<redacted>")));
+        put("token", self.token.as_ref().map(|_| json!(REDACTED)));
         put("key_id", self.key.as_ref().map(|(id, _)| json!(id)));
         put("scopes", self.scopes.clone().map(Value::from));
         put(
@@ -1508,7 +1536,7 @@ impl<P: Profile> ClientBuilder<P> {
         let resolved = crate::config::run(options, code, typed)?;
         let mut config = ResolvedConfig::new(resolved.describe);
         let settings = Settings::from_resolved(&config, &resolved.secrets)?;
-        let credential = self.credential(&config, &settings, &resolved.secrets)?;
+        let credential = self.credential(&config, &settings, &resolved.secrets, resolved.login)?;
         let base = check_url("base_url", &settings.base_url, true)?;
         let token_url = check_url("token_url", &settings.token_url, false)?;
         let https_only = base.scheme() == "https" && token_url.scheme() == "https";
@@ -1561,6 +1589,9 @@ impl<P: Profile> ClientBuilder<P> {
                 let p = CliToken::new(program, profile);
                 p.attach(&logger, exchanged);
                 (Arc::new(p), None)
+            }
+            Credential::Login(target) => {
+                (login_provider(&target, options, &logger, exchanged)?, None)
             }
         };
         let capacity = self.retry_budget_capacity.unwrap_or(RETRY_BUDGET);
@@ -1628,6 +1659,7 @@ impl<P: Profile> ClientBuilder<P> {
         config: &ResolvedConfig,
         settings: &Settings,
         secrets: &std::collections::BTreeMap<String, Secret<String>>,
+        login: Option<crate::config::LoginTarget>,
     ) -> Result<Credential, Error> {
         let d = config.describe();
         let source = d["credential"]["source"].as_str().unwrap_or_default();
@@ -1715,6 +1747,7 @@ impl<P: Profile> ClientBuilder<P> {
                 },
                 scopes: scopes(),
             },
+            (_, "login") => Credential::Login(Box::new(login.ok_or_else(|| missing("login"))?)),
             (_, "cli") => Credential::Cli {
                 program: PathBuf::from(text("cli_path").unwrap_or_else(|| "iohr".into())),
                 profile: config.profile().unwrap_or_default().to_owned(),
@@ -1722,6 +1755,39 @@ impl<P: Profile> ClientBuilder<P> {
             _ => return Err(missing("credentials")),
         })
     }
+}
+
+/// The stored sign-in the chain chose, as a provider.
+#[cfg(feature = "login")]
+fn login_provider(
+    target: &crate::config::LoginTarget,
+    options: &LoadOptions,
+    logger: &Logger,
+    exchanged: Option<crate::auth::Exchanged>,
+) -> Result<Arc<dyn DynProvider>, Error> {
+    let session = crate::login::StoredSession::from_target(target, options.login_store_ref())
+        .map_err(|reason| ConfigError::Missing {
+            what: "login",
+            env: reason,
+        })?;
+    session.attach(logger, exchanged);
+    Ok(Arc::new(session))
+}
+
+/// Resolution skips the `login` source without the feature, so this is not reached; it
+/// is an error, never a panic, if it ever is.
+#[cfg(not(feature = "login"))]
+fn login_provider(
+    _: &crate::config::LoginTarget,
+    _: &LoadOptions,
+    _: &Logger,
+    _: Option<crate::auth::Exchanged>,
+) -> Result<Arc<dyn DynProvider>, Error> {
+    Err(ConfigError::Missing {
+        what: "login",
+        env: "the `login` cargo feature".into(),
+    }
+    .into())
 }
 
 /// A credential found the way `load` finds one (`docs/config.md` section 5.1), as a
@@ -1774,8 +1840,28 @@ mod tests {
             "https://api.inorbit.hr/v1",
             "https://u:p@api.inorbit.hr",
             "nope",
+            "http://127.example.com",
+            "http://127.0.0.1.example.com",
+            "http://localhost.example",
         ] {
             assert!(check_url("base_url", bad, true).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_operation_never_prints_its_body_or_values() {
+        let op = Operation::new(Method::Post, "/v1/keys")
+            .named("keys.create")
+            .query("password", "q-s3cr3t")
+            .field("secret", "f-s3cr3t")
+            .json(&serde_json::json!({ "key_secret": "b-s3cr3t" }))
+            .unwrap();
+        for shown in [format!("{op:?}"), format!("{op:#?}")] {
+            assert!(!shown.contains("s3cr3t"), "{shown}");
+            assert!(
+                shown.contains("/v1/keys") && shown.contains("password"),
+                "{shown}"
+            );
         }
     }
 

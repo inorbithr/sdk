@@ -18,6 +18,9 @@ compiled `iohr` and the replay server, the same two binaries six times a run. Lo
 | Nightly (03:23 UTC) and by hand (`workflow_dispatch`) | all | every supported version | Linux, Windows, macOS |
 | release-please pull requests | all | every supported version | Linux, Windows, macOS |
 
+- A change that touches the command line (`cli/**`, `rust/**`, `spec/**`, `mise.toml` or the
+  workflow) also runs its newest-Rust cell on Windows and macOS, so a platform break fails the
+  pull request and not the merge queue.
 - A `tools` job builds `iohr` and the replay server once on Linux and hands them to every
   Linux language job as an artifact; the tasks take them through `IOHR_BIN` and
   `REPLAY_PREBUILT` and build them themselves when those are unset, as on a laptop.

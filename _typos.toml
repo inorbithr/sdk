@@ -10,5 +10,9 @@ flate = "flate"
 # Comment-thread id prefix (thr_1) in the canvas tests.
 thr = "thr"
 
+[default.extend-identifiers]
+# A pydantic-core function name.
+plain_serializer_function_ser_schema = "plain_serializer_function_ser_schema"
+
 [files]
 extend-exclude = ["LICENSE", "CODE_OF_CONDUCT.md", "spec/*.json", "**/generated/**", "**/CHANGELOG.md", "cli/crates/iohr/tests/data/host-action/vectors/", "cli/crates/iohr/tests/data/ask-claude.jsonl"]

@@ -42,7 +42,7 @@ import {
 } from "./middleware.js";
 import { Pipeline, type SdkRequest, type SdkResponse } from "./pipeline.js";
 import { osArch, runtimeName } from "./platform.js";
-import { parseNoProxy } from "./proxy.js";
+import { isLoopback, parseNoProxy } from "./proxy.js";
 import type { RateLimit } from "./ratelimit.js";
 import {
   type CredentialSource,
@@ -300,9 +300,7 @@ function checkUrl(what: string, raw: string, originOnly: boolean): URL {
   } catch (e) {
     throw new ConfigError(`${what} is not usable: ${describe(e)}`);
   }
-  const host = url.hostname.replace(/^\[|\]$/g, "");
-  const loopback = host === "localhost" || host === "::1" || /^127\./.test(host);
-  if (!(url.protocol === "https:" || (url.protocol === "http:" && loopback))) {
+  if (!(url.protocol === "https:" || (url.protocol === "http:" && isLoopback(url.hostname)))) {
     throw new ConfigError(
       `${what} is not usable: it must use https (plain http only to this machine)`,
     );

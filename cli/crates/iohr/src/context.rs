@@ -1,14 +1,22 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::auth::AuthError;
+use crate::auth::Bearer;
+use crate::auth::Config;
+use crate::auth::Credential;
+use crate::auth::Session as PersonSession;
+use crate::auth::StaticToken;
+use inorbithr::login::Claims;
+use inorbithr::login::EntryKey;
+use inorbithr::login::Kind;
+use inorbithr::login::ProfileName;
+use inorbithr::login::Storage;
+use inorbithr::login::Store;
+use inorbithr::login::StoreError;
 use inorbithr::{
     Attempt, Client, ClientCredentials, ConfigError, Hook, Method, Operation, RawResponse, Secret,
     Token, TokenProvider,
-};
-use iohr_auth::{
-    AuthError, Bearer, Claims, Config, Credential, EntryKey, FileStore, KeyringStore, Kind,
-    ProfileName, QuietStore, Redacted, Session as PersonSession, StaticToken, Storage, Store,
-    StoreError,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -71,11 +79,11 @@ impl Ctx {
     ) -> Result<Arc<dyn Store>, Error> {
         #[cfg(test)]
         OPENED.with(|n| n.set(n.get() + 1));
-        Ok(match (storage, prompts) {
-            (Storage::File, _) => Arc::new(FileStore::new(self.dir.join("secrets"))),
-            (_, Prompts::Allowed) => Arc::new(KeyringStore::open()?),
-            (_, Prompts::Never) => Arc::new(QuietStore::new(Arc::new(KeyringStore::open()?))),
-        })
+        Ok(inorbithr::login::store_for(
+            storage,
+            &self.dir,
+            prompts == Prompts::Never,
+        )?)
     }
 
     /// The profile chosen by `--profile`, `IOHR_PROFILE`, or the default.
@@ -100,7 +108,7 @@ where
     T: Send + 'static,
     F: FnOnce(&dyn Store) -> Result<T, StoreError> + Send + 'static,
 {
-    iohr_auth::off_thread(move || f(store.as_ref()))
+    inorbithr::login::off_thread(move || f(store.as_ref()))
         .await
         .map_err(Error::from)
 }
@@ -125,7 +133,7 @@ impl Credential for AnyCredential {
                     .token()
                     .await
                     .map_err(|e| AuthError::Http(format!("Io's sign-in failed: {e}")))?;
-                Ok(Bearer::new(Redacted::new(token.expose().to_owned())))
+                Ok(Bearer::new(Secret::new(token.expose().to_owned())))
             }
         }
     }
@@ -467,7 +475,7 @@ pub(crate) async fn shared_session(global: &Global, env: &Env) -> Result<Arc<Ses
     use std::hash::{Hash as _, Hasher as _};
     let ctx = Ctx::load(global)?;
     let chosen = run_profile(global, env, &ctx);
-    let secret = |t: Option<&Redacted<String>>| {
+    let secret = |t: Option<&Secret<String>>| {
         t.map(|t| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             t.expose().hash(&mut h);
@@ -530,7 +538,7 @@ async fn session_in(
     let base = global.base_url();
     // A named profile takes `IOHR_TOKEN_<PROFILE>` and nothing else from the environment;
     // the chosen profile falls back to `IOHR_TOKEN` as every command always did.
-    let per_profile: Option<&Redacted<String>> = name.and_then(|n| env.profile_token(n.as_str()));
+    let per_profile: Option<&Secret<String>> = name.and_then(|n| env.profile_token(n.as_str()));
     let standing_in = per_profile.or(if name.is_some() {
         None
     } else {
@@ -578,7 +586,7 @@ async fn session_in(
     )?;
     let (credential, claims) = match profile.kind {
         Kind::Token => {
-            let secret: Option<Redacted<String>> = blocking(store, move |s| s.get(&key)).await?;
+            let secret: Option<Secret<String>> = blocking(store, move |s| s.get(&key)).await?;
             let token = secret.ok_or_else(|| AuthError::NotSignedIn {
                 profile: name.to_string(),
             })?;
@@ -680,9 +688,16 @@ pub(crate) fn account(session: &Session, flag: Option<String>) -> Result<String,
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
 
+    use crate::auth::Config;
     use base64::Engine as _;
     use clap::Parser as _;
-    use iohr_auth::{Config, EntryKey, FileStore, Kind, Profile, Redacted, Storage, Store as _};
+    use inorbithr::Secret;
+    use inorbithr::login::EntryKey;
+    use inorbithr::login::FileStore;
+    use inorbithr::login::Kind;
+    use inorbithr::login::Profile;
+    use inorbithr::login::Storage;
+    use inorbithr::login::Store as _;
 
     use super::{OPENED, shared_session};
     use crate::Env;
@@ -701,7 +716,7 @@ mod tests {
         );
         let key = EntryKey::new("work".parse().unwrap(), "acc_1").unwrap();
         FileStore::new(dir.join("secrets"))
-            .set(&key, &Redacted::new(jwt))
+            .set(&key, &Secret::new(jwt))
             .unwrap();
     }
 
@@ -710,7 +725,7 @@ mod tests {
     fn machine(token: bool) -> (tempfile::TempDir, crate::cli::Global) {
         let dir = tempfile::tempdir().unwrap();
         let mut config = Config::default();
-        let name: iohr_auth::ProfileName = "work".parse().unwrap();
+        let name: inorbithr::login::ProfileName = "work".parse().unwrap();
         config.profiles.insert(
             name.clone(),
             Profile::new(Kind::Token, "acc_1", Storage::File),

@@ -2,7 +2,7 @@
 //! current folder with the question. The question and the answer are never logged, traced or
 //! written by iohr; they go to the agent's argv and the agent's own terminal, nothing else.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::runner::claude;
 
@@ -314,26 +314,6 @@ pub(crate) fn shell_line(program: &str, args: &[String]) -> String {
         .join(" ")
 }
 
-/// The executable `name` on the `PATH` value `path`, if any.
-#[must_use]
-pub(crate) fn find_on_path(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
-    std::env::split_paths(path)
-        .map(|dir| dir.join(name))
-        .find(|p| is_executable(p))
-}
-
-#[cfg(unix)]
-fn is_executable(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt as _;
-    p.metadata()
-        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_executable(p: &Path) -> bool {
-    p.is_file() || p.with_extension("exe").is_file() || p.with_extension("cmd").is_file()
-}
-
 /// The agent to start without being told which (`iohr project init`): the one the config
 /// names, if any, else `claude`, then `codex`, whichever is on `path`. `Ok(None)`: none found.
 ///
@@ -345,11 +325,11 @@ pub(crate) fn detect_agent(
 ) -> Result<Option<(Agent, PathBuf)>, String> {
     if configured.is_some_and(|c| !c.trim().is_empty()) {
         let agent = choose_agent(None, configured)?;
-        return Ok(find_on_path(agent.name(), path).map(|b| (agent, b)));
+        return Ok(crate::paths::find_program(agent.name(), path).map(|b| (agent, b)));
     }
     Ok([Agent::Claude, Agent::Codex]
         .into_iter()
-        .find_map(|a| find_on_path(a.name(), path).map(|b| (a, b))))
+        .find_map(|a| crate::paths::find_program(a.name(), path).map(|b| (a, b))))
 }
 
 /// Where the question goes, said on every surface that shows an answer.

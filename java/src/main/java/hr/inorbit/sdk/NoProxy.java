@@ -36,6 +36,13 @@ final class NoProxy extends ProxySelector {
         this.entries = List.copyOf(entries);
     }
 
+    /** The proxy with its user-info redacted, and the entries. */
+    @Override
+    public String toString() {
+        return "NoProxy[" + (proxy == null ? "none" : Config.redactUserinfo(proxy.toString())) + ", explicit="
+                + explicit + ", " + entries + "]";
+    }
+
     /** The rule the resolved {@code proxy} and {@code no_proxy} settings give. */
     @SuppressWarnings("unchecked")
     static NoProxy of(Map<String, Object> values, String proxySource) {

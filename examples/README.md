@@ -26,6 +26,7 @@ how each language is built and run.
 | `retries`: A 429 with Retry-After, retried | [`retries.rs`](rust/src/bin/retries.rs) | [`retries.ts`](typescript/src/retries.ts) | [`retries`](go/retries/main.go) | [`retries.py`](python/retries.py) | [`Retries.java`](java/src/main/java/example/Retries.java) | [`Retries.cs`](csharp/Calls/Retries.cs) | [`Retries.swift`](swift/Sources/Calls/Retries.swift) |
 | `concurrent-calls`: Several calls at once on one client | [`concurrent-calls.rs`](rust/src/bin/concurrent-calls.rs) | [`concurrent-calls.ts`](typescript/src/concurrent-calls.ts) | [`concurrent-calls`](go/concurrent-calls/main.go) | [`concurrent_calls.py`](python/concurrent_calls.py) | [`ConcurrentCalls.java`](java/src/main/java/example/ConcurrentCalls.java) | [`ConcurrentCalls.cs`](csharp/Calls/ConcurrentCalls.cs) | [`ConcurrentCalls.swift`](swift/Sources/Calls/ConcurrentCalls.swift) |
 | `config-load`: A client from load, with where each setting came from | [`config-load.rs`](rust/src/bin/config-load.rs) | [`config-load.ts`](typescript/src/config-load.ts) | [`config-load`](go/config-load/main.go) | [`config_load.py`](python/config_load.py) | [`ConfigLoad.java`](java/src/main/java/example/ConfigLoad.java) | [`ConfigLoad.cs`](csharp/Calls/ConfigLoad.cs) | [`ConfigLoad.swift`](swift/Sources/Calls/ConfigLoad.swift) |
+| `login-device`: A person signs in with the device flow and calls as that person (Rust, the login feature) | [`login-device.rs`](rust/src/bin/login-device.rs) | none | none | none | none | none | none |
 
 Swift builds only on a Mac, so the release workflow runs all of it on a macOS runner and
 attests the commit itself (`examples-attest` in `release.yml`, docs/releasing.md). By hand, a
@@ -39,6 +40,7 @@ bumps the `inorbithr` version in it otherwise, and a dirty tree fails the gate).
 Not shown yet:
 
 - swift / `stream-socket`: the Swift SDK has no WebSocket stream transport yet
+- every language but Rust / `login-device`: the `login` feature is Rust-only until the other SDKs ship theirs (RFC 0231). The check drives the device flow against the replay server, because the check path runs programs with environment variables and no browser; the browser flow is covered by the conformance cases
 
 ## Earlier examples
 

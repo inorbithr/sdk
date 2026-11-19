@@ -358,6 +358,11 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo nextest run --locked --all-features
 cargo test --locked --doc --all-features
 cargo deny check
+# The credential store lives in the Rust SDK's login feature (RFC 0231). Where a real store
+# must be tested (IOHR_TEST_REQUIRE_STORE: macOS and Windows CI, SR-24), run it there.
+if [ -n "${IOHR_TEST_REQUIRE_STORE:-}" ]; then
+  (cd ../rust && cargo nextest run --locked --features login -E 'test(os_credential_store)')
+fi
 """
 
 [tasks."cli:themes"]
@@ -385,8 +390,8 @@ run = "cargo deny check advisories"
 
 [tasks."cli:keyring"]
 shell = "bash -e -o pipefail -c"
-description = "Command line, Linux: the credential-store test against a real Secret Service in a private D-Bus session"
-dir = "cli"
+description = "Command line, Linux: the credential-store test (Rust SDK, login feature) against a real Secret Service in a private D-Bus session"
+dir = "rust"
 run = """
 command -v dbus-run-session >/dev/null && command -v gnome-keyring-daemon >/dev/null || {
   echo "cli:keyring: needs dbus-run-session and gnome-keyring-daemon" >&2; exit 1; }
@@ -395,14 +400,14 @@ keyrings=$(mktemp -d)
 trap 'rm -rf "$keyrings"' EXIT
 dbus-run-session -- bash -e -o pipefail -c "
   printf iohr-test | XDG_DATA_HOME='$keyrings' gnome-keyring-daemon --unlock --components=secrets >/dev/null
-  IOHR_TEST_REQUIRE_STORE=1 cargo nextest run --locked -p iohr-auth -E 'test(os_credential_store)'
+  IOHR_TEST_REQUIRE_STORE=1 cargo nextest run --locked --features login -E 'test(os_credential_store)'
 "
 """
 
 [tasks."cli:hydra"]
 shell = "bash -e -o pipefail -c"
 description = "Command line: browser and device sign-in, refresh and revocation against a real Ory Hydra (the version the platform runs), in Docker"
-dir = "cli"
+dir = "rust"
 run = """
 # The version core pins in devops/k8s/auth/hydra.yaml, by digest.
 image="oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9"
@@ -421,7 +426,7 @@ docker run -d --name "$name" -p "127.0.0.1:$port:4444" -p "127.0.0.1:$aport:4445
   "$image" serve all --dev >/dev/null
 for _ in $(seq 1 60); do curl -fs "$public/health/ready" >/dev/null && break; sleep 1; done
 IOHR_TEST_REQUIRE_HYDRA=1 IOHR_TEST_HYDRA="$public" IOHR_TEST_HYDRA_ADMIN="$admin" \\
-  cargo nextest run --locked -p iohr-auth -E 'binary(hydra)'
+  cargo nextest run --locked --features login -E 'binary(login_hydra)'
 """
 
 [tasks."cli:compile-test"]
@@ -472,7 +477,7 @@ for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-
   cargo cyclonedx --format json --manifest-path crates/iohr/Cargo.toml --target "$target" --override-filename "iohr-$version-$target.cdx"
   mv "crates/iohr/iohr-$version-$target.cdx.json" ../dist/cli/
   # cargo-cyclonedx writes one for every workspace member; only the binary's is released.
-  rm -f crates/iohr-auth/*.cdx.json crates/iohr-openapi/*.cdx.json crates/iohr-codegen/*.cdx.json
+  rm -f crates/iohr-openapi/*.cdx.json crates/iohr-codegen/*.cdx.json
   cyclonedx validate --input-file "../dist/cli/iohr-$version-$target.cdx.json" --input-format json --fail-on-errors
 done
 """
@@ -560,7 +565,7 @@ run = "bash cli/release/winget.sh"
 [tasks."cli:sbom"]
 dir = "cli"
 shell = "bash -e -o pipefail -c"
-run = "mkdir -p ../dist/sbom && cargo cyclonedx --format json --manifest-path crates/iohr/Cargo.toml --override-filename cli.cdx && mv crates/iohr/cli.cdx.json ../dist/sbom/ && rm -f crates/iohr-auth/*.cdx.json crates/iohr-openapi/*.cdx.json crates/iohr-codegen/*.cdx.json"
+run = "mkdir -p ../dist/sbom && cargo cyclonedx --format json --manifest-path crates/iohr/Cargo.toml --override-filename cli.cdx && mv crates/iohr/cli.cdx.json ../dist/sbom/ && rm -f crates/iohr-openapi/*.cdx.json crates/iohr-codegen/*.cdx.json"
 
 # ---------------------------------------------------------------- TypeScript
 

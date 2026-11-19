@@ -1,0 +1,21 @@
+[package]
+name = "@@NAME@@"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "@@LICENSE@@"
+description = "@@DESCRIPTION@@"
+publish = false
+
+# rmcp is the official Rust SDK for the Model Context Protocol, pinned to one exact version.
+[dependencies]
+rmcp = { version = "=3.9.0", features = ["server", "client", "macros", "transport-io", "transport-child-process"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints.clippy]
+unwrap_used = "deny"
