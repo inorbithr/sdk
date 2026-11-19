@@ -511,11 +511,10 @@ fn blank_keeps_a_small_floor_and_no_ci_unless_asked() {
 
 /// One row of the table: init, then that template's own check. The smoke test runs inside init
 /// (`done:` line), and when the toolchain is here the project's own check passes. A row whose
-/// toolchain is not on the PATH is skipped, said on stderr.
-fn check_variant(template: &str, lang: &str, needs: &[&str]) {
+/// toolchain is not on the PATH is skipped; the reason comes back for the test to print.
+fn check_variant(template: &str, lang: &str, needs: &[&str]) -> Option<String> {
     if !needs.iter().all(|p| toolchain_runs(p)) {
-        eprintln!("{template}/{lang}: skipped, {needs:?} not here");
-        return;
+        return Some(format!("{template}/{lang}: skipped, {needs:?} not here"));
     }
     // An MCP server's smoke installs the official SDK from its registry (a cold cache in
     // this test's private home), so it needs the network; without it the row is skipped.
@@ -523,8 +522,9 @@ fn check_variant(template: &str, lang: &str, needs: &[&str]) {
     let restores =
         template == "mcp-server" || (template == "evals" && matches!(lang, "csharp" | "dart"));
     if restores && !registry_reachable(lang) {
-        eprintln!("{template}/{lang}: skipped, its package registry is not reachable");
-        return;
+        return Some(format!(
+            "{template}/{lang}: skipped, its package registry is not reachable"
+        ));
     }
     let (_h, dir, out) = init(template, Some(lang), true, &[]);
     assert!(out.status.success(), "{template}/{lang}: {}", text(&out));
@@ -534,6 +534,7 @@ fn check_variant(template: &str, lang: &str, needs: &[&str]) {
         text(&out)
     );
     assert!(dir.join("README.md").is_file(), "{template}/{lang}");
+    None
 }
 
 /// Every live variant, one test each (nextest schedules tests, not the rows of one loop, so the
@@ -546,7 +547,9 @@ macro_rules! every_live_variant {
             $(
                 #[test]
                 fn $name() {
-                    check_variant($template, $lang, $needs);
+                    if let Some(why) = check_variant($template, $lang, $needs) {
+                        eprintln!("{why}");
+                    }
                 }
             )+
         }

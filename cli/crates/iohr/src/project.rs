@@ -1537,7 +1537,9 @@ mod tests {
                 $(
                     #[test]
                     fn $id() {
-                        $check(stringify!($id));
+                        if let Some(why) = $check(stringify!($id)) {
+                            eprintln!("{why}");
+                        }
                     }
                 )+
             }
@@ -1583,7 +1585,7 @@ mod tests {
         }
     }
 
-    fn blank_variant_is_plain(variant: &str) {
+    fn blank_variant_is_plain(variant: &str) -> Option<String> {
         let tpl =
             template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
         let v = tpl.variant(variant).unwrap();
@@ -1613,18 +1615,16 @@ mod tests {
         // The Rust demo talks to the host over a unix socket (`std::os::unix`), so it
         // cannot be built on Windows; the macOS service it stands for is not there either.
         if cfg!(windows) && v.id == "rust" {
-            eprintln!("rust: the demo uses a unix socket: not run on Windows");
-            return;
+            return Some("rust: the demo uses a unix socket: not run on Windows".into());
         }
         let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
         if !missing.is_empty() {
-            eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
-            return;
+            return Some(format!("{}: {missing:?} not on this PATH: not run", v.id));
         }
         // A documents project has nothing to run: init drops its Smoke step.
         if v.is_docs_only() {
             assert!(runner.as_ref().is_some_and(|r| r.test.is_empty()), "docs");
-            return;
+            return None;
         }
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("my-shop");
@@ -1638,6 +1638,7 @@ mod tests {
             "{}",
             v.id
         );
+        None
     }
 
     #[test]
@@ -1702,20 +1703,18 @@ mod tests {
     }
 
     /// Every live language of the demo: its files render, its manifest passes the lint, its
-    /// smoke test reads one heartbeat, and its own self-test passes. Skipped (said on stderr)
+    /// smoke test reads one heartbeat, and its own self-test passes. Skipped (the reason returned)
     /// when the toolchain is not on this machine.
-    fn demo_variant_runs(variant: &str) {
+    fn demo_variant_runs(variant: &str) -> Option<String> {
         let tpl =
             template::load(&Spec::Id("demo".into()), Path::new("/no-such-iohr-root")).unwrap();
         let v = tpl.variant(variant).unwrap();
         if cfg!(windows) && v.id == "rust" {
-            eprintln!("rust: the demo uses a unix socket: not run on Windows");
-            return;
+            return Some("rust: the demo uses a unix socket: not run on Windows".into());
         }
         let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
         if !missing.is_empty() {
-            eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
-            return;
+            return Some(format!("{}: {missing:?} not on this PATH: not run", v.id));
         }
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("my-shop");
@@ -1801,5 +1800,6 @@ mod tests {
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
+        None
     }
 }
