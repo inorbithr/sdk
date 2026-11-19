@@ -559,6 +559,10 @@ fn reader<R: std::io::Read + Send + 'static>(mut from: R) -> mpsc::Receiver<Vec<
         let mut buf = vec![0u8; 16 * 1024];
         loop {
             match from.read(&mut buf) {
+                // A read cut short by a signal (macOS returns EINTR to a terminal read when the
+                // process is stopped and continued) is retried: ending here would leave the panel
+                // deaf to every later key.
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     if tx.blocking_send(buf[..n].to_vec()).is_err() {
@@ -1384,7 +1388,12 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
                     Some(t) => tokio::time::sleep_until(t).await,
                     None => std::future::pending().await,
                 }
-            } => session.esc_released(),
+            } => match from_user.try_recv() {
+                // A key read while the hold ran out comes first: select picks among ready
+                // branches at random, and an `h` already waiting is still Option+h.
+                Ok(bytes) => session.user_input(&bytes),
+                Err(_) => session.esc_released(),
+            },
             _ = winch.recv() => session.resized(),
             _ = beat.tick(), if session.proxy.chat.animating() => session.chat_tick(),
             _ = tick.tick(), if !config.stub => session.refresh(),
@@ -1537,6 +1546,30 @@ mod tests {
             parser.process(b);
         }
         parser.screen().rows(0, cols).collect()
+    }
+
+    /// A terminal read that a signal cut short, then a key, then the end.
+    struct Interrupted(u8);
+
+    impl std::io::Read for Interrupted {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.0 += 1;
+            match self.0 {
+                1 => Err(std::io::ErrorKind::Interrupted.into()),
+                2 => {
+                    buf[0] = b'h';
+                    Ok(1)
+                }
+                _ => Ok(0),
+            }
+        }
+    }
+
+    #[test]
+    fn a_read_a_signal_cut_short_does_not_end_the_keys() {
+        let mut rx = reader(Interrupted(0));
+        assert_eq!(rx.blocking_recv(), Some(b"h".to_vec()));
+        assert_eq!(rx.blocking_recv(), None);
     }
 
     #[test]
