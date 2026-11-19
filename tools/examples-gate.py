@@ -63,8 +63,10 @@ def merge(files: list[dict], head: str) -> tuple[dict | None, str | None]:
 
 
 def languages() -> set[str]:
-    """The languages the runner runs: examples/examples.toml, the same table run-examples.py reads."""
-    return set(tomllib.loads((ROOT / "examples/examples.toml").read_text())["language"])
+    """What the runner runs: examples/examples.toml, the same file run-examples.py reads. The
+    languages, and the extensions (each one needs a pass of its self-test under its own name)."""
+    m = tomllib.loads((ROOT / "examples/examples.toml").read_text())
+    return set(m["language"]) | set(m.get("extension", {}))
 
 
 def repo() -> str:
