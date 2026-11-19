@@ -24,5 +24,6 @@ Format: Status, Context, Decision, Consequences, Sources. Keep each under a page
 | [0015](0015-configuration-and-middleware.md) | Configuration, credentials and the middleware pipeline | accepted |
 | [0016](0016-swift.md) | Swift: the package at the repository root, a runtime ahead of its parity | proposed |
 | [0017](0017-c.md) | C: a pull transport the caller can replace, our own JSON reader, one arena per answer | proposed |
+| [0018](0018-runner-host-rules.md) | The runner obeys the build host's rules | accepted |
 | [0019](0019-built-in-roles-inherit-and-check-before-import.md) | Built-in roles: one root they inherit, one text limit, a check before import | proposed |
 | [0020](0020-roles-gates-base-pack-and-a-stack.md) | Built-in roles: gates in the role, the base as a pack, a project's whole stack | proposed |
