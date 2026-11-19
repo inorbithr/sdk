@@ -487,11 +487,14 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 declared: Some(declared),
                 build_floor: build_floor(&set),
                 report_host: true,
-                gate: Some(GateCheck {
-                    // The pack names the checkout relative to the turns' working directory.
-                    workdir: exec.workdir.clone(),
-                    ..GateCheck::default()
-                }),
+                gate: Some(
+                    GateCheck {
+                        // The pack names the checkout relative to the turns' working directory.
+                        workdir: exec.workdir.clone(),
+                        ..GateCheck::default()
+                    }
+                    .with_profile(s.profile.as_ref().map(ToString::to_string).as_deref()),
+                ),
                 // Job leases get their own checkout, `checkouts/<job_id>` on `job/<id>`,
                 // and a replied turn's pull request, through the host's git and `gh`.
                 workspaces: Some(Arc::new(Workspaces::for_runner(exec.workdir.clone()))),
