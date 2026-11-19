@@ -44,6 +44,12 @@ echo "ci:changed: ${#files[@]} changed file(s) since $(git rev-parse --short "$b
 echo "ci:changed: ${tasks[*]}"
 [ "$dry" = 1 ] && exit 0
 
+# The gate record (PRD 0221): the pass counts for HEAD's tree only when the checkout is
+# clean now and still clean at the same tree after the last step. A run against another
+# base checks a different set of steps, so it leaves no record.
+start=${EPOCHREALTIME:-$(date +%s)}
+tree=$(python3 tools/gate-record.py tree)
+
 # Build the command line once for every <lang>:gen instead of once per task.
 if printf '%s\n' "${langs[@]}" | grep -qv '^dart$' && [ -z "${IOHR_BIN:-}" ]; then
   cargo build -q --manifest-path cli/Cargo.toml -p iohr
@@ -66,3 +72,8 @@ for task in "${tasks[@]}"; do
   esac
 done
 echo "ci:changed: all ${#tasks[@]} step(s) passed"
+if [ -n "${CI_CHANGED_BASE:-}" ] && [ "$CI_CHANGED_BASE" != origin/main ]; then
+  echo "ci:changed: no gate record: CI_CHANGED_BASE=$CI_CHANGED_BASE is not origin/main"
+else
+  python3 tools/gate-record.py write "$tree" "$start"
+fi
