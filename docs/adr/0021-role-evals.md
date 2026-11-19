@@ -100,8 +100,7 @@ with this ADR are all synthetic.
 
 ## Sources
 
-- ADR 0019, built-in roles (this repository, `docs/adr/0018-built-in-roles-inherit-and-check-before-import.md`
-  until its renumbering lands).
+- [ADR 0019](0019-built-in-roles-inherit-and-check-before-import.md), built-in roles.
 - `cli/crates/iohr/templates/project/evals/thresholds.toml`, the template's bar format
   (platform PRD 0088.1, ADR 0221).
 - `cli/crates/iohr/tests/roles_runtime.rs`, the fake agent this harness's recorder follows.
