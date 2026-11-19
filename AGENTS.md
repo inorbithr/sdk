@@ -16,7 +16,7 @@ agent and for people. Language-specific rules live in each language directory's 
 | `cli/` | The `iohr` command line: a Cargo workspace of its own (ADR 0009), with `cli/AGENTS.md`. |
 | `ui/` | The web UI `iohr ui` serves (RFC 0217): a private Vite and React package, not published. The shell frame layer moves here from the Mac app under ADR 0230. |
 | `examples/<lang>/` | Small programs that compile in CI and are quoted by the READMEs. |
-| `docs/` | `design.md` (cross-language API rules), `adr/` (decisions), `releasing.md`, `style.md`. |
+| `docs/` | `design.md` (cross-language API rules), `adr/` (decisions), `studies/` (research before a decision), `releasing.md`, `style.md`. |
 | `tools/` | Repository scripts used by `mise` tasks and hooks. |
 
 The `iohr` guides live on the developer site (developers.inorbit.hr, pages `tools/iohr`,
@@ -111,7 +111,7 @@ A task for a language whose package does not exist yet prints a skip line and ex
 - Cross-language API rules: `docs/design.md`
 - Configuration, credentials and the middleware pipeline: `docs/config.md` (recipes in
   `docs/recipes.md`)
-- Why things are the way they are: `docs/adr/`
+- Why things are the way they are: `docs/adr/`; research behind a plan: `docs/studies/`
 - Writing style for READMEs, docs and error messages: `docs/style.md`
 - Releasing: `docs/releasing.md`
 - Contract quirks and what we asked the platform to fix: `spec/README.md`
