@@ -1526,64 +1526,118 @@ mod tests {
         }
     }
 
+    /// One test per live variant of `blank`, so the slow smoke builds run in parallel (nextest
+    /// schedules tests, not the rows of one loop). The ids here are guarded against the
+    /// template's live variants by `every_blank_variant_has_its_own_test`.
+    macro_rules! variant_tests {
+        ($check:ident, $mod_name:ident, [$($id:ident),+ $(,)?]) => {
+            mod $mod_name {
+                use super::*;
+                pub(super) const IDS: &[&str] = &[$(stringify!($id)),+];
+                $(
+                    #[test]
+                    fn $id() {
+                        $check(stringify!($id));
+                    }
+                )+
+            }
+        };
+    }
+
+    variant_tests!(
+        blank_variant_is_plain,
+        the_blank_template_is_a_plain_project_and_its_smoke_test_is_its_own_test,
+        [
+            python, typescript, go, rust, java, csharp, dart, swift, docs
+        ]
+    );
+    variant_tests!(
+        demo_variant_runs,
+        every_live_demo_language_renders_runs_and_passes_its_own_test,
+        [python, typescript, go, rust, java, csharp, dart, swift]
+    );
+
+    /// A new live variant of `blank` or `demo` fails here until it gets its test above.
     #[test]
-    fn the_blank_template_is_a_plain_project_and_its_smoke_test_is_its_own_test() {
+    fn every_blank_and_demo_variant_has_its_own_test() {
+        for (id, listed) in [
+            (
+                "blank",
+                the_blank_template_is_a_plain_project_and_its_smoke_test_is_its_own_test::IDS,
+            ),
+            (
+                "demo",
+                every_live_demo_language_renders_runs_and_passes_its_own_test::IDS,
+            ),
+        ] {
+            let tpl =
+                template::load(&Spec::Id(id.into()), Path::new("/no-such-iohr-root")).unwrap();
+            let mut live: Vec<String> = tpl.live_variants().iter().map(|v| v.id.clone()).collect();
+            let mut have: Vec<String> = listed.iter().map(|s| (*s).to_owned()).collect();
+            live.sort();
+            have.sort();
+            assert_eq!(
+                live, have,
+                "{id}: live variants and per-variant tests differ"
+            );
+        }
+    }
+
+    fn blank_variant_is_plain(variant: &str) {
         let tpl =
             template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
-        assert_eq!(tpl.live_variants().len(), 9);
-        for v in tpl.live_variants() {
-            let (files, runner) = rendered_in("blank", "my-shop", &v.id);
-            let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
-            for gone in ["extension.toml", "panel/index.html"] {
-                assert!(!paths.contains(&gone), "{}: {gone}", v.id);
-            }
-            for (p, x) in &files {
-                assert!(!p.contains("@@") && !x.contains("@@"), "{}: {p}", v.id);
-                let low = x.to_lowercase();
-                assert!(
-                    !low.contains("macos service") && !low.contains("heartbeat"),
-                    "{}: {p} talks about a service",
-                    v.id
-                );
-            }
-            let get = |p: &str| files.iter().find(|(f, _)| f == p).map(|(_, t)| t.as_str());
-            let rec = get("inorbit.toml").unwrap();
-            assert!(rec.contains("template = \"blank\""), "{}", v.id);
-            assert!(rec.contains("kind = \"project\""), "{}", v.id);
-            assert!(!get(".gitignore").unwrap().contains(".inorbit"), "{}", v.id);
-            let prompt = tpl.meta.agent_prompt.clone().unwrap().to_lowercase();
-            for word in ["macos", "service", "panel", "extension.toml"] {
-                assert!(!prompt.contains(word), "the prompt says {word}");
-            }
-            // The Rust demo talks to the host over a unix socket (`std::os::unix`), so it
-            // cannot be built on Windows; the macOS service it stands for is not there either.
-            if cfg!(windows) && v.id == "rust" {
-                eprintln!("rust: the demo uses a unix socket: not run on Windows");
-                continue;
-            }
-            let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
-            if !missing.is_empty() {
-                eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
-                continue;
-            }
-            // A documents project has nothing to run: init drops its Smoke step.
-            if v.is_docs_only() {
-                assert!(runner.as_ref().is_some_and(|r| r.test.is_empty()), "docs");
-                continue;
-            }
-            let tmp = tempfile::tempdir().unwrap();
-            let dir = tmp.path().join("my-shop");
-            scaffold(&dir, &files, &[], "blank").unwrap();
-            let (state, _) =
-                register_step(&dir, &tmp.path().join("projects"), "my-shop", "blank", "").unwrap();
-            let s = smoke(&dir, &state, "my-shop", runner.as_ref());
-            assert!(s.ok, "{}: {} / {}", v.id, s.said, s.output);
+        let v = tpl.variant(variant).unwrap();
+        let (files, runner) = rendered_in("blank", "my-shop", &v.id);
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        for gone in ["extension.toml", "panel/index.html"] {
+            assert!(!paths.contains(&gone), "{}: {gone}", v.id);
+        }
+        for (p, x) in &files {
+            assert!(!p.contains("@@") && !x.contains("@@"), "{}: {p}", v.id);
+            let low = x.to_lowercase();
             assert!(
-                s.heartbeat.is_none() && s.said.contains("passed"),
-                "{}",
+                !low.contains("macos service") && !low.contains("heartbeat"),
+                "{}: {p} talks about a service",
                 v.id
             );
         }
+        let get = |p: &str| files.iter().find(|(f, _)| f == p).map(|(_, t)| t.as_str());
+        let rec = get("inorbit.toml").unwrap();
+        assert!(rec.contains("template = \"blank\""), "{}", v.id);
+        assert!(rec.contains("kind = \"project\""), "{}", v.id);
+        assert!(!get(".gitignore").unwrap().contains(".inorbit"), "{}", v.id);
+        let prompt = tpl.meta.agent_prompt.clone().unwrap().to_lowercase();
+        for word in ["macos", "service", "panel", "extension.toml"] {
+            assert!(!prompt.contains(word), "the prompt says {word}");
+        }
+        // The Rust demo talks to the host over a unix socket (`std::os::unix`), so it
+        // cannot be built on Windows; the macOS service it stands for is not there either.
+        if cfg!(windows) && v.id == "rust" {
+            eprintln!("rust: the demo uses a unix socket: not run on Windows");
+            return;
+        }
+        let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
+        if !missing.is_empty() {
+            eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
+            return;
+        }
+        // A documents project has nothing to run: init drops its Smoke step.
+        if v.is_docs_only() {
+            assert!(runner.as_ref().is_some_and(|r| r.test.is_empty()), "docs");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("my-shop");
+        scaffold(&dir, &files, &[], "blank").unwrap();
+        let (state, _) =
+            register_step(&dir, &tmp.path().join("projects"), "my-shop", "blank", "").unwrap();
+        let s = smoke(&dir, &state, "my-shop", runner.as_ref());
+        assert!(s.ok, "{}: {} / {}", v.id, s.said, s.output);
+        assert!(
+            s.heartbeat.is_none() && s.said.contains("passed"),
+            "{}",
+            v.id
+        );
     }
 
     #[test]
@@ -1650,48 +1704,62 @@ mod tests {
     /// Every live language of the demo: its files render, its manifest passes the lint, its
     /// smoke test reads one heartbeat, and its own self-test passes. Skipped (said on stderr)
     /// when the toolchain is not on this machine.
-    #[test]
-    fn every_live_demo_language_renders_runs_and_passes_its_own_test() {
+    fn demo_variant_runs(variant: &str) {
         let tpl =
             template::load(&Spec::Id("demo".into()), Path::new("/no-such-iohr-root")).unwrap();
-        for v in tpl.live_variants() {
-            if cfg!(windows) && v.id == "rust" {
-                eprintln!("rust: the demo uses a unix socket: not run on Windows");
-                continue;
-            }
-            let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
-            if !missing.is_empty() {
-                eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
-                continue;
-            }
-            let tmp = tempfile::tempdir().unwrap();
-            let dir = tmp.path().join("my-shop");
-            let (files, runner) = rendered_in("demo", "my-shop", &v.id);
-            assert!(check_manifest(&files).is_ok(), "{}", v.id);
-            for (p, x) in &files {
-                assert!(!p.contains("@@") && !x.contains("@@"), "{}: {p}", v.id);
-            }
-            let tv = tpl.with_variant(&v.id).unwrap();
-            let programs = template::programs(&tv, &[]);
-            scaffold(&dir, &files, &programs, "demo").unwrap();
-            let st = tmp.path().join("projects");
-            let (state, _) = register_step(&dir, &st, "my-shop", "demo", "").unwrap();
-            let said = smoke(&dir, &state, "my-shop", runner.as_ref());
-            assert!(said.ok, "{}: {} / {}", v.id, said.said, said.output);
-            let b = said.heartbeat.unwrap_or_else(|| {
-                panic!("{}: no heartbeat: {} / {}", v.id, said.said, said.output)
-            });
-            assert_eq!(b["id"], "local/my-shop", "{}", v.id);
-            assert_eq!(b["beats"], 1, "{}", v.id);
-            assert_eq!(b["token"], "refused", "{}", v.id);
-            // The project's own test, the way its README says.
-            std::fs::create_dir_all(tmp.path().join("tstate")).unwrap();
-            std::fs::create_dir_all(tmp.path().join("tcache")).unwrap();
-            // The rendered test command (`@@MODULE@@` filled in), with its paths expanded.
-            let test: Vec<String> = runner
-                .as_ref()
-                .unwrap()
-                .test
+        let v = tpl.variant(variant).unwrap();
+        if cfg!(windows) && v.id == "rust" {
+            eprintln!("rust: the demo uses a unix socket: not run on Windows");
+            return;
+        }
+        let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
+        if !missing.is_empty() {
+            eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("my-shop");
+        let (files, runner) = rendered_in("demo", "my-shop", &v.id);
+        assert!(check_manifest(&files).is_ok(), "{}", v.id);
+        for (p, x) in &files {
+            assert!(!p.contains("@@") && !x.contains("@@"), "{}: {p}", v.id);
+        }
+        let tv = tpl.with_variant(&v.id).unwrap();
+        let programs = template::programs(&tv, &[]);
+        scaffold(&dir, &files, &programs, "demo").unwrap();
+        let st = tmp.path().join("projects");
+        let (state, _) = register_step(&dir, &st, "my-shop", "demo", "").unwrap();
+        let said = smoke(&dir, &state, "my-shop", runner.as_ref());
+        assert!(said.ok, "{}: {} / {}", v.id, said.said, said.output);
+        let b = said
+            .heartbeat
+            .unwrap_or_else(|| panic!("{}: no heartbeat: {} / {}", v.id, said.said, said.output));
+        assert_eq!(b["id"], "local/my-shop", "{}", v.id);
+        assert_eq!(b["beats"], 1, "{}", v.id);
+        assert_eq!(b["token"], "refused", "{}", v.id);
+        // The project's own test, the way its README says.
+        std::fs::create_dir_all(tmp.path().join("tstate")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("tcache")).unwrap();
+        // The rendered test command (`@@MODULE@@` filled in), with its paths expanded.
+        let test: Vec<String> = runner
+            .as_ref()
+            .unwrap()
+            .test
+            .iter()
+            .map(|w| {
+                paths_in(
+                    w,
+                    &dir,
+                    &tmp.path().join("tstate"),
+                    &tmp.path().join("tcache"),
+                )
+            })
+            .collect();
+        let (prog, args) = test.split_first().unwrap();
+        // A compiled language builds first, into the same cache, the way its README says.
+        let rt = runner.as_ref().unwrap();
+        if let Some((bp, bargs)) = rt.build.split_first() {
+            let bargs: Vec<String> = bargs
                 .iter()
                 .map(|w| {
                     paths_in(
@@ -1702,52 +1770,36 @@ mod tests {
                     )
                 })
                 .collect();
-            let (prog, args) = test.split_first().unwrap();
-            // A compiled language builds first, into the same cache, the way its README says.
-            let rt = runner.as_ref().unwrap();
-            if let Some((bp, bargs)) = rt.build.split_first() {
-                let bargs: Vec<String> = bargs
-                    .iter()
-                    .map(|w| {
-                        paths_in(
-                            w,
-                            &dir,
-                            &tmp.path().join("tstate"),
-                            &tmp.path().join("tcache"),
-                        )
-                    })
-                    .collect();
-                let built = Command::new(bp)
-                    .args(&bargs)
-                    .current_dir(&dir)
-                    .env("CARGO_TARGET_DIR", tmp.path().join("tt"))
-                    .output()
-                    .unwrap();
-                assert!(
-                    built.status.success(),
-                    "{} build: {}{}",
-                    v.id,
-                    String::from_utf8_lossy(&built.stdout),
-                    String::from_utf8_lossy(&built.stderr)
-                );
-            }
-            let out = Command::new(prog)
-                .args(args)
+            let built = Command::new(bp)
+                .args(&bargs)
                 .current_dir(&dir)
                 .env("CARGO_TARGET_DIR", tmp.path().join("tt"))
-                .env("STATE", tmp.path().join("tstate"))
-                .env("CACHE", tmp.path().join("tcache"))
-                .env("PYTHONDONTWRITEBYTECODE", "1")
-                .env("PYTHONPATH", dir.join("src"))
                 .output()
                 .unwrap();
             assert!(
-                out.status.success(),
-                "{} self-test: {}{}",
+                built.status.success(),
+                "{} build: {}{}",
                 v.id,
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
+                String::from_utf8_lossy(&built.stdout),
+                String::from_utf8_lossy(&built.stderr)
             );
         }
+        let out = Command::new(prog)
+            .args(args)
+            .current_dir(&dir)
+            .env("CARGO_TARGET_DIR", tmp.path().join("tt"))
+            .env("STATE", tmp.path().join("tstate"))
+            .env("CACHE", tmp.path().join("tcache"))
+            .env("PYTHONDONTWRITEBYTECODE", "1")
+            .env("PYTHONPATH", dir.join("src"))
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{} self-test: {}{}",
+            v.id,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 }
