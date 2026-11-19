@@ -139,7 +139,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: "go golangci-lint python uv typos actionlint zizmor osv-scanner shellcheck go:github.com/oasdiff/oasdiff"
       - run: mise run repo:check
@@ -161,7 +161,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: "rust go"
       - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
@@ -204,7 +204,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: >-
             go golangci-lint go:golang.org/x/exp/cmd/gorelease go:golang.org/x/vuln/cmd/govulncheck
@@ -254,7 +254,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: >-
             rust cargo-binstall cargo:cargo-nextest cargo:cargo-semver-checks cargo:cargo-hack cargo-deny
@@ -305,7 +305,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: >-
             node pnpm biome
@@ -356,7 +356,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: >-
             python uv
@@ -407,7 +407,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: >-
             java maven
@@ -454,7 +454,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           # Rust on every cell: Linux for the compile test, the others to build iohr.
           install_args: >-
@@ -493,7 +493,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: "rust go cargo-binstall cargo:cargo-nextest"
       - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
@@ -548,7 +548,7 @@ jobs:
         rust: ["1.94", "1.99.0"]
         # Windows and macOS run wherever the job runs (cli/**, rust/**, spec/**, mise.toml or this
         # workflow changed, or a full run), so a platform break fails the pull request, not the
-        # merge queue. The init smoke test of every template (tests/templates.rs) is in cli:check.
+        # merge queue. The init smoke test of every template (tests/templates.rs) is in cli:test.
         include:
           - { os: windows-latest, rust: "1.99.0" }
           - { os: macos-latest, rust: "1.99.0" }
@@ -557,19 +557,21 @@ jobs:
       # macOS and Windows runners have a credential store: its test must run, not skip
       # (SR-24). Linux gets one in the cli:keyring step.
       IOHR_TEST_REQUIRE_STORE: ${{ matrix.os != 'ubuntu-latest' && '1' || '' }}
+      # Line tables keep file:line in panics and backtraces; full debuginfo only cost link and
+      # build time. Local profiles are unchanged.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          install_args: "rust cargo-binstall cargo:cargo-nextest cargo-deny shellcheck dotnet"
+          install_args: "rust cargo-binstall cargo:cargo-nextest shellcheck dotnet"
       - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
           workspaces: cli
           key: ${{ matrix.rust }}
-      # MISE_RUST_VERSION overrides the version and drops the components mise.toml asks for.
-      - run: rustup component add rustfmt clippy
       # The panel's pty tests (tests/panel_live.rs) run a real zsh: the panel is a zsh feature,
       # and the runner image has none. macOS ships one.
       - if: runner.os == 'Linux'
@@ -577,8 +579,8 @@ jobs:
         timeout-minutes: 10
         with:
           packages: zsh
-      - run: mise run cli:check
-      - run: mise run cli:audit
+      # fmt, clippy and cargo-deny (advisories included) run once, in cli-lint.
+      - run: mise run cli:test
       # A generated surface builds against rust/ and the wrong profile is refused.
       - if: runner.os == 'Linux' && matrix.rust != '1.94'
         run: mise run cli:compile-test
@@ -596,6 +598,33 @@ jobs:
       - if: runner.os == 'Linux' && matrix.rust != '1.94'
         run: mise run cli:hydra
 
+  # fmt, clippy and cargo-deny once, on one toolchain: they check the source, not the platform.
+  # The `cli` legs run the tests. Together they are `mise run cli:check`.
+  cli-lint:
+    name: cli lint
+    needs: changes
+    if: needs.changes.outputs.cli == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      MISE_RUST_VERSION: "1.99.0"
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          install_args: "rust cargo-deny"
+      - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
+        with:
+          workspaces: cli
+          key: lint-1.99.0
+      # MISE_RUST_VERSION overrides the version and drops the components mise.toml asks for.
+      - run: rustup component add rustfmt clippy
+      - run: mise run cli:lint
+
   # The web UI package's checks, run through the `iohr ui check` verb a developer runs.
   ui:
     name: ui
@@ -608,7 +637,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: node pnpm biome
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -631,7 +660,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: "go rust node pnpm python uv dotnet java maven"
       - run: mise run examples:check
@@ -651,7 +680,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: dart
       - run: mise run dart:gen && git diff --exit-code -- dart
@@ -660,7 +689,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [repo, tools, go, rust, ts, py, java, csharp, swift, swift-linux, dart, cli, ui, examples]
+    needs: [repo, tools, go, rust, ts, py, java, csharp, swift, swift-linux, dart, cli, cli-lint, ui, examples]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
