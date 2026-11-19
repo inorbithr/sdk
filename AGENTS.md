@@ -46,7 +46,9 @@ release carries them.
 once, then:
 
 - `mise run ci:changed`: what CI runs for your changes since `origin/main` (same path
-  rules). Run it before a push and before saying a change is done.
+  rules). Run it before a push and before saying a change is done. A pass from a clean
+  checkout (everything committed) leaves the gate record the platform's PR guard reads
+  before a ready pull request (ADR 0018); a dirty checkout records nothing.
 - `mise run ci`: every check in every language; before a release, or when in doubt.
 - `mise run <lang>:check`: format check, lint, type check and unit tests for one
   language (`go`, `rust`, `ts`, `py`, `java`, `csharp`, `swift`, `dart`), or `cli:check` for the command line.
