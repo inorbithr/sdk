@@ -51,18 +51,39 @@ export function requestId(): string {
   return `iohr-${[...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** Waits `ms`, or rejects when `signal` aborts. */
-export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+/**
+ * Waits at least `ms`, or rejects when `signal` aborts. A timer can fire about 1 ms early,
+ * so after it fires the monotonic clock is checked and the remainder is waited out.
+ * `timer` and `now` are injectable for tests.
+ */
+export function sleep(
+  ms: number,
+  signal?: AbortSignal,
+  timer: (fn: () => void, ms: number) => ReturnType<typeof setTimeout> = setTimeout,
+  now: () => number = () => performance.now(),
+): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(signal.reason);
       return;
     }
-    const timer = setTimeout(resolve, ms);
+    const start = now();
+    let handle: ReturnType<typeof setTimeout>;
+    const arm = (wait: number): void => {
+      handle = timer(() => {
+        const left = ms - (now() - start);
+        if (left > 0) {
+          arm(Math.ceil(left));
+        } else {
+          resolve();
+        }
+      }, wait);
+    };
+    arm(ms);
     signal?.addEventListener(
       "abort",
       () => {
-        clearTimeout(timer);
+        clearTimeout(handle);
         reject(signal.reason);
       },
       { once: true },
