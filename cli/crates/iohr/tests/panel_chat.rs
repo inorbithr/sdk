@@ -556,6 +556,26 @@ fn escape_and_h_in_two_reads_is_option_h_and_not_the_shells() {
     assert!(!prompt_row(s.screen.screen()).contains('h'));
 }
 
+/// A panel that is late to run (a loaded hosted runner: tens of milliseconds with no time slice)
+/// finds the held Esc's time up and the `h` already waiting: that is still Option+h, since the
+/// two were written 5 ms apart. The stall is made by stopping the panel between the writes.
+#[test]
+fn escape_and_h_written_close_together_are_option_h_even_when_the_panel_runs_late() {
+    let rig = Rig::new("opthstall", QUICK);
+    let mut s = rig.panel_in("", "xterm");
+    s.until("the box", |sc| any(sc, HIDE) && ready(sc));
+    fresh(&mut s);
+    let pid = rustix::process::Pid::from_child(&s.child);
+    s.send(b"\x1b");
+    std::thread::sleep(Duration::from_millis(10));
+    rustix::process::kill_process(pid, rustix::process::Signal::STOP).unwrap();
+    s.send(b"h");
+    std::thread::sleep(Duration::from_millis(150));
+    rustix::process::kill_process(pid, rustix::process::Signal::CONT).unwrap();
+    s.until("the box folded", folded);
+    assert!(!prompt_row(s.screen.screen()).contains('h'));
+}
+
 #[test]
 fn a_plain_h_is_typing_at_the_prompt_and_in_the_box() {
     let rig = Rig::new("opthplain", QUICK);
