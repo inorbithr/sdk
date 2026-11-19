@@ -1048,7 +1048,9 @@ fn effective(
 
 /// On SIGHUP, reads config.toml again and sends what the next heartbeat declares. A file
 /// that cannot be read, or a bad value, keeps the settings in use and says why.
-/// What a SIGHUP reload sends the running parts.
+/// What a SIGHUP reload sends the running parts. Off Unix nothing reads it: there is no
+/// SIGHUP.
+#[cfg_attr(not(unix), allow(dead_code))]
 struct Reload {
     declare: watch::Sender<Declared>,
     policy: watch::Sender<Policy>,
