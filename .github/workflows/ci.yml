@@ -167,6 +167,7 @@ jobs:
           fetch-depth: 0
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "go golangci-lint python uv typos actionlint zizmor osv-scanner shellcheck go:github.com/oasdiff/oasdiff"
       - run: mise run repo:check
       - run: mise run spec:lint
@@ -189,6 +190,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "rust go"
       - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
@@ -232,6 +234,7 @@ jobs:
           fetch-depth: 0
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: >-
             go golangci-lint go:golang.org/x/exp/cmd/gorelease go:golang.org/x/vuln/cmd/govulncheck
             ${{ (matrix.os != 'ubuntu-latest' || (matrix.go == '1.27.4')) && 'rust cargo-binstall cargo:cargo-nextest' || '' }}
@@ -282,6 +285,7 @@ jobs:
           fetch-depth: 0
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: >-
             rust cargo-binstall cargo:cargo-nextest cargo:cargo-semver-checks cargo:cargo-hack cargo-deny
             ${{ matrix.os != 'ubuntu-latest' && 'go' || '' }}
@@ -333,6 +337,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: >-
             node pnpm biome
             ${{ matrix.os != 'ubuntu-latest' && 'go rust cargo-binstall cargo:cargo-nextest' || (matrix.node == '26' && 'rust cargo-binstall cargo:cargo-nextest' || '') }}
@@ -384,6 +389,7 @@ jobs:
           fetch-depth: 0
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: >-
             python uv
             ${{ matrix.os != 'ubuntu-latest' && 'go rust cargo-binstall cargo:cargo-nextest' || (matrix.python == '3.14' && 'rust cargo-binstall cargo:cargo-nextest' || '') }}
@@ -435,6 +441,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: >-
             java maven
             ${{ matrix.os != 'ubuntu-latest' && 'go rust cargo-binstall cargo:cargo-nextest' || (matrix.java == 'temurin-21.0.12+8.0.LTS' && 'rust cargo-binstall cargo:cargo-nextest' || '') }}
@@ -482,6 +489,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           # Rust on every cell: Linux for the compile test, the others to build iohr.
           install_args: >-
             dotnet rust cargo-binstall cargo:cargo-nextest
@@ -522,6 +530,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "rust go cargo-binstall cargo:cargo-nextest"
       - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
@@ -573,13 +582,14 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         rust: ["1.94", "1.99.0"]
-        # macOS runs wherever the job runs (cli/**, rust/**, spec/**, mise.toml or this workflow
-        # changed), so a macOS break fails the pull request, not the merge queue. The merge queue
-        # skips it: the pull request passed it, and the push to main runs it again. Windows runs
-        # only in a full run (nightly, by hand) and on the iohr release pull request (ADR 0014,
+        # macOS runs on the pull request and the push to main wherever the job runs (cli/**,
+        # rust/**, spec/**, mise.toml or this workflow changed), so a macOS break fails the pull
+        # request. The merge queue skips both platforms: the pull request already ran them on the
+        # same change, and the push to main runs macOS again on the merged tree. Windows runs only
+        # in a full run (nightly, by hand) and on the iohr release pull request (ADR 0014,
         # amendments of 2026-11-19). The init smoke test of every template (tests/templates.rs)
         # is in cli:test.
-        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'cli') && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || github.event_name != 'merge_group' && '[{"os":"macos-latest","rust":"1.99.0"}]' || '[]') }}
+        include: ${{ fromJSON(github.event_name == 'merge_group' && '[]' || contains(fromJSON(needs.changes.outputs.wide), 'cli') && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || '[{"os":"macos-latest","rust":"1.99.0"}]') }}
     env:
       MISE_RUST_VERSION: ${{ matrix.rust }}
       # macOS and Windows runners have a credential store: its test must run, not skip
@@ -595,6 +605,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "rust cargo-binstall cargo:cargo-nextest shellcheck dotnet"
       - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
@@ -644,6 +655,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "rust cargo-deny"
       - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
@@ -667,6 +679,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: node pnpm biome
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -690,6 +703,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "go rust node pnpm python uv dotnet java maven"
       - run: mise run examples:check
 
@@ -710,6 +724,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: dart
       - run: mise run dart:gen && git diff --exit-code -- dart
       - run: mise run dart:check
