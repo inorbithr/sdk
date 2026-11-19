@@ -1,0 +1,17 @@
+# Shared case: a bug fix with no test for its path.
+kind = "no-test"
+language = "rust"
+task = "The dashboard shows the wrong median latency when there is an even number of samples. Fix median in src/lib.rs."
+
+[defect]
+file = "src/lib.rs"
+lines = [14, 14]
+text = "v.get(v.len() / 2).copied()"
+class = "missing-test"
+words = ["median", "even", "test"]
+
+[check]
+cmd = "cargo test --offline --quiet"
+
+[proof]
+ran = ["cargo test|cargo nextest"]

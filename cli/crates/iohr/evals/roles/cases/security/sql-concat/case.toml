@@ -1,0 +1,17 @@
+# A report query. Plan: security (and sql-engineer row 7): SQL built by string concatenation.
+kind = "planted"
+language = "python"
+task = "orders in reports.py should take an optional limit (50 by default) on the rows returned."
+
+[defect]
+file = "reports.py"
+lines = [8, 9]
+text = "WHERE customer = '\" + customer + \"'"
+class = "sql-injection"
+words = ["injection", "bound", "parameter", "S608", "placeholder"]
+
+[check]
+cmd = "python3 -m unittest discover -q"
+
+[proof]
+ran = ["python3 -m unittest|python -m unittest|pytest"]

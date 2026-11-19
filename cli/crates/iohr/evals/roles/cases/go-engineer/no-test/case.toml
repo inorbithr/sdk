@@ -1,0 +1,17 @@
+# Shared case: a bug fix with no test for its path.
+kind = "no-test"
+language = "go"
+task = "Users report the last page of search results is missing when the count is not a round number. Fix Pages in paging.go."
+
+[defect]
+file = "paging.go"
+lines = [9, 9]
+text = "return total / per"
+class = "missing-test"
+words = ["Pages", "test", "ceiling", "partial"]
+
+[check]
+cmd = "go test ./..."
+
+[proof]
+ran = ["go test"]

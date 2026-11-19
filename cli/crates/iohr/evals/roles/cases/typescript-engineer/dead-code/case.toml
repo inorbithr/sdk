@@ -1,0 +1,18 @@
+# Shared case: dead code next to the change.
+kind = "dead"
+language = "typescript"
+task = "Add formatMinute(d) to dates.ts: the day and the UTC time to the minute, such as 2026-11-19 14:05."
+
+[defect]
+file = "dates.ts"
+lines = [7, 9]
+text = "function legacyFormat("
+class = "dead-code"
+words = ["legacyFormat", "unused", "dead"]
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran = ["node --test|npm test"]
+ran_any = ["grep", "rg", "git grep", "knip", "tsc", "biome"]

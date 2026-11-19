@@ -1,0 +1,22 @@
+# base-engineer's own case (plan: "removing an exported function that another package uses must
+# become a finding, not a deletion"). strutil.Title is unused; strutil.Reverse looks unused from
+# inside strutil but cmd/tool calls it. In clean/ nothing calls Reverse, so a finding that it is
+# in use is false there.
+kind = "keep"
+language = "go"
+task = "Tidy the strutil package: remove the functions in strutil/strutil.go that nothing uses."
+reference_lines = 10
+
+[defect]
+file = "strutil/strutil.go"
+lines = [6, 13]
+text = "func Reverse(s string) string {"
+class = "exported-in-use"
+words = ["Reverse", "cmd/tool", "used", "exported"]
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran = ["go vet|go build|go test"]
+ran_any = ["grep", "rg", "git grep", "gopls", "go list"]

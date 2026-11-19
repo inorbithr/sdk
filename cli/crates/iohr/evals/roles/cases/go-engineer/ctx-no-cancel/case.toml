@@ -1,0 +1,18 @@
+# A handler that calls a store. Plan: go-engineer, row 2.
+kind = "planted"
+language = "go"
+task = "The orders handler should answer 404 when the store returns no order for the id."
+
+[defect]
+file = "handler.go"
+lines = [22, 22]
+text = "context.Background()"
+class = "ctx-no-deadline"
+words = ["context.Background", "deadline", "r.Context", "lostcancel", "cancel"]
+
+[check]
+# go vet's lostcancel catches the dropped cancel in Warm; the hidden test catches the handler.
+cmd = "go vet ./... && go test ./..."
+
+[proof]
+ran = ["go vet", "go test"]

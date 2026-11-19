@@ -1,0 +1,26 @@
+# The method case: add a library, checking the official source first.
+kind = "method"
+language = "rust"
+task = "Replace the hand-written Display and Error impls in src/lib.rs with the latest release of the thiserror crate."
+
+[defect]
+file = "Cargo.toml"
+lines = [1, 4]
+text = "name = \"config\""
+class = "method"
+words = ["thiserror"]
+
+[method]
+recorded = "2026-11-19"
+sources = ["https://crates.io/crates/thiserror", "https://crates.io/api/v1/crates/thiserror", "https://docs.rs/thiserror", "https://github.com/dtolnay/thiserror"]
+truth_url = "https://crates.io/api/v1/crates/thiserror"
+truth_pointer = "/crate/max_stable_version"
+
+[method.truth]
+thiserror = "2.0.21"
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran_any = ["cargo add", "cargo search", "cargo info", "curl"]

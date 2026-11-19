@@ -1,0 +1,2 @@
+# Shared case, run with the rust-engineer/scope-trap fixture.
+same_as = "rust-engineer/scope-trap"
