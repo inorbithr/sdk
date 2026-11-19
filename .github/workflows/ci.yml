@@ -546,12 +546,12 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         rust: ["1.94", "1.99.0"]
-        # Windows and macOS run wherever the job runs (cli/**, rust/**, spec/**, mise.toml or this
-        # workflow changed, or a full run), so a platform break fails the pull request, not the
-        # merge queue. The init smoke test of every template (tests/templates.rs) is in cli:check.
-        include:
-          - { os: windows-latest, rust: "1.99.0" }
-          - { os: macos-latest, rust: "1.99.0" }
+        # Windows and macOS run on the pull request wherever the job runs (cli/**, rust/**, spec/**,
+        # mise.toml or this workflow changed, or a full run), so a platform break fails the pull
+        # request. The merge queue skips them: the pull request already ran them on the same
+        # change, they cost about 48 minutes a queue entry, and the nightly full run still covers
+        # main on both. The init smoke test of every template (tests/templates.rs) is in cli:check.
+        include: ${{ fromJSON(github.event_name == 'merge_group' && '[]' || '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]') }}
     env:
       MISE_RUST_VERSION: ${{ matrix.rust }}
       # macOS and Windows runners have a credential store: its test must run, not skip
