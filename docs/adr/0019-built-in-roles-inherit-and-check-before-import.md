@@ -1,4 +1,4 @@
-# 0018. Built-in roles: one root they inherit, one text limit, a check before import
+# 0019. Built-in roles: one root they inherit, one text limit, a check before import
 
 Status: proposed, 2026-11-19
 

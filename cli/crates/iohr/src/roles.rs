@@ -1,6 +1,6 @@
 //! The built-in roles `iohr project init` and `iohr atlas init` give a project
 //! (RFC 0124.1, RFC 0205): `base-engineer` and `security` for every project, one engineer for
-//! each language it holds, and each role its files turn on (`markers`, ADR 0019). The
+//! each language it holds, and each role its files turn on (`markers`, ADR 0020). The
 //! catalogue is data in `roles/*.toml`, versioned with this binary; every line carries the
 //! primary source it comes from, and a role's `[[check]]` gates are the commands it runs
 //! before it says the work is done.
@@ -28,14 +28,14 @@ pub const DIR: &str = "atlas/roles";
 const LEGACY_DIR: &str = "atlas/personalities";
 /// The one role every project gets, whatever its language.
 pub const BASE: &str = "security";
-/// The root of the tree, written as a pack beside every role (ADR 0019) and never routed to:
+/// The root of the tree, written as a pack beside every role (ADR 0020) and never routed to:
 /// its lines also reach every role by inheritance (in the pack, in `--role` and in InOrbit's
 /// brief). Imported when the account has no root, and upgraded when the account's root is
 /// this one, unchanged.
 pub const ROOT: &str = "base-engineer";
 /// The most tokens one pack's own core may hold (characters over four, as the service counts).
 pub const PACK_CORE_MAX: usize = 700;
-/// The most core tokens a run loads: the root's and one role's together (ADR 0019).
+/// The most core tokens a run loads: the root's and one role's together (ADR 0020).
 pub const LOADED_CORE_MAX: usize = 1_400;
 /// The pack's heading over its gates, read by `--role` with the core.
 pub const CHECKS_HEADING: &str = "Before you say done, run";
@@ -239,7 +239,7 @@ impl Stack {
 
 /// What a project gets: `base-engineer` and `security`, the engineer of each of its languages,
 /// and each role its files turn on, in catalogue order. The root comes first: its lines are
-/// loaded beside every role (ADR 0019).
+/// loaded beside every role (ADR 0020).
 #[must_use]
 pub fn selection(s: &Stack) -> Vec<Role> {
     select(catalogue(), s)

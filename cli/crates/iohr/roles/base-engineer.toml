@@ -1,7 +1,7 @@
 # The root of the tree, imported when the account has none (the lint wants exactly one) and
 # upgraded when the account's root is this one, not edited in InOrbit. An account with another
 # root keeps it, and the built-ins hang under that one.
-# Written as its own pack beside every role (ADR 0019) and never routed to: its lines reach
+# Written as its own pack beside every role (ADR 0020) and never routed to: its lines reach
 # every role by inheritance (the pack, `--role` and InOrbit's brief all put them first). A line
 # every engineer needs goes here once, not into each language role. A `[[check]]` here is a
 # gate every role inherits.
