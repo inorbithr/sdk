@@ -428,6 +428,9 @@ jobs:
         run: |
           chmod +x ci-tools/iohr ci-tools/replay
           mkdir -p conformance/server/bin && cp ci-tools/replay conformance/server/bin/replay
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: restore
       - run: mise run java:gen && git diff --exit-code -- java
       - run: mise run java:check
       - run: mise run conformance:java
@@ -438,6 +441,9 @@ jobs:
       # A generated two-profile surface compiles and the wrong profile does not.
       - if: env.COMPILE_CELL == 'true'
         run: IOHR_TEST_COMPILE=java mise run cli:compile-test
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: save
 
   csharp:
     name: csharp (${{ matrix.os }})
@@ -676,7 +682,13 @@ jobs:
         with:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "go rust node pnpm python uv dotnet java maven"
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: restore
       - run: mise run examples:check
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: save
 
   # The only required status check. Skipped jobs count as passing; failed or
   # cancelled ones do not.
