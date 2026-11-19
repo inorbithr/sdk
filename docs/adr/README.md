@@ -25,3 +25,4 @@ Format: Status, Context, Decision, Consequences, Sources. Keep each under a page
 | [0016](0016-swift.md) | Swift: the package at the repository root, a runtime ahead of its parity | proposed |
 | [0017](0017-c.md) | C: a pull transport the caller can replace, our own JSON reader, one arena per answer | proposed |
 | [0018](0018-built-in-roles-inherit-and-check-before-import.md) | Built-in roles: one root they inherit, one text limit, a check before import | proposed |
+| [0021](0021-role-evals.md) | Role evals: planted-defect cases, three arms, a landing rule | proposed |

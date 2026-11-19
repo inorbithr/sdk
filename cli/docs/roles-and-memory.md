@@ -86,6 +86,16 @@ refuse one in the future. Every prompt that asks a model to research or write fa
 YYYY-MM-DD. Use the newest edition or version published as of today; name it with its
 publication date; if you are unsure a newer one exists, say so."
 
+### Evals
+
+Each built-in role has eval cases: small repositories with one planted defect, a clean twin,
+a fix check and the commands that prove the work. The test `tests/role_evals.rs` replays the
+recorded runs offline in every CI run and holds each role to a bar and, when its text
+changes, to a landing rule; a nightly workflow records them with the real agent. A change to
+a role's text needs new recordings. How to run, record and add a case is in
+[`crates/iohr/evals/roles/README.md`](../crates/iohr/evals/roles/README.md); the decision is
+[ADR 0021](../../docs/adr/0021-role-evals.md).
+
 ## Use a role in a run: `--role`
 
 `iohr ask --role NAME` and `iohr init --role NAME` (the same as `iohr project init`) run the
