@@ -336,24 +336,18 @@ fn venv_python(venv: &Path) -> PathBuf {
     }
 }
 
-/// The project languages whose files are in `dir`.
+/// The project languages whose files are in `dir`, read from the one table of build files the
+/// roles detection also uses ([`crate::roles::LANGUAGE_FILES`]).
 fn languages_at(dir: &Path) -> BTreeSet<AddLang> {
-    const MARKERS: &[(&str, AddLang)] = &[
-        ("Cargo.toml", AddLang::Rust),
-        ("package.json", AddLang::Typescript),
-        ("deno.json", AddLang::Typescript),
-        ("deno.jsonc", AddLang::Typescript),
-        ("pyproject.toml", AddLang::Python),
-        ("requirements.txt", AddLang::Python),
-        ("uv.lock", AddLang::Python),
-        ("poetry.lock", AddLang::Python),
-        ("pdm.lock", AddLang::Python),
-        ("go.mod", AddLang::Go),
-    ];
-    MARKERS
-        .iter()
-        .filter(|(file, _)| dir.join(file).is_file())
-        .map(|(_, lang)| *lang)
+    crate::roles::languages_at(dir)
+        .into_iter()
+        .filter_map(|l| match l {
+            "rust" => Some(AddLang::Rust),
+            "typescript" => Some(AddLang::Typescript),
+            "python" => Some(AddLang::Python),
+            "go" => Some(AddLang::Go),
+            _ => None,
+        })
         .collect()
 }
 

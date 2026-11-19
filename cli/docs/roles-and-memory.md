@@ -8,10 +8,15 @@ project's local, file-based memory. Back to the [iohr overview](../README.md).
 `iohr project init` and `iohr atlas init` also write the built-in roles into
 `atlas/roles/`:
 
+- `base-engineer`, the root, which loads beside every role;
 - `security`, which every project gets whatever its language;
-- one engineer for the project's language: `rust-engineer`, `python-engineer`,
-  `typescript-engineer` or `go-engineer`. `atlas init` reads the language from
-  `inorbit.toml` or the build file.
+- one engineer for each language the project holds: `rust-engineer`, `python-engineer`,
+  `typescript-engineer` or `go-engineer`. A repository with `go.mod` at the root and
+  `web/package.json` gets both the Go and the TypeScript engineer. `atlas init` reads the
+  language from `inorbit.toml`; with none declared, it reads the build files at the root and
+  two folders down, skipping hidden, dependency and build folders;
+- each role whose `markers` match the project's files: `Dockerfile` (an exact name),
+  `*.tf` (a file pattern) or `migrations/` (a folder). No built-in role has markers yet.
 
 Each file has front matter (`name`, `parent`, `domain`, the catalogue it came from and the
 day it was checked) and its lines: a core, and recall lines found by topic, each with the
@@ -21,11 +26,18 @@ the like). The catalogue is data in the binary, labelled origin `doctrine`, and
 
 Every role hangs under `base-engineer`, the root. Its lines are the ones every engineer
 needs (a timeout on every remote call, for one), kept there once rather than copied into
-each role. `base-engineer` is never a pack in `atlas/roles/` and never a role a question is
-routed to: its lines reach every role by inheritance. Each pack lists them first, under
-"(inherited from base-engineer)", then the role's own; `--role` gives the same lines, and
-InOrbit builds a role's brief from the same chain, root first. The core a role brings,
-inherited lines included, stays within 700 tokens.
+each role. `base-engineer` has its own pack in `atlas/roles/`, for an agent that loads the
+base by itself, but no question is ever routed to it: its lines reach every role by
+inheritance. Each pack lists them first, under "(inherited from base-engineer)", then the
+role's own; `--role` gives the same lines, and InOrbit builds a role's brief from the same
+chain, root first. A role's own core stays within 700 tokens, and the base and a role
+together within 1,400.
+
+A role may also name its gates: the commands to pass before saying done. In the catalogue
+they are `[[check]]` tables, with a `command`, what it `proves`, and `blocks = false` for one
+that only reports. The pack lists them after the core under "Before you say done, run",
+inherited ones first, and `--role` gives them with the core. `iohr atlas roles list --json`
+shows them as `checks`. InOrbit does not take them on import yet.
 
 A pack is written from the catalogue. Editing one changes what `--role` gives in this
 project, because the project's pack is read first (see below), but `iohr sync` does not

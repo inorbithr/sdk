@@ -441,21 +441,22 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
     let (name, template) = project_meta(&root);
     let created_at = super::project::now();
     let bin = super::shell::running_bin();
-    // No hint here: the language the project declares, else the one its build file shows.
-    let lang = roles::language(&root, None);
+    // No hint here: the language the project declares, else the ones its build files show,
+    // and the roles its files call for.
+    let stack = roles::stack(&root, None);
     let mut written = atlas::ensure(
         &root,
         &atlas::Meta {
             name: &name,
             template: &template,
-            lang,
+            stack: &stack,
             describe: None,
             created_at: &created_at,
             bin: &bin,
         },
     )
     .map_err(Error::Failed)?;
-    if roles::ensure_record(&root, lang).map_err(Error::Failed)? {
+    if roles::ensure_record(&root, &stack).map_err(Error::Failed)? {
         written.push("inorbit.toml".to_owned());
     }
     written.extend(roles::ensure_agents(&root, &bin).map_err(Error::Failed)?);
@@ -464,7 +465,9 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
         Out::print_json(&serde_json::json!({
             "root": root.display().to_string(),
             "written": written,
-            "language": lang,
+            "language": stack.language(),
+            "languages": stack.languages,
+            "marked": stack.marked,
             "moved": moved,
             "roles": report,
         }));
@@ -558,6 +561,7 @@ async fn roles_cmd(g: &Global, env: &Env, cmd: RolesCommand, out: Out) -> Result
                         "language": p.language,
                         "core_tokens": roles::core_tokens(p),
                         "lines": p.lines.len(),
+                        "checks": p.checks,
                         "catalogue_version": p.version,
                         "imported_version": f.imported_version,
                     })

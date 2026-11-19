@@ -1339,9 +1339,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     }
     let created_at = now();
     let lang = answers.get(LANGUAGE).map(Answer::text);
-    // The roles go by the template's language, else by what the folder already has, as
+    // The roles go by the template's language, then by what the folder already has, as
     // `iohr atlas init` picks them.
-    let roles_lang = crate::roles::language(&dir, lang.as_deref());
+    let roles_stack = crate::roles::stack(&dir, lang.as_deref());
     let tpl_lang = match &lang {
         Some(l) => tpl.with_variant(l).map_err(Error::Usage)?,
         None => tpl.clone(),
@@ -1408,7 +1408,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         &atlas::Meta {
             name,
             template: &tpl.meta.id,
-            lang: roles_lang,
+            stack: &roles_stack,
             describe: describe.as_deref(),
             created_at: &created_at,
             bin: &me,

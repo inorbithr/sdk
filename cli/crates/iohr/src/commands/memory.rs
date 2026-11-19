@@ -553,8 +553,15 @@ fn check_cmd(
 ) -> Result<(), Error> {
     let entries = w.store()?.load()?;
     let base = w.base();
-    let lang = roles::detect_language(&base);
-    let mut findings = check::check(&entries, &base, lang, now_unix(), stale_days, checked_days);
+    let stack = roles::stack(&base, None);
+    let mut findings = check::check(
+        &entries,
+        &base,
+        stack.language(),
+        now_unix(),
+        stale_days,
+        checked_days,
+    );
     // Topics a project is expected to remember are a project's business, not a person's notes.
     if w.scope != Scope::Project {
         findings.retain(|f| f.rule != "gap");

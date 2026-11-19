@@ -373,8 +373,9 @@ fn init_writes_the_roles_the_record_the_memory_readme_and_the_agent_section() {
     // Signed out: said once, nothing fails.
     assert_eq!(t.matches("Not signed in").count(), 1, "{t}");
 
-    // The language came from the build file: a Rust project gets the Rust engineer.
-    for name in ["security", "rust-engineer"] {
+    // The language came from the build file: a Rust project gets the Rust engineer, beside
+    // the base every role loads with.
+    for name in ["base-engineer", "security", "rust-engineer"] {
         let p = read(&dir, &format!("atlas/roles/{name}.md"));
         assert!(p.contains(&format!("name: {name}")), "{p}");
         assert!(p.contains("parent:"), "{p}");
@@ -414,6 +415,45 @@ fn init_writes_the_roles_the_record_the_memory_readme_and_the_agent_section() {
     assert!(o.status.success(), "{t}");
     assert!(t.contains("\"doctrine\""), "{t}");
     assert!(t.contains("\"parent\""), "{t}");
+}
+
+#[test]
+fn a_repo_of_two_languages_gets_both_engineers_and_the_base() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = h.path().join("work/made");
+    std::fs::create_dir_all(dir.join("web")).unwrap();
+    std::fs::write(dir.join("go.mod"), "module made\n").unwrap();
+    std::fs::write(dir.join("web/package.json"), "{}\n").unwrap();
+    std::fs::write(dir.join("inorbit.toml"), "name = \"made\"\n").unwrap();
+    let o = iohr(h.path(), &dir, None, &["atlas", "init", "--json"]);
+    assert!(o.status.success(), "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["language"], "go", "{v}");
+    assert_eq!(
+        v["languages"],
+        serde_json::json!(["go", "typescript"]),
+        "{v}"
+    );
+    for name in [
+        "base-engineer",
+        "security",
+        "go-engineer",
+        "typescript-engineer",
+    ] {
+        assert!(
+            dir.join(format!("atlas/roles/{name}.md")).is_file(),
+            "{name}"
+        );
+    }
+    let record = read(&dir, "inorbit.toml");
+    assert!(record.contains("\"typescript-engineer\""), "{record}");
+    // The list names what the project imports, each with its gates; the base is the root.
+    let o = iohr(h.path(), &dir, None, &["atlas", "roles", "list", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    let roles = v["roles"].as_array().unwrap();
+    assert_eq!(roles.len(), 3, "{v}");
+    assert!(roles.iter().all(|r| r["checks"].is_array()), "{v}");
+    assert!(roles.iter().all(|r| r["name"] != "base-engineer"), "{v}");
 }
 
 #[test]

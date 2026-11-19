@@ -115,27 +115,38 @@ pub(crate) fn bound(text: &str) -> String {
     format!("{}{note}", cut.trim_end())
 }
 
-/// The pack's own text: its core section (the lines always in the brief) when it has one,
-/// else everything under the front matter.
-fn core_of(body: &str) -> &str {
+/// The pack's own text: its core section (the lines always in the brief) and its gates
+/// ([`roles::CHECKS_HEADING`], the commands to pass before saying done) when it has them, else
+/// everything under the front matter.
+fn core_of(body: &str) -> String {
+    let core = section(body, "## Core");
+    let gates = section(body, &format!("## {}", roles::CHECKS_HEADING));
+    match (core, gates) {
+        (None, None) => body.to_owned(),
+        (Some(c), None) => c.to_owned(),
+        (None, Some(g)) => g.to_owned(),
+        (Some(c), Some(g)) => format!("{}\n\n{g}", c.trim_end()),
+    }
+}
+
+/// The section of `body` under the first heading line that starts with `heading`, up to the
+/// next `## ` heading.
+fn section<'a>(body: &'a str, heading: &str) -> Option<&'a str> {
     let mut at = 0usize;
     let mut start = None;
     for l in body.split_inclusive('\n') {
-        if l.starts_with("## Core") {
+        if l.starts_with(heading) {
             start = Some(at);
             break;
         }
         at += l.len();
     }
-    let Some(start) = start else {
-        return body;
-    };
-    let rest = &body[start..];
+    let rest = &body[start?..];
     let end = rest
         .match_indices("\n## ")
         .next()
         .map_or(rest.len(), |(i, _)| i + 1);
-    &rest[..end]
+    Some(&rest[..end])
 }
 
 /// The pack in `text` when it is the Role `name`: its model (its own, else the catalogue's)
@@ -153,7 +164,7 @@ fn from_pack(text: &str, name: &str) -> Option<Pack> {
                 .find(|p| p.name == name)
                 .map(|p| p.model)
         });
-    let text = clean_text(core_of(body))?;
+    let text = clean_text(&core_of(body))?;
     Some(Pack {
         model,
         text: bound(&text),
@@ -322,6 +333,20 @@ mod tests {
         assert!(!p.text.contains("nextest"));
         assert!(!p.text.contains("Intro line"));
         assert_eq!(p.model.as_deref(), Some("haiku"));
+    }
+
+    #[test]
+    fn a_pack_s_gates_travel_with_its_core() {
+        let gated = pack("").replace(
+            "## Recall: found by topic",
+            "## Before you say done, run\n\n- `cargo nextest run`\n  Proves: the tests pass\n\n\
+             ## Recall: found by topic",
+        );
+        let p = from_pack(&gated, "rust-engineer").unwrap();
+        assert!(p.text.contains("Return errors, never panic."));
+        assert!(p.text.contains("Before you say done, run"));
+        assert!(p.text.contains("`cargo nextest run`"));
+        assert!(!p.text.contains("Use cargo nextest."));
     }
 
     #[test]

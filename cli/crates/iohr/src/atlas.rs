@@ -161,8 +161,9 @@ pub struct Meta<'a> {
     pub name: &'a str,
     /// The template it was made from.
     pub template: &'a str,
-    /// The language, when the template has one.
-    pub lang: Option<&'a str>,
+    /// What the project is built with: the template's language first, then what its files
+    /// show. Picks the roles it starts with.
+    pub stack: &'a crate::roles::Stack,
     /// The person's own description, when they gave one. Goes into the PRD's problem only.
     pub describe: Option<&'a str>,
     /// When, as an RFC 3339 timestamp in UTC.
@@ -310,7 +311,10 @@ fn first_line_of(text: &str, max: usize) -> String {
 }
 
 fn starter(kind: Kind, m: &Meta<'_>) -> (String, String) {
-    let lang = m.lang.map_or_else(String::new, |l| format!(", {l}"));
+    let lang = m
+        .stack
+        .language()
+        .map_or_else(String::new, |l| format!(", {l}"));
     let made = format!(
         "project made from the `{}` template{lang} by `iohr project init`.",
         m.template
@@ -531,7 +535,7 @@ file, so it is versioned, reviewed and merged like code.
 | `studies/` | Measurements, with the question asked before the result. |
 | `canvas/` | Boards, in the InOrbit canvas format (`iohr.canvas`, version 3). |
 | `models/` | 3D models, in glTF 2.0. Empty for now. |
-| `roles/` | The built-in InOrbit roles for this project: `security` and the engineer of its language. Each line names its source. |
+| `roles/` | The built-in InOrbit roles for this project: `base-engineer` (loaded with every role), `security`, the engineer of each language it holds and the roles its files call for. Each line names its source; a role's gates are under \"Before you say done, run\". |
 
 The files named `0001-...` are starters. Each says so in its first line. Replace their text.
 
@@ -569,9 +573,9 @@ pub fn files(m: &Meta<'_>) -> Vec<(String, String)> {
     out.extend(Kind::ALL.into_iter().map(|k| starter(k, m)));
     out.push(canvas_starter(m));
     out.push(models_readme());
-    out.extend(crate::roles::pack_files(m.lang));
+    out.extend(crate::roles::pack_files(m.stack));
     // Memory is not an atlas folder: it is `.inorbit/memory/`, local first, committed.
-    out.extend(crate::memory::seed::files(m.lang, &slug(m.name)));
+    out.extend(crate::memory::seed::files(m.stack, &slug(m.name)));
     out
 }
 
@@ -585,7 +589,7 @@ pub fn add_atlas(files_out: &mut Vec<(String, String)>, m: &Meta<'_>) {
         }
     }
     // The roles are recorded in the manifest, and the agents are told about memory.
-    crate::roles::add_record(files_out, m.lang);
+    crate::roles::add_record(files_out, m.stack);
     crate::roles::add_agents(files_out, m.bin);
 }
 
@@ -710,10 +714,12 @@ mod tests {
     use super::*;
 
     fn meta() -> Meta<'static> {
+        static RUST: std::sync::LazyLock<crate::roles::Stack> =
+            std::sync::LazyLock::new(|| crate::roles::Stack::of(Some("rust")));
         Meta {
             name: "my-shop",
             template: "demo",
-            lang: Some("rust"),
+            stack: &RUST,
             describe: Some("A shop for hand-made chairs.\nSecond line."),
             created_at: "2026-11-05T10:00:00Z",
             bin: "iohr",
@@ -725,7 +731,7 @@ mod tests {
         let files = files(&meta());
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(
-            paths[..10],
+            paths[..11],
             [
                 "atlas/README.md",
                 "atlas/prd/0001-what-my-shop-is-for.md",
@@ -734,15 +740,16 @@ mod tests {
                 "atlas/studies/0001-the-first-measurement-for-my-shop.md",
                 "atlas/canvas/start.canvas.json",
                 "atlas/models/README.md",
+                "atlas/roles/base-engineer.md",
                 "atlas/roles/security.md",
                 "atlas/roles/rust-engineer.md",
                 ".inorbit/memory/README.md",
             ]
         );
         // The rest are the seed memories, local files under `.inorbit/memory/`.
-        assert!(paths.len() > 10);
+        assert!(paths.len() > 11);
         assert!(
-            paths[10..]
+            paths[11..]
                 .iter()
                 .all(|p| p.starts_with(".inorbit/memory/"))
         );
