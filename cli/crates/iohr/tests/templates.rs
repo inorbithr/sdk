@@ -509,88 +509,104 @@ fn blank_keeps_a_small_floor_and_no_ci_unless_asked() {
     assert!(dir.join(".github/workflows/ci.yml").is_file());
 }
 
-/// Init, then the template's own check: the smoke test runs inside init (`done:` line), and
-/// for the languages whose toolchain is here, the project's own test command passes again
-/// when run by hand.
-#[test]
-fn every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here() {
-    let table: &[(&str, &str, &[&str])] = &[
-        ("service", "go", &["go"]),
-        ("service", "python", &["python3"]),
-        ("service", "typescript", &["node"]),
-        ("service", "rust", &["cargo"]),
-        ("service", "java", &["javac", "java"]),
-        ("service", "csharp", &["dotnet"]),
-        ("service", "dart", &["dart"]),
-        ("service", "swift", &["swift"]),
-        ("cli", "go", &["go"]),
-        ("cli", "python", &["python3"]),
-        ("cli", "rust", &["cargo"]),
-        ("cli", "typescript", &["node"]),
-        ("cli", "java", &["javac", "java"]),
-        ("cli", "csharp", &["dotnet"]),
-        ("cli", "dart", &["dart"]),
-        ("cli", "swift", &["swift"]),
-        ("blank", "java", &["javac", "java"]),
-        ("blank", "csharp", &["dotnet"]),
-        ("blank", "dart", &["dart"]),
-        ("blank", "swift", &["swift"]),
-        ("agent", "python", &["uv"]),
-        ("agent", "typescript", &["node"]),
-        ("agent", "go", &["go"]),
-        ("agent", "rust", &["cargo"]),
-        ("agent", "java", &["mvn", "java"]),
-        ("agent", "csharp", &["dotnet"]),
-        ("agent", "swift", &["swift"]),
-        ("agent", "dart", &["dart"]),
-        ("mcp-server", "python", &["uv"]),
-        ("mcp-server", "typescript", &["node", "npm"]),
-        ("mcp-server", "go", &["go"]),
-        ("mcp-server", "rust", &["cargo"]),
-        ("mcp-server", "java", &["mvn", "java"]),
-        ("mcp-server", "csharp", &["dotnet"]),
-        ("mcp-server", "swift", &["swift"]),
-        ("mcp-server", "dart", &["dart"]),
-        ("evals", "python", &["python3"]),
-        ("evals", "typescript", &["node"]),
-        ("evals", "go", &["go"]),
-        ("evals", "rust", &["cargo"]),
-        ("evals", "java", &["javac", "java"]),
-        ("evals", "csharp", &["dotnet"]),
-        ("evals", "dart", &["dart"]),
-        ("evals", "swift", &["swift"]),
-        ("extension", "python", &["python3"]),
-        ("extension", "typescript", &["node"]),
-        ("extension", "go", &["go"]),
-        ("extension", "rust", &["cargo"]),
-        ("extension", "java", &["javac", "java"]),
-        ("extension", "csharp", &["dotnet"]),
-        ("extension", "dart", &["dart"]),
-        ("extension", "swift", &["swift"]),
-    ];
-    let mut ran = 0;
-    for (template, lang, needs) in table {
-        if !needs.iter().all(|p| toolchain_runs(p)) {
-            continue;
-        }
-        // An MCP server's smoke installs the official SDK from its registry (a cold cache in
-        // this test's private home), so it needs the network; without it the row is skipped.
-        // The C# and Dart evals restore their pinned test packages once, so they need it too.
-        let restores = *template == "mcp-server"
-            || (*template == "evals" && matches!(*lang, "csharp" | "dart"));
-        if restores && !registry_reachable(lang) {
-            eprintln!("{template}/{lang}: skipped, its package registry is not reachable");
-            continue;
-        }
-        let (_h, dir, out) = init(template, Some(lang), true, &[]);
-        assert!(out.status.success(), "{template}/{lang}: {}", text(&out));
-        assert!(
-            text(&out).contains("done:"),
-            "{template}/{lang} smoke: {}",
-            text(&out)
-        );
-        assert!(dir.join("README.md").is_file(), "{template}/{lang}");
-        ran += 1;
+/// One row of the table: init, then that template's own check. The smoke test runs inside init
+/// (`done:` line), and when the toolchain is here the project's own check passes. A row whose
+/// toolchain is not on the PATH is skipped; the reason comes back for the test to print.
+fn check_variant(template: &str, lang: &str, needs: &[&str]) -> Option<String> {
+    if !needs.iter().all(|p| toolchain_runs(p)) {
+        return Some(format!("{template}/{lang}: skipped, {needs:?} not here"));
     }
-    eprintln!("variants checked: {ran} of {}", table.len());
+    // An MCP server's smoke installs the official SDK from its registry (a cold cache in
+    // this test's private home), so it needs the network; without it the row is skipped.
+    // The C# and Dart evals restore their pinned test packages once, so they need it too.
+    let restores =
+        template == "mcp-server" || (template == "evals" && matches!(lang, "csharp" | "dart"));
+    if restores && !registry_reachable(lang) {
+        return Some(format!(
+            "{template}/{lang}: skipped, its package registry is not reachable"
+        ));
+    }
+    let (_h, dir, out) = init(template, Some(lang), true, &[]);
+    assert!(out.status.success(), "{template}/{lang}: {}", text(&out));
+    assert!(
+        text(&out).contains("done:"),
+        "{template}/{lang} smoke: {}",
+        text(&out)
+    );
+    assert!(dir.join("README.md").is_file(), "{template}/{lang}");
+    None
+}
+
+/// Every live variant, one test each (nextest schedules tests, not the rows of one loop, so the
+/// slow builds run in parallel). Each test has its own private home and folder, so none shares
+/// state. This table is the one list; add a row for a new variant.
+macro_rules! every_live_variant {
+    ($($name:ident: ($template:expr, $lang:expr, $needs:expr),)+) => {
+        mod every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here {
+            use super::check_variant;
+            $(
+                #[test]
+                fn $name() {
+                    if let Some(why) = check_variant($template, $lang, $needs) {
+                        eprintln!("{why}");
+                    }
+                }
+            )+
+        }
+    };
+}
+
+every_live_variant! {
+    service_go: ("service", "go", &["go"]),
+    service_python: ("service", "python", &["python3"]),
+    service_typescript: ("service", "typescript", &["node"]),
+    service_rust: ("service", "rust", &["cargo"]),
+    service_java: ("service", "java", &["javac", "java"]),
+    service_csharp: ("service", "csharp", &["dotnet"]),
+    service_dart: ("service", "dart", &["dart"]),
+    service_swift: ("service", "swift", &["swift"]),
+    cli_go: ("cli", "go", &["go"]),
+    cli_python: ("cli", "python", &["python3"]),
+    cli_rust: ("cli", "rust", &["cargo"]),
+    cli_typescript: ("cli", "typescript", &["node"]),
+    cli_java: ("cli", "java", &["javac", "java"]),
+    cli_csharp: ("cli", "csharp", &["dotnet"]),
+    cli_dart: ("cli", "dart", &["dart"]),
+    cli_swift: ("cli", "swift", &["swift"]),
+    blank_java: ("blank", "java", &["javac", "java"]),
+    blank_csharp: ("blank", "csharp", &["dotnet"]),
+    blank_dart: ("blank", "dart", &["dart"]),
+    blank_swift: ("blank", "swift", &["swift"]),
+    agent_python: ("agent", "python", &["uv"]),
+    agent_typescript: ("agent", "typescript", &["node"]),
+    agent_go: ("agent", "go", &["go"]),
+    agent_rust: ("agent", "rust", &["cargo"]),
+    agent_java: ("agent", "java", &["mvn", "java"]),
+    agent_csharp: ("agent", "csharp", &["dotnet"]),
+    agent_swift: ("agent", "swift", &["swift"]),
+    agent_dart: ("agent", "dart", &["dart"]),
+    mcp_server_python: ("mcp-server", "python", &["uv"]),
+    mcp_server_typescript: ("mcp-server", "typescript", &["node", "npm"]),
+    mcp_server_go: ("mcp-server", "go", &["go"]),
+    mcp_server_rust: ("mcp-server", "rust", &["cargo"]),
+    mcp_server_java: ("mcp-server", "java", &["mvn", "java"]),
+    mcp_server_csharp: ("mcp-server", "csharp", &["dotnet"]),
+    mcp_server_swift: ("mcp-server", "swift", &["swift"]),
+    mcp_server_dart: ("mcp-server", "dart", &["dart"]),
+    evals_python: ("evals", "python", &["python3"]),
+    evals_typescript: ("evals", "typescript", &["node"]),
+    evals_go: ("evals", "go", &["go"]),
+    evals_rust: ("evals", "rust", &["cargo"]),
+    evals_java: ("evals", "java", &["javac", "java"]),
+    evals_csharp: ("evals", "csharp", &["dotnet"]),
+    evals_dart: ("evals", "dart", &["dart"]),
+    evals_swift: ("evals", "swift", &["swift"]),
+    extension_python: ("extension", "python", &["python3"]),
+    extension_typescript: ("extension", "typescript", &["node"]),
+    extension_go: ("extension", "go", &["go"]),
+    extension_rust: ("extension", "rust", &["cargo"]),
+    extension_java: ("extension", "java", &["javac", "java"]),
+    extension_csharp: ("extension", "csharp", &["dotnet"]),
+    extension_dart: ("extension", "dart", &["dart"]),
+    extension_swift: ("extension", "swift", &["swift"]),
 }
