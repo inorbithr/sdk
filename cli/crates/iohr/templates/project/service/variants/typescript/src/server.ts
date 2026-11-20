@@ -65,7 +65,6 @@ export function makeServer(svc: Service): Server {
       "Content-Length": Buffer.byteLength(reply.body),
       traceparent: span.header(),
     });
-    res.end(reply.body);
     const ms = span.millis();
     const method = req.method === "GET" ? "GET" : "OTHER";
     const common = { trace_id: span.traceId, route: reply.route, status: reply.status, duration_ms: ms };
@@ -77,5 +76,8 @@ export function makeServer(svc: Service): Server {
     });
     svc.log.info("request", { method, ...common });
     svc.metrics.inc(reply.route, reply.status);
+    // Logged and counted before the reply goes out, so a client that has the reply
+    // already finds it in the log and in /metrics.
+    res.end(reply.body);
   });
 }
