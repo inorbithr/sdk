@@ -2,7 +2,7 @@
 
 These measure whether an agent in a built-in role catches the defects the role exists for. The
 agent must invent no others, show its proof, keep the change small, and cost no more than it
-should. The decision and its limits are in [ADR 0021](../../../../../docs/adr/0021-role-evals.md).
+should. The decision and its limits are in [ADR 0022](../../../../../docs/adr/0022-role-evals.md).
 The test is [`tests/role_evals.rs`](../../tests/role_evals.rs).
 
 ## What is here

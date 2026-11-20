@@ -1,4 +1,4 @@
-//! Role evals (ADR 0021): does an agent that loads a built-in role catch the defects the role
+//! Role evals (ADR 0022): does an agent that loads a built-in role catch the defects the role
 //! is for, invent none, show its proof, keep the change small, and cost no more than it
 //! should?
 //!

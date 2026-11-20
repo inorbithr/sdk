@@ -94,7 +94,7 @@ recorded runs offline in every CI run and holds each role to a bar and, when its
 changes, to a landing rule; a nightly workflow records them with the real agent. A change to
 a role's text needs new recordings. How to run, record and add a case is in
 [`crates/iohr/evals/roles/README.md`](../crates/iohr/evals/roles/README.md); the decision is
-[ADR 0021](../../docs/adr/0021-role-evals.md).
+[ADR 0022](../../docs/adr/0022-role-evals.md).
 
 ## Use a role in a run: `--role`
 

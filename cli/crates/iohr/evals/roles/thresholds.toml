@@ -1,4 +1,4 @@
-# The bar and the landing rule for role evals (ADR 0021). tests/role_evals.rs reads this file
+# The bar and the landing rule for role evals (ADR 0022). tests/role_evals.rs reads this file
 # and enforces it on every run; it refuses to start when a scorer has no bar or a bar names an
 # unknown scorer, as the evals project template does (ADR 0221).
 

@@ -1,6 +1,6 @@
 name: role-evals
 
-# The built-in roles, measured with the real agent (ADR 0021): every case of every role,
+# The built-in roles, measured with the real agent (ADR 0022): every case of every role,
 # with the role and without it, three runs each, then scored against the bar and the landing
 # rule in cli/crates/iohr/evals/roles/thresholds.toml. Nightly and on demand; not a
 # pull-request check (pull requests replay the committed transcripts offline in ci.yml).

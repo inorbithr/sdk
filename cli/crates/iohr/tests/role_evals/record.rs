@@ -260,7 +260,7 @@ fn toolchain_env(cmd: &mut Command) {
 }
 
 /// Sets the package tools offline: a check or a run proves the tree, never the network. It is
-/// environment only; a tool that ignores these can still reach out (ADR 0021).
+/// environment only; a tool that ignores these can still reach out (ADR 0022).
 fn offline_env(cmd: &mut Command) {
     cmd.env("GOPROXY", "off")
         .env("GOFLAGS", "-mod=mod")

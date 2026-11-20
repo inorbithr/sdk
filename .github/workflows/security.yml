@@ -84,7 +84,7 @@ jobs:
               # The project templates are files with @@PLACEHOLDERS@@ that init fills in, not
               # modules (a go.mod there says `module @@MODULE@@`); the shipped code is scanned.
               - cli/crates/iohr/templates
-              # The role eval cases carry planted defects on purpose (ADR 0021); they are
+              # The role eval cases carry planted defects on purpose (ADR 0022); they are
               # fixtures for the evals, not code this repository ships.
               - cli/crates/iohr/evals/roles/cases
       # `go test -c` compiles every package with its tests and runs none, so CodeQL extracts

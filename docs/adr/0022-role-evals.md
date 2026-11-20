@@ -1,10 +1,10 @@
-# 0021. Role evals: planted-defect cases, replayed offline, recorded nightly
+# 0022. Role evals: planted-defect cases, replayed offline, recorded nightly
 
 Status: proposed, 2026-11-19
 
 ## Context
 
-ADR 0019 made the built-in roles one tree with one root and a check before import. Nothing yet
+ADR 0020 made the built-in roles one tree with one root and a check before import. Nothing yet
 says whether a role helps. A role can be well formed and still make the agent worse: it can
 raise cost, miss the defect it exists for, or report problems that are not there. The roles
 upgrade plan has more changes queued against these texts, so each one needs a measure that
@@ -100,7 +100,7 @@ with this ADR are all synthetic.
 
 ## Sources
 
-- [ADR 0019](0019-built-in-roles-inherit-and-check-before-import.md), built-in roles.
+- [ADR 0020](0020-built-in-roles-inherit-and-check-before-import.md), built-in roles.
 - `cli/crates/iohr/templates/project/evals/thresholds.toml`, the template's bar format
   (platform PRD 0088.1, ADR 0221).
 - `cli/crates/iohr/tests/roles_runtime.rs`, the fake agent this harness's recorder follows.
