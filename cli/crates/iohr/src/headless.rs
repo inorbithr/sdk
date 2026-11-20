@@ -45,8 +45,6 @@ pub(crate) const OUTPUT_LINES: usize = 200;
 pub(crate) const MESSAGE_MAX: usize = 24 * 1024;
 /// Bytes of git facts sent.
 pub(crate) const GIT_MAX: usize = 2 * 1024;
-/// Bytes of a Role's text sent (RFC 0211).
-pub(crate) const ROLE_MAX: usize = 4 * 1024;
 
 /// `text` with `&`, `<` and `>` as entities (see the `<sources>` block).
 fn escape_markup(text: &str) -> String {
@@ -152,6 +150,8 @@ pub(crate) struct Context {
     /// the model is told not to ask again.
     pub(crate) refresh: bool,
     /// The text of the Role the run works in (`--role`, RFC 0211); empty when there is none.
+    /// Already bounded where it is made ([`crate::roles::runtime::TEXT_MAX`], the one limit),
+    /// so it is not cut again here.
     pub(crate) role: String,
     /// The text of `<sources>`: the best chunks of the project's local site knowledge base
     /// for the question, from [`crate::kb::sources_block`]; empty when nothing is indexed or
@@ -557,7 +557,7 @@ pub(crate) fn assemble(question: &str, ctx: &Context) -> Result<String, String> 
     let build = |output: &str, prior: Option<&(String, String)>| {
         let mut m = String::new();
         if !ctx.role.trim().is_empty() {
-            let _ = writeln!(m, "<role>\n{}\n</role>", head(ctx.role.trim(), ROLE_MAX));
+            let _ = writeln!(m, "<role>\n{}\n</role>", ctx.role.trim());
         }
         let _ = writeln!(m, "<cwd>{}</cwd>", head(ctx.cwd.trim(), CWD_MAX));
         for also in &ctx.also {
@@ -1077,6 +1077,23 @@ mod tests {
         assert!(!m.contains(&"c".repeat(CWD_MAX + 1)));
         assert!(m.contains("exit=\"2\""));
         assert!(m.ends_with("Question: why\n"));
+    }
+
+    #[test]
+    fn a_roles_text_is_cut_once_where_it_is_made_and_never_again_here() {
+        // A Role's text at the run's one limit, in a script of more than one byte a character:
+        // it was cut a second time here at 4 KiB.
+        let text = crate::roles::runtime::bound(&"é".repeat(crate::roles::runtime::TEXT_MAX + 9));
+        let ctx = Context {
+            role: text.clone(),
+            ..Context::default()
+        };
+        let m = assemble("why", &ctx).unwrap();
+        assert!(
+            m.contains(&format!("<role>\n{text}\n</role>")),
+            "the whole text"
+        );
+        assert_eq!(m.matches("was cut at").count(), 1, "one note, one cut");
     }
 
     #[test]

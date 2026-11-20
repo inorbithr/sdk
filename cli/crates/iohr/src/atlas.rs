@@ -547,8 +547,10 @@ since the last sync is reported and never overwritten. `iohr sync --dry-run` sho
 would do and sends nothing.
 
 `iohr sync` also imports the files in `roles/` into your InOrbit account (signed in
-only; `--dry-run` shows what would be sent). The packs are copies of the catalogue: an edit
-here is not read back, so change a role in InOrbit.
+only; `--dry-run` shows what would be sent). The packs are written from the catalogue, each
+with the lines it inherits from `base-engineer`. An edit here changes what `--role` gives in
+this project (its pack is read first), but `iohr sync` does not send it: to change a role for
+your whole account, change it in InOrbit.
 
 The keys `kind`, `number`, `remote_id`, `remote_version`, `remote_number` and `remote_sha`
 at the top of a document are bookkeeping for sync. They are not sent.
