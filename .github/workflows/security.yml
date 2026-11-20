@@ -69,6 +69,7 @@ jobs:
         env:
           MISE_YES: "1"
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "go"
       - if: steps.present.outputs.yes == 'true'
         uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
