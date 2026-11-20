@@ -624,6 +624,11 @@ jobs:
         timeout-minutes: 10
         with:
           packages: zsh
+      # cli:test's template smoke test builds the Java project template with mvn; read the
+      # Maven repository from main's cache so it does not download from Maven Central (Study 0094.91).
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: restore
       # fmt, clippy and cargo-deny (advisories included) run once, in cli-lint.
       - run: mise run cli:test
       # A generated surface builds against rust/ and the wrong profile is refused.
@@ -642,6 +647,9 @@ jobs:
       # Browser and device sign-in against the identity provider the platform runs.
       - if: runner.os == 'Linux' && matrix.rust != '1.94'
         run: mise run cli:hydra
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: save
 
   # fmt, clippy and cargo-deny once, on one toolchain: they check the source, not the platform.
   # The `cli` legs run the tests. Together they are `mise run cli:check`.

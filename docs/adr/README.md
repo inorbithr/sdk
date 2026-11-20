@@ -27,4 +27,5 @@ Format: Status, Context, Decision, Consequences, Sources. Keep each under a page
 | [0018](0018-ci-changed-gate-record.md) | A passing `ci:changed` leaves the platform's gate record | proposed |
 | [0019](0019-pr-preflight.md) | A pull request preflight: every failing check named in one place, advisory | proposed |
 | [0020](0020-built-in-roles-inherit-and-check-before-import.md) | Built-in roles: one root they inherit, one text limit, a check before import | proposed |
+| [0021](0021-roles-gates-base-pack-and-a-stack.md) | Built-in roles: gates in the role, the base as a pack, a project's whole stack | proposed |
 | [0022](0022-role-evals.md) | Role evals: planted-defect cases, three arms, a landing rule | proposed |
