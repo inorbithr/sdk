@@ -1,11 +1,11 @@
-# 0020. Built-in roles: gates in the role, the base as a pack, a project's whole stack
+# 0021. Built-in roles: gates in the role, the base as a pack, a project's whole stack
 
-Status: proposed, 2026-11-19. Supersedes two points of [0019](0019-built-in-roles-inherit-and-check-before-import.md):
+Status: proposed, 2026-11-19. Supersedes two points of [0020](0020-built-in-roles-inherit-and-check-before-import.md):
 "`base-engineer` is never a pack" and "the 700-token core limit counts [the inherited lines]".
 
 ## Context
 
-Three gaps were left after ADR 0019 (PR #588). First, a role said how to work but not how to
+Three gaps were left after ADR 0020 (PR #588). First, a role said how to work but not how to
 prove the work: no role carried the commands to pass before saying done. Second,
 `base-engineer` reached a role only by inheritance, so an agent that loads the base by
 itself had no file to read. Third, `selection` took one language. A repository with Go at the
@@ -59,7 +59,7 @@ lists the roles a project imports.
 
 ## Sources
 
-- [0019](0019-built-in-roles-inherit-and-check-before-import.md) and PR #588 (3f68e73a, 2026-11-19).
+- [0020](0020-built-in-roles-inherit-and-check-before-import.md) and PR #588 (3f68e73a, 2026-11-19).
 - `cli/crates/iohr/src/roles.rs`, `roles/lint.rs`, `roles/runtime.rs`, `commands/sdk_add.rs`
   at 3f68e73a: the two build-file tables and the one-language `selection`.
 - [Roles and memory](../../cli/docs/roles-and-memory.md).
