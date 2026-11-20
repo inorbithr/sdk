@@ -79,13 +79,6 @@ class Service {
     final isGet = req.method == 'GET';
     final reply = isGet ? _respond(req.uri) : _json('unmatched', 405, {'error': 'method not allowed'});
     final bytes = utf8.encode(reply.body);
-    req.response
-      ..statusCode = reply.status
-      ..headers.set('Content-Type', reply.type)
-      ..headers.set('traceparent', span.header)
-      ..contentLength = bytes.length
-      ..add(bytes);
-    req.response.close();
     final common = <String, Object>{
       'trace_id': span.traceId,
       'route': reply.route,
@@ -100,5 +93,14 @@ class Service {
     });
     log.info('request', {'method': isGet ? 'GET' : 'OTHER', ...common});
     metrics.inc(reply.route, reply.status);
+    // Logged and counted before the reply goes out, so a client that has the reply
+    // already finds it in the log and in /metrics.
+    req.response
+      ..statusCode = reply.status
+      ..headers.set('Content-Type', reply.type)
+      ..headers.set('traceparent', span.header)
+      ..contentLength = bytes.length
+      ..add(bytes);
+    req.response.close();
   }
 }

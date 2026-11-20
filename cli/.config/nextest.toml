@@ -13,3 +13,14 @@ retries = 2
 # break.
 [profile.default]
 fail-fast = false
+
+# The template variants that build with Maven (agent and mcp-server in Java) download their
+# plugins from Maven Central on a cold runner. Started together, they got HTTP 429 (Too Many
+# Requests) from Central on 2026-11-19. They run one at a time; every other variant still runs
+# in parallel.
+[test-groups]
+maven = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary(templates) & (test(=every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here::agent_java) | test(=every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here::mcp_server_java))'
+test-group = 'maven'
