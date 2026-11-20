@@ -116,7 +116,6 @@ public sealed class Service(JsonLog log)
         }
         ctx.Response.StatusCode = reply.Status;
         ctx.Response.ContentType = reply.Type;
-        await ctx.Response.WriteAsync(reply.Body);
         var ms = span.Millis();
         if (span.ParentId is { } parent)
         {
@@ -131,6 +130,9 @@ public sealed class Service(JsonLog log)
         Log.Info("request", ("trace_id", span.TraceId), ("method", method), ("route", route),
             ("status", reply.Status), ("duration_ms", ms));
         Metrics.Inc(route, reply.Status);
+        // Logged and counted before the reply goes out, so a client that has the reply
+        // already finds it in the log and in /metrics.
+        await ctx.Response.WriteAsync(reply.Body);
     }
 
     /// <summary>
