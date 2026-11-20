@@ -25,6 +25,5 @@ Format: Status, Context, Decision, Consequences, Sources. Keep each under a page
 | [0016](0016-swift.md) | Swift: the package at the repository root, a runtime ahead of its parity | proposed |
 | [0017](0017-c.md) | C: a pull transport the caller can replace, our own JSON reader, one arena per answer | proposed |
 | [0018](0018-ci-changed-gate-record.md) | A passing `ci:changed` leaves the platform's gate record | proposed |
-| [0018](0018-runner-host-rules.md) | The runner obeys the build host's rules | accepted |
-| [0019](0019-built-in-roles-inherit-and-check-before-import.md) | Built-in roles: one root they inherit, one text limit, a check before import | proposed |
 | [0019](0019-pr-preflight.md) | A pull request preflight: every failing check named in one place, advisory | proposed |
+| [0020](0020-built-in-roles-inherit-and-check-before-import.md) | Built-in roles: one root they inherit, one text limit, a check before import | proposed |
