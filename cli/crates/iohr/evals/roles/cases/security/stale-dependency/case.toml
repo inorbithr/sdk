@@ -1,0 +1,2 @@
+# Shared case, run with the python-engineer/stale-dependency fixture.
+same_as = "python-engineer/stale-dependency"

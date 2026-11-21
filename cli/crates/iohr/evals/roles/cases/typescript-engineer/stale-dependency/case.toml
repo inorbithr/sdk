@@ -1,0 +1,21 @@
+# Shared case: a stale dependency. axios 1.5.1 carries GHSA-wf5p-g6vw-rhxx / CVE-2023-45857
+# (fixed in 1.6.0), GHSA-8hc4-vh64-cxmj / CVE-2024-39338, GHSA-jr5f-v2jv-69x6 / CVE-2025-27152
+# and GHSA-4hjh-wcwx-xvwj / CVE-2025-58754, with the newest fixes in 1.20.0. Checked 2026-11-19
+# at osv.dev and the npm registry (latest 1.21.1).
+kind = "stale"
+language = "typescript"
+task = "price in prices.ts should return null instead of throwing when the catalogue answers 404."
+
+[defect]
+file = "package.json"
+lines = [7, 7]
+text = "\"axios\": \"1.5.1\""
+class = "stale-dependency"
+words = ["axios", "1.5.1"]
+ids = ["GHSA-wf5p-g6vw-rhxx", "CVE-2023-45857", "GHSA-8hc4-vh64-cxmj", "CVE-2024-39338", "GHSA-jr5f-v2jv-69x6", "CVE-2025-27152", "GHSA-4hjh-wcwx-xvwj", "CVE-2025-58754"]
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran_any = ["npm audit", "osv-scanner", "npm view", "npm outdated", "pnpm audit"]

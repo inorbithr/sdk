@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        id: changed
+      - name: Test the changed packages
+        run: ./scripts/test.sh $CHANGED
+        env:
+          CHANGED: ${{ steps.changed.outputs.all_changed_files }}

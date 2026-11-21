@@ -1,0 +1,18 @@
+# A client for a partner API. Plan: python-engineer, row 2 (the stdlib form: urlopen with no
+# timeout, which waits forever like requests.get with none).
+kind = "planted"
+language = "python"
+task = "stock in partner.py should send the header Accept: application/json."
+
+[defect]
+file = "partner.py"
+lines = [9, 9]
+text = "urllib.request.urlopen("
+class = "http-no-timeout"
+words = ["timeout", "urlopen", "S113", "S310", "hang"]
+
+[check]
+cmd = "python3 -m unittest discover -q"
+
+[proof]
+ran = ["python3 -m unittest|python -m unittest|pytest"]

@@ -1,0 +1,17 @@
+# An upstream reader. Plan: go-engineer, row 4.
+kind = "planted"
+language = "go"
+task = "Latest in feed.go should return a clear error when the feed answers 404."
+
+[defect]
+file = "feed.go"
+lines = [15, 22]
+text = "resp, err := c.Get(url)"
+class = "body-not-closed"
+words = ["Body.Close", "bodyclose", "close", "leak"]
+
+[check]
+cmd = "go test ./..."
+
+[proof]
+ran = ["go test"]

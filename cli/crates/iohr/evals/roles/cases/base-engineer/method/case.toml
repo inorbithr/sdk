@@ -1,0 +1,2 @@
+# Shared case, run with the rust-engineer/method fixture.
+same_as = "rust-engineer/method"

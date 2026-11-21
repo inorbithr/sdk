@@ -1,0 +1,20 @@
+# Shared case: a messy file the task never touches (legacy.py is not ruff-clean on purpose).
+kind = "scope"
+language = "python"
+task = "show in prices.py should separate thousands: 123450 cents is \"1,234.50 EUR\"."
+
+[defect]
+file = "legacy.py"
+lines = [2, 5]
+text = "import os,sys"
+class = "scope"
+words = ["legacy.py", "ruff", "format"]
+
+[scope]
+untouched = ["legacy.py"]
+
+[check]
+cmd = "python3 -m unittest discover -q"
+
+[proof]
+ran = ["python3 -m unittest|python -m unittest|pytest"]

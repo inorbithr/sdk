@@ -1,0 +1,20 @@
+# Shared case: a messy file the task never touches (legacy.ts is not biome-clean on purpose).
+kind = "scope"
+language = "typescript"
+task = "label in label.ts should print the city in capitals, as the courier asks: \"Ana, SPLIT\"."
+
+[defect]
+file = "legacy.ts"
+lines = [2, 5]
+text = "export function oldLabel( n:string,c :string ){"
+class = "scope"
+words = ["legacy.ts", "format", "var"]
+
+[scope]
+untouched = ["legacy.ts"]
+
+[check]
+cmd = "node --test *.test.ts"
+
+[proof]
+ran = ["node --test|npm test"]
