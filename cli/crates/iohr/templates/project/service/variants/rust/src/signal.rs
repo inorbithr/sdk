@@ -2,7 +2,7 @@
 //! so this declares the C library's `signal` (already linked on Unix). The handler only stores
 //! to an atomic, which is async-signal-safe. Elsewhere (Windows) nothing is installed.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 /// Set when the process was asked to stop.
 pub static STOP: AtomicBool = AtomicBool::new(false);
@@ -13,7 +13,8 @@ pub static STOP: AtomicBool = AtomicBool::new(false);
     reason = "the one call into the C library for signals; std has none"
 )]
 mod unix {
-    use super::{Ordering, STOP};
+    use super::STOP;
+    use std::sync::atomic::Ordering;
 
     unsafe extern "C" {
         fn signal(signum: i32, handler: extern "C" fn(i32)) -> usize;

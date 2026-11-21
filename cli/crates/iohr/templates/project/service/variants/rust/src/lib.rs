@@ -198,7 +198,6 @@ fn handle(svc: &Service, mut stream: TcpStream) {
         body.len(),
         span.header()
     );
-    let _ = stream.write_all(reply.as_bytes());
     let ms = span.millis();
     let method = parsed
         .as_ref()
@@ -222,6 +221,9 @@ fn handle(svc: &Service, mut stream: TcpStream) {
     fields.insert(0, ("method", Val::Str(method)));
     svc.log.info("request", &fields);
     svc.metrics.inc(route_name, status);
+    // Logged and counted before the reply goes out, so a client that has the reply
+    // already finds it in the log and in /metrics.
+    let _ = stream.write_all(reply.as_bytes());
 }
 
 fn clone_val<'a>(v: &Val<'a>) -> Val<'a> {

@@ -373,8 +373,9 @@ fn init_writes_the_roles_the_record_the_memory_readme_and_the_agent_section() {
     // Signed out: said once, nothing fails.
     assert_eq!(t.matches("Not signed in").count(), 1, "{t}");
 
-    // The language came from the build file: a Rust project gets the Rust engineer.
-    for name in ["security", "rust-engineer"] {
+    // The language came from the build file: a Rust project gets the Rust engineer, beside
+    // the base every role loads with.
+    for name in ["base-engineer", "security", "rust-engineer"] {
         let p = read(&dir, &format!("atlas/roles/{name}.md"));
         assert!(p.contains(&format!("name: {name}")), "{p}");
         assert!(p.contains("parent:"), "{p}");
@@ -414,6 +415,45 @@ fn init_writes_the_roles_the_record_the_memory_readme_and_the_agent_section() {
     assert!(o.status.success(), "{t}");
     assert!(t.contains("\"doctrine\""), "{t}");
     assert!(t.contains("\"parent\""), "{t}");
+}
+
+#[test]
+fn a_repo_of_two_languages_gets_both_engineers_and_the_base() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = h.path().join("work/made");
+    std::fs::create_dir_all(dir.join("web")).unwrap();
+    std::fs::write(dir.join("go.mod"), "module made\n").unwrap();
+    std::fs::write(dir.join("web/package.json"), "{}\n").unwrap();
+    std::fs::write(dir.join("inorbit.toml"), "name = \"made\"\n").unwrap();
+    let o = iohr(h.path(), &dir, None, &["atlas", "init", "--json"]);
+    assert!(o.status.success(), "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["language"], "go", "{v}");
+    assert_eq!(
+        v["languages"],
+        serde_json::json!(["go", "typescript"]),
+        "{v}"
+    );
+    for name in [
+        "base-engineer",
+        "security",
+        "go-engineer",
+        "typescript-engineer",
+    ] {
+        assert!(
+            dir.join(format!("atlas/roles/{name}.md")).is_file(),
+            "{name}"
+        );
+    }
+    let record = read(&dir, "inorbit.toml");
+    assert!(record.contains("\"typescript-engineer\""), "{record}");
+    // The list names what the project imports, each with its gates; the base is the root.
+    let o = iohr(h.path(), &dir, None, &["atlas", "roles", "list", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    let roles = v["roles"].as_array().unwrap();
+    assert_eq!(roles.len(), 3, "{v}");
+    assert!(roles.iter().all(|r| r["checks"].is_array()), "{v}");
+    assert!(roles.iter().all(|r| r["name"] != "base-engineer"), "{v}");
 }
 
 #[test]
@@ -533,7 +573,7 @@ async fn signed_in_init_imports_under_the_base_then_leaves_alone_and_skips() {
         serde_json::json!({ "personalities": [
             {"name": "base-engineer", "parent": "", "head_version": 1},
             {"name": "security", "parent": "base-engineer", "head_version": 1},
-            {"name": "rust-engineer", "parent": "security", "head_version": 1},
+            {"name": "rust-engineer", "parent": "base-engineer", "head_version": 1},
         ]}),
         200,
     )
@@ -559,7 +599,7 @@ async fn signed_in_init_imports_under_the_base_then_leaves_alone_and_skips() {
         serde_json::json!({ "personalities": [
             {"name": "base-engineer", "parent": "", "head_version": 1},
             {"name": "security", "parent": "base-engineer", "head_version": 4},
-            {"name": "rust-engineer", "parent": "security", "head_version": 1},
+            {"name": "rust-engineer", "parent": "base-engineer", "head_version": 1},
         ]}),
         200,
     )
@@ -576,6 +616,48 @@ async fn signed_in_init_imports_under_the_base_then_leaves_alone_and_skips() {
         imports(&server3.received_requests().await.unwrap()).len(),
         0
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_role_under_another_parent_is_a_change_and_goes_back_under_its_own() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = fresh_rust_project(h.path());
+    let server = MockServer::start().await;
+    mount_roles(&server, serde_json::json!({ "personalities": [] }), 200).await;
+    let o = iohr(h.path(), &dir, Some(&server.uri()), &["atlas", "init"]);
+    assert!(o.status.success(), "{}", text(&o));
+
+    // The account still has our version of every role, but rust-engineer hangs under
+    // security: the lines match, the parent does not, so it is sent again under the root.
+    let drifted = MockServer::start().await;
+    mount_roles(
+        &drifted,
+        serde_json::json!({ "personalities": [
+            {"name": "base-engineer", "parent": "", "head_version": 1},
+            {"name": "security", "parent": "base-engineer", "head_version": 1},
+            {"name": "rust-engineer", "parent": "security", "head_version": 1},
+        ]}),
+        200,
+    )
+    .await;
+    let o = iohr(
+        h.path(),
+        &dir,
+        Some(&drifted.uri()),
+        &["atlas", "roles", "import"],
+    );
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(t.contains("rust-engineer: upgraded"), "{t}");
+    assert!(t.contains("parent security \u{2192} base-engineer"), "{t}");
+    assert!(t.contains("not edited in InOrbit"), "{t}");
+    assert!(t.contains("security: unchanged"), "{t}");
+    let sent = imports(&drifted.received_requests().await.unwrap());
+    assert_eq!(sent.len(), 1, "{t}");
+    let roles = sent[0]["personalities"].as_array().unwrap();
+    assert_eq!(roles.len(), 1, "only the drifted role: {roles:?}");
+    assert_eq!(roles[0]["name"], "rust-engineer");
+    assert_eq!(roles[0]["parent"], "base-engineer");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -736,6 +818,8 @@ async fn an_unmodified_older_built_in_in_the_account_is_upgraded_and_says_v1_to_
     assert!(o.status.success(), "{t}");
     assert!(t.contains("security: upgraded v1 \u{2192} v2"), "{t}");
     assert!(!t.contains("left alone v1"), "{t}");
+    // Upgraded without --upgrade, so the line says why it was safe.
+    assert!(t.contains("not edited in InOrbit"), "{t}");
     let sent = imports(&server.received_requests().await.unwrap());
     assert_eq!(sent.len(), 1, "one import, with the newer security in it");
     assert!(

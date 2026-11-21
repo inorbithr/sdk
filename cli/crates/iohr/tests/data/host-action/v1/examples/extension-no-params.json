@@ -1,0 +1,11 @@
+{
+  "provider": {
+    "extension": "example",
+    "version": "1.2.0",
+    "manifest_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "action": "example.flush",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {},
+  "effect": "Flushes the example cache."
+}

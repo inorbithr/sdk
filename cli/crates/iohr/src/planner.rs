@@ -458,7 +458,9 @@ pub(crate) fn item_fields(item: &Value) -> Map<String, Value> {
 mod tests {
     use std::sync::Arc;
 
-    use iohr_auth::{Redacted, StaticToken};
+    use inorbithr::Secret;
+
+    use crate::auth::StaticToken;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -468,7 +470,7 @@ mod tests {
     const PLAN: &str = "plan_01TEST";
 
     fn api(server: &MockServer) -> Api {
-        let cred = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+        let cred = Arc::new(AnyCredential::Token(StaticToken::new(Secret::new(
             "test-token".to_owned(),
         ))));
         Api::new(&server.uri(), cred, false).unwrap()

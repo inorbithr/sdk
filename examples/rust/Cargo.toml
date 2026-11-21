@@ -7,7 +7,7 @@ publish = false
 description = "Small, complete programs that use the inorbithr crate; CI compiles them and the README quotes them."
 
 [dependencies]
-inorbithr = { path = "../../rust" }
+inorbithr = { path = "../../rust", features = ["login"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "macros", "fs"] }
 

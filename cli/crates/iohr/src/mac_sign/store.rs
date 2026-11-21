@@ -59,7 +59,7 @@ pub(crate) fn save(dir: &Path, key: &Enrolled) -> Result<(), String> {
     let path = record(dir);
     let text = serde_json::to_string_pretty(key).map_err(|_| "cannot write the key record")?;
     // Written whole beside it and renamed over it, so a reader sees one record or the other.
-    iohr_auth::write_private(dir, RECORD, text.as_bytes())
+    inorbithr::login::write_private(dir, RECORD, text.as_bytes())
         .map_err(|e| format!("cannot write {}: {}", path.display(), e.kind()))
 }
 

@@ -1,0 +1,9 @@
+name: @@MODULE@@
+description: "@@ID@@: the demo project's private macOS service (Dart, core libraries only)."
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+# No dependencies: the token channel and the panel are dart:io's sockets and HTTP server.

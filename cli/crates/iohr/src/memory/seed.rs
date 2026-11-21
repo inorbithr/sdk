@@ -13,24 +13,31 @@ pub fn readme_path() -> String {
     format!("{PROJECT_DIR}/README.md")
 }
 
-/// The seed memories of a project of `lang`: the recall lines of the roles it gets
-/// (`security` and its language's engineer), each as a fact that names its source.
+/// The seed memories of a project of stack `s`: the recall lines of the roles it gets
+/// (`base-engineer`, `security`, each of its languages' engineers and the roles its files
+/// mark) and of the roles they inherit from, each as a fact that names its source and the day
+/// it was checked.
 #[must_use]
-pub fn entries(lang: Option<&str>) -> Vec<Entry> {
+pub fn entries(s: &roles::Stack) -> Vec<Entry> {
     let mut out: Vec<Entry> = Vec::new();
-    for p in roles::selection(lang) {
-        for l in p.lines.iter().filter(|l| l.place == "recall") {
-            let why = format!(
-                "seed from the {} role (catalogue v{}); source {}",
-                p.title,
-                p.version,
-                l.cites.first().map_or("", String::as_str)
-            );
-            let mut e = Entry::new(&l.text, Kind::Fact, &why, Vec::new(), false);
-            // A built-in fact was last checked when the catalogue was, not when it was seeded.
-            e.checked = Some(roles::CHECKED.to_owned());
-            if !out.iter().any(|o| o.id == e.id) {
-                out.push(e);
+    for chosen in roles::selection(s) {
+        let mut chain = roles::ancestors(&chosen);
+        chain.push(chosen);
+        for p in &chain {
+            for l in p.lines.iter().filter(|l| l.place == "recall") {
+                let why = format!(
+                    "seed from the {} role (catalogue v{}); source {}",
+                    p.title,
+                    p.version,
+                    l.cites.first().map_or("", String::as_str)
+                );
+                let mut e = Entry::new(&l.text, Kind::Fact, &why, Vec::new(), false);
+                // A built-in fact was last checked when its role (or the line) was, not when
+                // it was seeded.
+                e.checked = Some(l.checked_on(p).to_owned());
+                if !out.iter().any(|o| o.id == e.id) {
+                    out.push(e);
+                }
             }
         }
     }
@@ -39,9 +46,9 @@ pub fn entries(lang: Option<&str>) -> Vec<Entry> {
 
 /// Every file a new project gets under `.inorbit/memory/`, as relative path and text.
 #[must_use]
-pub fn files(lang: Option<&str>, slug: &str) -> Vec<(String, String)> {
+pub fn files(s: &roles::Stack, slug: &str) -> Vec<(String, String)> {
     let mut out = vec![(readme_path(), readme(slug))];
-    out.extend(entries(lang).into_iter().map(|e| {
+    out.extend(entries(s).into_iter().map(|e| {
         (
             format!("{PROJECT_DIR}/{}.md", e.id),
             e.render(Scope::Project),
@@ -107,23 +114,26 @@ mod tests {
 
     #[test]
     fn a_rust_project_gets_the_readme_and_the_recall_lines_of_two_roles() {
-        let f = files(Some("rust"), "x");
+        let f = files(&roles::Stack::of(Some("rust")), "x");
         assert_eq!(f[0].0, ".inorbit/memory/README.md");
         assert!(f.len() > 5, "{}", f.len());
         assert!(f.iter().all(|(p, _)| p.starts_with(".inorbit/memory/")));
-        let e = entries(Some("rust"));
+        let e = entries(&roles::Stack::of(Some("rust")));
         assert!(e.iter().all(|e| e.why.contains("source https://")));
         assert!(e.iter().all(|e| e.refs.is_empty()));
     }
 
     #[test]
     fn no_language_still_seeds_the_security_role() {
-        assert_ne!(entries(None).len(), 0);
+        assert_ne!(entries(&roles::Stack::default()).len(), 0);
     }
 
     #[test]
     fn the_seeds_read_back_as_the_same_memories() {
-        for (path, text) in files(Some("go"), "x").into_iter().skip(1) {
+        for (path, text) in files(&roles::Stack::of(Some("go")), "x")
+            .into_iter()
+            .skip(1)
+        {
             let stem = path
                 .rsplit('/')
                 .next()

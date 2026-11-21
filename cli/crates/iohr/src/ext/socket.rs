@@ -20,7 +20,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use iohr_auth::Redacted;
+use inorbithr::Secret;
 use serde::Deserialize;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
@@ -36,7 +36,7 @@ const MINT_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug)]
 pub struct Minted {
     /// The access token.
-    pub access_token: Redacted<String>,
+    pub access_token: Secret<String>,
     /// When it expires, RFC 3339.
     pub expires_at: String,
 }
@@ -341,7 +341,7 @@ mod tests {
 
     use std::sync::Arc;
 
-    use iohr_auth::Redacted;
+    use inorbithr::Secret;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     use super::{Ctx, MintError, Minted, Minter, handle, parse_head, requested_scopes};
@@ -361,7 +361,7 @@ mod tests {
                 ));
             }
             Ok(Minted {
-                access_token: Redacted::new("tok".into()),
+                access_token: Secret::new("tok".into()),
                 expires_at: "2026-10-03T12:00:00Z".into(),
             })
         }

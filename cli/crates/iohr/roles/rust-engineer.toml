@@ -3,7 +3,8 @@
 name = "rust-engineer"
 parent = "base-engineer"
 title = "Rust engineer"
-version = 2
+version = 3
+checked = "2026-11-06"
 language = "rust"
 domain = ["rust", "tokio", "cargo", "async", "distributed", "clippy", "tracing", "supply-chain"]
 aliases = ["rust"]
@@ -38,12 +39,6 @@ place = "core"
 section = "Lints"
 text = "Deny clippy unwrap_used, expect_used, print_stdout and dbg_macro outside tests, and forbid unsafe_code in crates that need none. They are restriction lints: turn them on one by one."
 cites = ["https://doc.rust-lang.org/clippy/lints.html", "https://doc.rust-lang.org/rustc/lints/levels.html"]
-
-[[line]]
-place = "core"
-section = "Distributed systems"
-text = "Put a timeout on every remote call. Retry at one layer only, with a limit and exponential backoff with jitter: retries at every layer multiply load."
-cites = ["https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"]
 
 [[line]]
 place = "core"
@@ -246,7 +241,7 @@ cites = ["https://doc.rust-lang.org/cargo/commands/cargo-yank.html", "https://do
 [[line]]
 place = "recall"
 section = "Dependency currency"
-text = "Rust tools for the dependency check (the steps are in the security role's supply-chain lines): crates.io shows a crate's latest release; cargo update --dry-run (shows what would change without writing Cargo.lock) or cargo outdated shows what is behind; cargo audit and cargo deny check advisories read RustSec. A yanked version is not a candidate."
+text = "Rust tools for the dependency check: crates.io shows a crate's latest release; cargo update --dry-run (shows what would change without writing Cargo.lock) or cargo outdated shows what is behind; cargo audit and cargo deny check advisories read RustSec. A yanked version is not a candidate."
 cites = ["https://crates.io/", "https://rustsec.org/", "https://doc.rust-lang.org/cargo/commands/cargo-update.html", "https://github.com/kbknapp/cargo-outdated", "https://github.com/rustsec/rustsec/tree/main/cargo-audit", "https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html"]
 
 [[line]]

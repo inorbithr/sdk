@@ -43,13 +43,33 @@ fn run(home: &Path, cwd: &Path, args: &[&str]) -> Output {
         )
         .env("DOTNET_CLI_HOME", home.join("dotnet"))
         .env("NUGET_PACKAGES", home.join("nuget"))
+        // NuGet on .NET reads its user config folder from APPDATA and its caches from
+        // LOCALAPPDATA (NuGet.Common `NuGetEnvironment`); without them every Windows restore
+        // stops with "Value cannot be null. (Parameter 'path1')". Unix NuGet ignores both.
+        .env("APPDATA", home.join("appdata"))
+        .env("LOCALAPPDATA", home.join("localappdata"))
         .env("DOTNET_NOLOGO", "1")
         .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
         .env("PUB_CACHE", home.join("pub"))
+        // On Windows `rustc` finds the MSVC linker through the Visual Studio installer
+        // (its COM server under `ProgramData`, then `vswhere` under `ProgramFiles(x86)`);
+        // without these a Rust variant fails to link its tests. None is set elsewhere.
         .envs(
-            ["JAVA_HOME", "DOTNET_ROOT"]
-                .into_iter()
-                .filter_map(|k| std::env::var_os(k).map(|v| (k, v))),
+            [
+                "JAVA_HOME",
+                "DOTNET_ROOT",
+                "ProgramData",
+                "ProgramFiles",
+                "ProgramFiles(x86)",
+                "ProgramW6432",
+                "CommonProgramFiles",
+                "CommonProgramFiles(x86)",
+                "SystemDrive",
+                "windir",
+                "PROCESSOR_ARCHITECTURE",
+            ]
+            .into_iter()
+            .filter_map(|k| std::env::var_os(k).map(|v| (k, v))),
         )
         .stdin(Stdio::null())
         .output()
@@ -69,6 +89,20 @@ fn on_path(program: &str) -> bool {
         std::env::split_paths(&p)
             .any(|d| d.join(program).is_file() || d.join(format!("{program}.exe")).is_file())
     })
+}
+
+/// Whether the program is on the PATH and starts: a version-manager shim (mise's `dotnet`)
+/// is a file on the PATH that refuses to run outside a folder that sets a version, and a
+/// language whose toolchain does not run is skipped like one that is missing, never faked.
+fn toolchain_runs(program: &str) -> bool {
+    on_path(program)
+        && (program != "dotnet"
+            || Command::new("dotnet")
+                .arg("--version")
+                .current_dir(std::env::temp_dir())
+                .stdin(Stdio::null())
+                .output()
+                .is_ok_and(|o| o.status.success()))
 }
 
 /// Whether the package registry a variant installs from answers (TCP connect, 5 s).
@@ -248,8 +282,17 @@ fn the_enterprise_floor_is_written_on_every_template_but_blank() {
         ("service", "go"),
         ("service", "python"),
         ("service", "rust"),
+        ("service", "java"),
+        ("service", "csharp"),
+        ("service", "dart"),
+        ("service", "swift"),
         ("cli", "go"),
         ("cli", "rust"),
+        ("cli", "typescript"),
+        ("cli", "java"),
+        ("cli", "csharp"),
+        ("cli", "dart"),
+        ("cli", "swift"),
         ("agent", "python"),
         ("agent", "typescript"),
         ("agent", "go"),
@@ -267,8 +310,19 @@ fn the_enterprise_floor_is_written_on_every_template_but_blank() {
         ("mcp-server", "swift"),
         ("mcp-server", "dart"),
         ("evals", "python"),
+        ("evals", "typescript"),
+        ("evals", "go"),
+        ("evals", "rust"),
+        ("evals", "java"),
+        ("evals", "csharp"),
+        ("evals", "dart"),
+        ("evals", "swift"),
         ("extension", "python"),
         ("extension", "typescript"),
+        ("extension", "java"),
+        ("extension", "csharp"),
+        ("extension", "dart"),
+        ("extension", "swift"),
     ] {
         let (_h, dir, out) = init(template, Some(lang), false, &[]);
         assert!(out.status.success(), "{template}/{lang}: {}", text(&out));
@@ -427,6 +481,11 @@ fn evals_and_mcp_server_carry_what_their_readme_promises_and_leave_no_placeholde
             "mcp-server/{lang}: the official SDK is pinned exactly"
         );
         assert!(dir.join(lock).is_file(), "mcp-server/{lang}: {lock}");
+        // The repository's audit config beside a template lockfile stays in the repository.
+        assert!(
+            !dir.join("osv-scanner.toml").exists(),
+            "mcp-server/{lang}: osv-scanner.toml is repository config"
+        );
         assert!(file(&dir, "README.md").contains("2026-07-28"), "{lang}");
         assert!(!holds(&dir, "@@"), "mcp-server/{lang}: placeholder left");
     }
@@ -450,61 +509,104 @@ fn blank_keeps_a_small_floor_and_no_ci_unless_asked() {
     assert!(dir.join(".github/workflows/ci.yml").is_file());
 }
 
-/// Init, then the template's own check: the smoke test runs inside init (`done:` line), and
-/// for the languages whose toolchain is here, the project's own test command passes again
-/// when run by hand.
-#[test]
-fn every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here() {
-    let table: &[(&str, &str, &[&str])] = &[
-        ("service", "go", &["go"]),
-        ("service", "python", &["python3"]),
-        ("service", "typescript", &["node"]),
-        ("service", "rust", &["cargo"]),
-        ("cli", "go", &["go"]),
-        ("cli", "python", &["python3"]),
-        ("cli", "rust", &["cargo"]),
-        ("agent", "python", &["uv"]),
-        ("agent", "typescript", &["node"]),
-        ("agent", "go", &["go"]),
-        ("agent", "rust", &["cargo"]),
-        ("agent", "java", &["mvn", "java"]),
-        ("agent", "csharp", &["dotnet"]),
-        ("agent", "swift", &["swift"]),
-        ("agent", "dart", &["dart"]),
-        ("mcp-server", "python", &["uv"]),
-        ("mcp-server", "typescript", &["node", "npm"]),
-        ("mcp-server", "go", &["go"]),
-        ("mcp-server", "rust", &["cargo"]),
-        ("mcp-server", "java", &["mvn", "java"]),
-        ("mcp-server", "csharp", &["dotnet"]),
-        ("mcp-server", "swift", &["swift"]),
-        ("mcp-server", "dart", &["dart"]),
-        ("evals", "python", &["python3"]),
-        ("extension", "python", &["python3"]),
-        ("extension", "typescript", &["node"]),
-        ("extension", "go", &["go"]),
-        ("extension", "rust", &["cargo"]),
-    ];
-    let mut ran = 0;
-    for (template, lang, needs) in table {
-        if !needs.iter().all(|p| on_path(p)) {
-            continue;
-        }
-        // An MCP server's smoke installs the official SDK from its registry (a cold cache in
-        // this test's private home), so it needs the network; without it the row is skipped.
-        if *template == "mcp-server" && !registry_reachable(lang) {
-            eprintln!("{template}/{lang}: skipped, its package registry is not reachable");
-            continue;
-        }
-        let (_h, dir, out) = init(template, Some(lang), true, &[]);
-        assert!(out.status.success(), "{template}/{lang}: {}", text(&out));
-        assert!(
-            text(&out).contains("done:"),
-            "{template}/{lang} smoke: {}",
-            text(&out)
-        );
-        assert!(dir.join("README.md").is_file(), "{template}/{lang}");
-        ran += 1;
+/// One row of the table: init, then that template's own check. The smoke test runs inside init
+/// (`done:` line), and when the toolchain is here the project's own check passes. A row whose
+/// toolchain is not on the PATH is skipped; the reason comes back for the test to print.
+fn check_variant(template: &str, lang: &str, needs: &[&str]) -> Option<String> {
+    if !needs.iter().all(|p| toolchain_runs(p)) {
+        return Some(format!("{template}/{lang}: skipped, {needs:?} not here"));
     }
-    eprintln!("variants checked: {ran} of {}", table.len());
+    // An MCP server's smoke installs the official SDK from its registry (a cold cache in
+    // this test's private home), so it needs the network; without it the row is skipped.
+    // The C# and Dart evals restore their pinned test packages once, so they need it too.
+    let restores =
+        template == "mcp-server" || (template == "evals" && matches!(lang, "csharp" | "dart"));
+    if restores && !registry_reachable(lang) {
+        return Some(format!(
+            "{template}/{lang}: skipped, its package registry is not reachable"
+        ));
+    }
+    let (_h, dir, out) = init(template, Some(lang), true, &[]);
+    assert!(out.status.success(), "{template}/{lang}: {}", text(&out));
+    assert!(
+        text(&out).contains("done:"),
+        "{template}/{lang} smoke: {}",
+        text(&out)
+    );
+    assert!(dir.join("README.md").is_file(), "{template}/{lang}");
+    None
+}
+
+/// Every live variant, one test each (nextest schedules tests, not the rows of one loop, so the
+/// slow builds run in parallel). Each test has its own private home and folder, so none shares
+/// state. This table is the one list; add a row for a new variant.
+macro_rules! every_live_variant {
+    ($($name:ident: ($template:expr, $lang:expr, $needs:expr),)+) => {
+        mod every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here {
+            use super::check_variant;
+            $(
+                #[test]
+                fn $name() {
+                    if let Some(why) = check_variant($template, $lang, $needs) {
+                        eprintln!("{why}");
+                    }
+                }
+            )+
+        }
+    };
+}
+
+every_live_variant! {
+    service_go: ("service", "go", &["go"]),
+    service_python: ("service", "python", &["python3"]),
+    service_typescript: ("service", "typescript", &["node"]),
+    service_rust: ("service", "rust", &["cargo"]),
+    service_java: ("service", "java", &["javac", "java"]),
+    service_csharp: ("service", "csharp", &["dotnet"]),
+    service_dart: ("service", "dart", &["dart"]),
+    service_swift: ("service", "swift", &["swift"]),
+    cli_go: ("cli", "go", &["go"]),
+    cli_python: ("cli", "python", &["python3"]),
+    cli_rust: ("cli", "rust", &["cargo"]),
+    cli_typescript: ("cli", "typescript", &["node"]),
+    cli_java: ("cli", "java", &["javac", "java"]),
+    cli_csharp: ("cli", "csharp", &["dotnet"]),
+    cli_dart: ("cli", "dart", &["dart"]),
+    cli_swift: ("cli", "swift", &["swift"]),
+    blank_java: ("blank", "java", &["javac", "java"]),
+    blank_csharp: ("blank", "csharp", &["dotnet"]),
+    blank_dart: ("blank", "dart", &["dart"]),
+    blank_swift: ("blank", "swift", &["swift"]),
+    agent_python: ("agent", "python", &["uv"]),
+    agent_typescript: ("agent", "typescript", &["node"]),
+    agent_go: ("agent", "go", &["go"]),
+    agent_rust: ("agent", "rust", &["cargo"]),
+    agent_java: ("agent", "java", &["mvn", "java"]),
+    agent_csharp: ("agent", "csharp", &["dotnet"]),
+    agent_swift: ("agent", "swift", &["swift"]),
+    agent_dart: ("agent", "dart", &["dart"]),
+    mcp_server_python: ("mcp-server", "python", &["uv"]),
+    mcp_server_typescript: ("mcp-server", "typescript", &["node", "npm"]),
+    mcp_server_go: ("mcp-server", "go", &["go"]),
+    mcp_server_rust: ("mcp-server", "rust", &["cargo"]),
+    mcp_server_java: ("mcp-server", "java", &["mvn", "java"]),
+    mcp_server_csharp: ("mcp-server", "csharp", &["dotnet"]),
+    mcp_server_swift: ("mcp-server", "swift", &["swift"]),
+    mcp_server_dart: ("mcp-server", "dart", &["dart"]),
+    evals_python: ("evals", "python", &["python3"]),
+    evals_typescript: ("evals", "typescript", &["node"]),
+    evals_go: ("evals", "go", &["go"]),
+    evals_rust: ("evals", "rust", &["cargo"]),
+    evals_java: ("evals", "java", &["javac", "java"]),
+    evals_csharp: ("evals", "csharp", &["dotnet"]),
+    evals_dart: ("evals", "dart", &["dart"]),
+    evals_swift: ("evals", "swift", &["swift"]),
+    extension_python: ("extension", "python", &["python3"]),
+    extension_typescript: ("extension", "typescript", &["node"]),
+    extension_go: ("extension", "go", &["go"]),
+    extension_rust: ("extension", "rust", &["cargo"]),
+    extension_java: ("extension", "java", &["javac", "java"]),
+    extension_csharp: ("extension", "csharp", &["dotnet"]),
+    extension_dart: ("extension", "dart", &["dart"]),
+    extension_swift: ("extension", "swift", &["swift"]),
 }

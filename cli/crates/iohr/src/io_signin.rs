@@ -253,8 +253,8 @@ mod tests {
         assert!(credential("not a url", s()).is_err());
     }
 
+    use crate::auth::Credential as _;
     use crate::context::AnyCredential;
-    use iohr_auth::Credential as _;
     use wiremock::matchers::{body_string_contains, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 

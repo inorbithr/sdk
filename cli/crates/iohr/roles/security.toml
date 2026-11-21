@@ -4,6 +4,7 @@ name = "security"
 parent = "base-engineer"
 title = "Security"
 version = 2
+checked = "2026-11-06"
 domain = ["security", "vulnerability", "authorization", "authentication", "injection", "threat", "secrets", "cryptography", "supply-chain", "dependency", "incident", "compliance", "privacy", "oauth", "prompt-injection", "agent"]
 aliases = ["security-engineer"]
 model = "sonnet"

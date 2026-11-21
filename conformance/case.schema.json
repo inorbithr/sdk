@@ -27,7 +27,26 @@
         "config_file": { "type": "string", "description": "TOML text the driver writes to `{dir}/config.toml` and passes as `config_file`; placeholders as in `env`." },
         "files": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Files written into `{dir}` before the client is built, name to content." },
         "profile": { "type": "string", "description": "The `profile` option in code." },
-        "credential_sources": { "type": "array", "items": { "enum": ["env", "workload", "file", "cli"] } },
+        "credential_sources": { "type": "array", "items": { "enum": ["env", "workload", "file", "login", "cli"] } },
+        "stored_session": {
+          "type": "object",
+          "required": ["profile", "account", "access_token", "refresh_token", "expires_in_s"],
+          "additionalProperties": false,
+          "description": "RFC 0231, docs/config.md section 5.6: seed the driver's in-memory store with a person's session before the client is built, as `iohr login` leaves it. The issuer is the profile table's `issuer` (use `{replay}`).",
+          "properties": {
+            "profile": { "type": "string" },
+            "account": { "type": "string" },
+            "access_token": { "type": "string" },
+            "refresh_token": { "type": "string" },
+            "expires_in_s": { "type": "integer", "description": "Seconds the access token has left when the client is built." },
+            "rotated_by_another_process": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "What another process writes to the entry the moment the refresh with `refresh_token` is sent (a rotation that beat this client to it); a later read of the store returns it.",
+              "properties": { "access_token": { "type": "string" }, "refresh_token": { "type": "string" }, "expires_in_s": { "type": "integer" } }
+            }
+          }
+        },
         "cli": { "type": "boolean", "description": "Point `cli_path` at the replay binary, which acts as a fake `iohr auth token` (replay feature 6)." },
         "pipeline": {
           "type": "object",
@@ -65,7 +84,7 @@
       "required": ["op"],
       "additionalProperties": false,
       "properties": {
-        "op": { "enum": ["me", "example", "accounts.get_me", "accounts.get_usage", "radar.get_digest", "events.create_endpoint", "events.update_endpoint", "events.delete_endpoint", "events.stream_events", "decisions.create_document"] },
+        "op": { "enum": ["me", "example", "login.browser", "login.device", "login.sign_out", "accounts.get_me", "accounts.get_usage", "radar.get_digest", "events.create_endpoint", "events.update_endpoint", "events.delete_endpoint", "events.stream_events", "decisions.create_document"] },
         "args": { "type": "object" },
         "repeat": { "type": "integer", "minimum": 1, "description": "Run the action this many times on one client." },
         "concurrent": { "type": "integer", "minimum": 1, "description": "Run the action this many times at once on one client." },
@@ -229,7 +248,8 @@
         },
         "rate_limit": { "type": ["object", "null"], "description": "The snapshot on the result: limit, remaining, reset_ms, policy." },
         "idempotency_key": { "type": "string", "description": "The key on the result; `*` for any." },
-        "config": { "type": "object", "description": "A subset of `describe()` (config.md section 2.6)." }
+        "config": { "type": "object", "description": "A subset of `describe()` (config.md section 2.6)." },
+        "stored_session": { "description": "RFC 0231: the store entry after the case, a subset of `{ refresh_token, access_token }`, or `absent` once signed out." }
       }
     }
   }

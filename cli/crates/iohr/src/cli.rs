@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
-use iohr_auth::ProfileName;
+use inorbithr::login::ProfileName;
 
 use inorbithr::DEFAULT_BASE_URL;
 
@@ -61,7 +61,7 @@ pub struct Global {
     #[arg(long, global = true, env = "IOHR_ISSUER", hide = true)]
     issuer: Option<String>,
     /// The OAuth client the command line signs in as.
-    #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
+    #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = inorbithr::login::DEFAULT_CLIENT_ID, hide = true)]
     pub client_id: String,
     /// Sign in as someone other than a person (`iohr runner` and `iohr coordinator` only).
     ///
@@ -195,7 +195,7 @@ impl Global {
         self.issuer
             .as_deref()
             .or(self.environment().issuer.as_deref())
-            .unwrap_or(iohr_auth::DEFAULT_ISSUER)
+            .unwrap_or(inorbithr::login::DEFAULT_ISSUER)
     }
 
     /// Refuses an environment whose address is a placeholder, unless the caller named
@@ -823,8 +823,8 @@ pub enum RunnerCommand {
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
         capacity: Option<u32>,
         /// The turn classes to take, comma separated: `coordinate`, `build` (default:
-        /// `[runner] kinds`, else both). Build turns pause while /mnt/build has under
-        /// 100 GB free.
+        /// `[runner] kinds`, else both). With `[runner] build_volume` set, build turns
+        /// pause while it has under `build_volume_min_free_gb` (default 100) GB free.
         #[arg(long, value_delimiter = ',')]
         kinds: Option<Vec<String>>,
         /// Never look for a newer iohr or restart into one (default: `[runner]
@@ -1882,7 +1882,7 @@ pub enum AtlasCommand {
     /// Send the atlas documents to the project's Decisions space.
     Sync(SyncArgs),
     /// The built-in roles of this project.
-    #[command(subcommand, alias = "personalities")]
+    #[command(subcommand, alias = crate::roles::LEGACY_CLI_ALIAS)]
     Roles(RolesCommand),
     /// Search the text of the sites this project crawled (PRD 0192).
     ///

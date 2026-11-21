@@ -181,7 +181,7 @@ Both keys always work. For `⌥i`, set Option to send Esc or Meta (iTerm2: Profi
 panel leaves Ctrl-G to the `?` menu and shows `⌥i`.
 
 The key opens the menu: `a` auto mode, `p` approvals, `w` workloads, `r` run, `s` status,
-`?` help, `x` stop the panel. Arrows and Enter move and open, Esc closes. Keys are taken only
+`h` share to phone, `t` let the phone type, `?` help, `x` stop the panel. Arrows and Enter move and open, Esc closes. Keys are taken only
 while the panel is open; every other byte goes to your shell untouched.
 
 The mouse works on the menu and the views while they are open: a click on a row selects and
@@ -199,12 +199,20 @@ deeper; one Enter sends either (the question goes to your shell as if you had ty
 your history). While Io answers, the status row shows a spinner, what it is doing ("reading 3
 files"), a moving bar with the count and the time (the number of steps is not known, so it is not a
 percentage), and a `■ Stop esc` button; Esc or a click on it stops the answer, and Ctrl-C still
-does. Shift+Tab changes the answer mode (manual, plan, auto), Up recalls the last question, Esc
-clears the line, and a click on the mode chip changes the mode. Option+h (`⌥h`; Alt+h on Linux)
-folds the box to a corner chip and brings it back, in every terminal, and the box names it so. So
-do `^G` then `c` and a click on `hide`; the chip is a click away, and `[panel] chat = "hidden"` or
-`"off"` (or `IOHR_PANEL_CHAT`) sets the start. `Ctrl-]` does the same, for a keyboard layout where
-Option+h types another character; it is rebound only inside the panel. A full-screen program has the whole
+does. Shift+Tab changes the answer mode (manual, plan, auto), Up recalls the last question, and a
+click on the mode chip changes the mode.
+
+Moving between the chat and the terminal is one key, `Ctrl-Space`, from either side. The title
+says `● typing here` while the box has the keys, and the shell has them when it does not. The
+draft stays when the keys leave: Esc hands them back to the terminal with the half-written
+question kept (it shows dimmed, tagged `draft`), `Ctrl-C` throws the draft away, and `Ctrl-Space`,
+`?` or a click on the input bring you back to it. A sent question starts the next line empty. The
+switch waits while an answer runs or a command is running (the box does not hold keys the shell
+would need). Option+h (`⌥h`; Alt+h on Linux) folds the box to a corner chip and brings it back, in
+every terminal, and the box names it so. So do `^G` then `c` and a click on `hide`; the chip is a
+click away, and `[panel] chat = "hidden"` or `"off"` (or `IOHR_PANEL_CHAT`) sets the start.
+`Ctrl-]` does the same, for a keyboard layout where Option+h types another character; it is
+rebound only inside the panel. A full-screen program has the whole
 screen: the box steps aside and comes back after it. While the box shows, the panel takes the
 mouse for its buttons, so select text with Option or Shift held.
 
@@ -224,6 +232,19 @@ question that is sent to the asker, `d` denies after a y/n confirmation, and `a`
 The panel never asks for Touch ID itself. An ask a Mac may sign is handed to
 `iohr asks approve <id>` in a shell, which asks Touch ID; every other ask goes to your phone.
 A merge, a roll, a migration and an auto-approve rule always stay on the phone.
+
+**Share to phone** (`h`) shows this panel's terminal on your phone, and **Let phone type**
+(`t`) lets the phone type into it. The panel does not serve the phone itself: it hands its
+shell to the InOrbit Mac app's terminal host as an external session (host protocol 2), and the
+app's relay, pairing and questions do the rest, so the Mac asks you "Share this terminal?"
+before anything leaves it. While it is on, the pill says `phone ● shared` (and `· types`
+while typing is on). The row says why in one line when it cannot: the Mac app is not running,
+is too old (update it), or the link was lost (an app update restarts the host); turn the row
+on again. Typing is off until you turn it on here, and it needs a second yes on the Mac;
+a key the phone sends is dropped unless both are on, and the app's own rules for typing (the
+terminal is idle, Claude is in front, no permission dialog waiting, one clean line, rate
+limits, `IOHR_TERMINAL_INPUT`) still apply before it gets here. The demo shares nothing. Needs
+the Mac app; a Linux machine or a server has no app to hand the shell to yet.
 
 **Workloads** (`w`) is the InOrbit Mac app's workload tree, flattened: a coordinator root for
 this machine, its children with `├` and `└`, then one "Coordinator service" row for the

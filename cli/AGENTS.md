@@ -29,9 +29,6 @@ Read the root `AGENTS.md`, `docs/design.md` sections 4 to 6 and
 ```
 cli/
   Cargo.toml          workspace, lints, dependency versions
-  crates/iohr-auth/   Redacted, Credential, Claims, Config and profiles, Store,
-                      Provider (discovery), Authorization<Browser|Device|Granted>,
-                      loopback listener, PKCE, Session (refreshing person)
   crates/iohr/        lib: cli (clap), commands, context (the runtime's Client with the
                       profile's credential as its TokenProvider, the --verbose hook), lock,
                       ext (OCI client, Sigstore trust, layer, lock, install store, token
@@ -66,7 +63,7 @@ cli/
   `--insecure-storage`. The config file never holds one. Entries are keyed by profile and
   account (`EntryKey`).
 - Credential-store calls block: run them through `context::blocking` (or
-  `iohr_auth::off_thread` where there is no profile store). Both are the one helper that
+  `inorbithr::login::off_thread` where there is no profile store). Both are the one helper that
   says on stderr why a call still waits after 5 s (a macOS Keychain prompt); never call
   `spawn_blocking` on the store directly.
 - Sign-in: PKCE S256 only, a fresh `state` compared in constant time, the issuer checked

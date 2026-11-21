@@ -332,14 +332,22 @@ credential helpers cleared and its prompts off (RFC 0147 containment).
 `iohr runner run` acts on a run ask (platform RFC 0172, RFC 0153) only after every check
 the platform's verifier makes, in its order: approved and pinned, the payload's SHA-256
 equal to the approved one, decided by a person, the action valid against
-`runner/host-action/v0`, this runner's id and key, not expired, and a decision signature
+`runner/host-action/v0` or `runner/host-action/v1`, this runner's id and key, not expired, and a decision signature
 by a device key pinned on this machine. A decision already carried out is refused as a
 replay; the record is written, under a file lock, before the run is reported started, and an ask that cannot be recorded is not run. The pinned device keys and the record must belong to the user and not be writable by group or world, and a malformed line in the record is an error; both live in a directory per account. Every `kubectl` call is pinned to the configured kube context or kubeconfig, and with none configured every Kubernetes action is refused. Any
 refusal is reported `failed` and runs nothing. Actions come only from a fixed catalogue
 in the binary (`k8s.delete-failed-pods`, `k8s.rollout-restart`, `systemd.user-restart`,
 `docker.prune-images`, `gh.cancel-run`, `iohr.upgrade`, `preview.take`, `roll.task`,
 `build.sweep-targets`, `gh.release-rerun`, `agent.install-checks`, `disk.prune`,
-`helm.runner-scale`); an action outside it is refused.
+`helm.runner-scale`) or, for a v1 ask whose `provider` names an extension, from that
+extension's own manifest; an action in neither is refused. An extension's action runs only
+after the installed copy verifies again offline (program hash, kept bundles, signer), is the
+version and manifest digest the person approved, declares the action for this system, and
+its declared parameters (each of a closed type no shell or path reads specially) and
+rendered effect equal the approved ones. Its entrypoint then runs as `host-action <id>`
+with the parameters as JSON on standard input, never a shell, with the scrubbed
+environment less `IOHR_TOKEN*` and `KUBECONFIG`, and the declared time limit (at most an
+hour). Host actions install only from a v2 config.
 The run's `effect` must be the catalogue's one sentence for its action and params
 (core's `effect_of`, ported unchanged), so the words the owner approved are what runs; any
 other effect is refused. Each action is planned to fixed argument vectors, its params checked again, before
@@ -378,7 +386,9 @@ carries is capped and redacted of URLs, addresses and tokens.
   the same verdict; tests that a replayed nonce, an unknown action and a cluster
   namespace run nothing and report `failed`; that each action runs exactly its argument
 vectors; that a missing tool, a bad param or systemd off Linux runs nothing;
-  that each report verifies with the run key.
+  that an extension action with another version, digest, action, system, parameter or
+  effect than the installed declaration runs nothing, and that its program gets its
+  parameters on stdin and no token; that each report verifies with the run key.
 - Refs: CRA I.2(d); least privilege.
 
 **SR-36. A runner's model key reaches its `claude` alone, and its sign-in follows a local policy.**

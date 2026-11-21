@@ -4,7 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
-use iohr_auth::{Kind, ProfileName};
+use inorbithr::login::Kind;
+
+use inorbithr::login::ProfileName;
 use iohr_codegen::{Files, Language};
 use iohr_openapi::Api;
 use serde_json::Value;

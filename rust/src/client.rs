@@ -881,6 +881,8 @@ enum Credential {
         program: PathBuf,
         profile: String,
     },
+    /// A person's stored sign-in (`login` source).
+    Login(Box<crate::config::LoginTarget>),
 }
 
 /// Configures a [`Client`]: [`build`](Self::build) reads only what is set here;
@@ -1157,7 +1159,7 @@ impl<P: Profile> ClientBuilder<P> {
         self
     }
 
-    /// The credential sources `load` may use, of `env`, `workload`, `file` and `cli`;
+    /// The credential sources `load` may use, of `env`, `workload`, `file`, `login` and `cli`;
     /// code is always allowed.
     #[must_use]
     pub fn credential_sources(
@@ -1534,7 +1536,7 @@ impl<P: Profile> ClientBuilder<P> {
         let resolved = crate::config::run(options, code, typed)?;
         let mut config = ResolvedConfig::new(resolved.describe);
         let settings = Settings::from_resolved(&config, &resolved.secrets)?;
-        let credential = self.credential(&config, &settings, &resolved.secrets)?;
+        let credential = self.credential(&config, &settings, &resolved.secrets, resolved.login)?;
         let base = check_url("base_url", &settings.base_url, true)?;
         let token_url = check_url("token_url", &settings.token_url, false)?;
         let https_only = base.scheme() == "https" && token_url.scheme() == "https";
@@ -1587,6 +1589,9 @@ impl<P: Profile> ClientBuilder<P> {
                 let p = CliToken::new(program, profile);
                 p.attach(&logger, exchanged);
                 (Arc::new(p), None)
+            }
+            Credential::Login(target) => {
+                (login_provider(&target, options, &logger, exchanged)?, None)
             }
         };
         let capacity = self.retry_budget_capacity.unwrap_or(RETRY_BUDGET);
@@ -1654,6 +1659,7 @@ impl<P: Profile> ClientBuilder<P> {
         config: &ResolvedConfig,
         settings: &Settings,
         secrets: &std::collections::BTreeMap<String, Secret<String>>,
+        login: Option<crate::config::LoginTarget>,
     ) -> Result<Credential, Error> {
         let d = config.describe();
         let source = d["credential"]["source"].as_str().unwrap_or_default();
@@ -1741,6 +1747,7 @@ impl<P: Profile> ClientBuilder<P> {
                 },
                 scopes: scopes(),
             },
+            (_, "login") => Credential::Login(Box::new(login.ok_or_else(|| missing("login"))?)),
             (_, "cli") => Credential::Cli {
                 program: PathBuf::from(text("cli_path").unwrap_or_else(|| "iohr".into())),
                 profile: config.profile().unwrap_or_default().to_owned(),
@@ -1748,6 +1755,39 @@ impl<P: Profile> ClientBuilder<P> {
             _ => return Err(missing("credentials")),
         })
     }
+}
+
+/// The stored sign-in the chain chose, as a provider.
+#[cfg(feature = "login")]
+fn login_provider(
+    target: &crate::config::LoginTarget,
+    options: &LoadOptions,
+    logger: &Logger,
+    exchanged: Option<crate::auth::Exchanged>,
+) -> Result<Arc<dyn DynProvider>, Error> {
+    let session = crate::login::StoredSession::from_target(target, options.login_store_ref())
+        .map_err(|reason| ConfigError::Missing {
+            what: "login",
+            env: reason,
+        })?;
+    session.attach(logger, exchanged);
+    Ok(Arc::new(session))
+}
+
+/// Resolution skips the `login` source without the feature, so this is not reached; it
+/// is an error, never a panic, if it ever is.
+#[cfg(not(feature = "login"))]
+fn login_provider(
+    _: &crate::config::LoginTarget,
+    _: &LoadOptions,
+    _: &Logger,
+    _: Option<crate::auth::Exchanged>,
+) -> Result<Arc<dyn DynProvider>, Error> {
+    Err(ConfigError::Missing {
+        what: "login",
+        env: "the `login` cargo feature".into(),
+    }
+    .into())
 }
 
 /// A credential found the way `load` finds one (`docs/config.md` section 5.1), as a

@@ -718,17 +718,21 @@ pub const TOOLCHAIN_MINIMUM: &str = "The one exception is the language's own min
      scaffold wrote, the installed toolchain above, never raise it to a newer release, which \
      would not build here. A newer toolchain goes in your summary as a suggestion.";
 
+/// Seconds a toolchain's version command may take. A version prints at once; a proxy that
+/// starts installing what it runs (a version manager on a fresh machine) is stopped instead.
+const VERSION_SECS: u64 = 5;
+
 /// What `command` prints first, for the agent's prompt (`rustc 1.99.0 (b940084d7 2026-09-28)`),
-/// else nothing: a toolchain that will not run is told nothing rather than guessed. A version
-/// command is a read, so a dry run runs it too.
+/// else nothing: a toolchain that will not run, or does not answer within [`VERSION_SECS`], is
+/// told nothing rather than guessed. A version command is a read, so a dry run runs it too.
 #[must_use]
 pub fn toolchain_line(command: &[String]) -> Option<String> {
     let (prog, args) = command.split_first()?;
-    let o = Command::new(prog).args(args).output().ok()?;
-    if !o.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&o.stdout);
+    let stdout = crate::memory::drift::output_within(
+        Command::new(prog).args(args),
+        std::time::Duration::from_secs(VERSION_SECS),
+    )?;
+    let text = String::from_utf8_lossy(&stdout);
     let first = text.lines().map(str::trim).find(|l| !l.is_empty())?;
     Some(first.chars().take(120).collect())
 }
@@ -889,7 +893,7 @@ pub fn smoke(dir: &Path, state: &Path, name: &str, runner: Option<&Runner>) -> S
         if prog.contains('/') {
             Some(PathBuf::from(prog))
         } else {
-            crate::ask::find_on_path(prog, &path)
+            crate::paths::find_program(prog, &path)
         }
     };
     if let Some(Err(fail)) = your_env_step(
@@ -938,17 +942,39 @@ pub fn smoke(dir: &Path, state: &Path, name: &str, runner: Option<&Runner>) -> S
 /// What the demo child may inherit: the runner's own allowlist (`PATH`, the temp directory,
 /// and on Windows `SYSTEMROOT` and the rest Node and Winsock need to start), without the
 /// XDG directories, which would point the demo at the real configuration. The unix `PATH`
-/// stays the fixed system one.
+/// stays the fixed system one. Windows also keeps [`DEMO_WINDOWS_FOLDERS`], which the
+/// runner's provider allowlist does not carry.
 fn demo_base_env() -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
     // The fixed system path on unix; Windows keeps the runner's own, where its tools live.
-    let fixed = cfg!(unix);
-    let mut env: Vec<_> = crate::runner::env::scrub(std::env::vars_os())
+    demo_env_from(std::env::vars_os(), cfg!(unix))
+}
+
+/// The Program Files folders. `NuGet` reads them from the environment for its machine-wide
+/// config and stops every restore with "Value cannot be null. (Parameter 'path1')" when
+/// they are missing. They name system folders and never carry a credential.
+const DEMO_WINDOWS_FOLDERS: &[&str] = &["PROGRAMFILES", "PROGRAMFILES(X86)"];
+
+/// [`demo_base_env`] over `vars`; `fixed` is the unix case (the fixed `PATH`, no Windows
+/// folders).
+fn demo_env_from<I>(vars: I, fixed: bool) -> Vec<(std::ffi::OsString, std::ffi::OsString)>
+where
+    I: IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+{
+    let vars: Vec<_> = vars.into_iter().collect();
+    let upper = |k: &std::ffi::OsString| k.to_string_lossy().to_ascii_uppercase();
+    let mut env: Vec<_> = crate::runner::env::scrub(vars.iter().cloned())
         .into_iter()
         .filter(|(k, _)| {
-            let up = k.to_string_lossy().to_ascii_uppercase();
+            let up = upper(k);
             !(up.starts_with("XDG_") || fixed && up == "PATH")
         })
         .collect();
+    if !fixed {
+        env.extend(
+            vars.into_iter()
+                .filter(|(k, _)| DEMO_WINDOWS_FOLDERS.contains(&upper(k).as_str())),
+        );
+    }
     if fixed {
         env.push((
             "PATH".into(),
@@ -1398,7 +1424,7 @@ mod tests {
 
     /// The program a variant needs, on this machine's PATH?
     fn have(program: &str) -> bool {
-        crate::ask::find_on_path(program, &std::env::var_os("PATH").unwrap_or_default()).is_some()
+        crate::paths::find_program(program, &std::env::var_os("PATH").unwrap_or_default()).is_some()
     }
 
     #[test]
@@ -1500,64 +1526,119 @@ mod tests {
         }
     }
 
+    /// One test per live variant of `blank`, so the slow smoke builds run in parallel (nextest
+    /// schedules tests, not the rows of one loop). The ids here are guarded against the
+    /// template's live variants by `every_blank_variant_has_its_own_test`.
+    macro_rules! variant_tests {
+        ($check:ident, $mod_name:ident, [$($id:ident),+ $(,)?]) => {
+            mod $mod_name {
+                use super::*;
+                pub(super) const IDS: &[&str] = &[$(stringify!($id)),+];
+                $(
+                    #[test]
+                    fn $id() {
+                        if let Some(why) = $check(stringify!($id)) {
+                            eprintln!("{why}");
+                        }
+                    }
+                )+
+            }
+        };
+    }
+
+    variant_tests!(
+        blank_variant_is_plain,
+        the_blank_template_is_a_plain_project_and_its_smoke_test_is_its_own_test,
+        [
+            python, typescript, go, rust, java, csharp, dart, swift, docs
+        ]
+    );
+    variant_tests!(
+        demo_variant_runs,
+        every_live_demo_language_renders_runs_and_passes_its_own_test,
+        [python, typescript, go, rust, java, csharp, dart, swift]
+    );
+
+    /// A new live variant of `blank` or `demo` fails here until it gets its test above.
     #[test]
-    fn the_blank_template_is_a_plain_project_and_its_smoke_test_is_its_own_test() {
+    fn every_blank_and_demo_variant_has_its_own_test() {
+        for (id, listed) in [
+            (
+                "blank",
+                the_blank_template_is_a_plain_project_and_its_smoke_test_is_its_own_test::IDS,
+            ),
+            (
+                "demo",
+                every_live_demo_language_renders_runs_and_passes_its_own_test::IDS,
+            ),
+        ] {
+            let tpl =
+                template::load(&Spec::Id(id.into()), Path::new("/no-such-iohr-root")).unwrap();
+            let mut live: Vec<String> = tpl.live_variants().iter().map(|v| v.id.clone()).collect();
+            let mut have: Vec<String> = listed.iter().map(|s| (*s).to_owned()).collect();
+            live.sort();
+            have.sort();
+            assert_eq!(
+                live, have,
+                "{id}: live variants and per-variant tests differ"
+            );
+        }
+    }
+
+    fn blank_variant_is_plain(variant: &str) -> Option<String> {
         let tpl =
             template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
-        assert_eq!(tpl.live_variants().len(), 5);
-        for v in tpl.live_variants() {
-            let (files, runner) = rendered_in("blank", "my-shop", &v.id);
-            let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
-            for gone in ["extension.toml", "panel/index.html"] {
-                assert!(!paths.contains(&gone), "{}: {gone}", v.id);
-            }
-            for (p, x) in &files {
-                assert!(!p.contains("@@") && !x.contains("@@"), "{}: {p}", v.id);
-                let low = x.to_lowercase();
-                assert!(
-                    !low.contains("macos service") && !low.contains("heartbeat"),
-                    "{}: {p} talks about a service",
-                    v.id
-                );
-            }
-            let get = |p: &str| files.iter().find(|(f, _)| f == p).map(|(_, t)| t.as_str());
-            let rec = get("inorbit.toml").unwrap();
-            assert!(rec.contains("template = \"blank\""), "{}", v.id);
-            assert!(rec.contains("kind = \"project\""), "{}", v.id);
-            assert!(!get(".gitignore").unwrap().contains(".inorbit"), "{}", v.id);
-            let prompt = tpl.meta.agent_prompt.clone().unwrap().to_lowercase();
-            for word in ["macos", "service", "panel", "extension.toml"] {
-                assert!(!prompt.contains(word), "the prompt says {word}");
-            }
-            // The Rust demo talks to the host over a unix socket (`std::os::unix`), so it
-            // cannot be built on Windows; the macOS service it stands for is not there either.
-            if cfg!(windows) && v.id == "rust" {
-                eprintln!("rust: the demo uses a unix socket: not run on Windows");
-                continue;
-            }
-            let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
-            if !missing.is_empty() {
-                eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
-                continue;
-            }
-            // A documents project has nothing to run: init drops its Smoke step.
-            if v.is_docs_only() {
-                assert!(runner.as_ref().is_some_and(|r| r.test.is_empty()), "docs");
-                continue;
-            }
-            let tmp = tempfile::tempdir().unwrap();
-            let dir = tmp.path().join("my-shop");
-            scaffold(&dir, &files, &[], "blank").unwrap();
-            let (state, _) =
-                register_step(&dir, &tmp.path().join("projects"), "my-shop", "blank", "").unwrap();
-            let s = smoke(&dir, &state, "my-shop", runner.as_ref());
-            assert!(s.ok, "{}: {} / {}", v.id, s.said, s.output);
+        let v = tpl.variant(variant).unwrap();
+        let (files, runner) = rendered_in("blank", "my-shop", &v.id);
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        for gone in ["extension.toml", "panel/index.html"] {
+            assert!(!paths.contains(&gone), "{}: {gone}", v.id);
+        }
+        for (p, x) in &files {
+            assert!(!p.contains("@@") && !x.contains("@@"), "{}: {p}", v.id);
+            let low = x.to_lowercase();
             assert!(
-                s.heartbeat.is_none() && s.said.contains("passed"),
-                "{}",
+                !low.contains("macos service") && !low.contains("heartbeat"),
+                "{}: {p} talks about a service",
                 v.id
             );
         }
+        let get = |p: &str| files.iter().find(|(f, _)| f == p).map(|(_, t)| t.as_str());
+        let rec = get("inorbit.toml").unwrap();
+        assert!(rec.contains("template = \"blank\""), "{}", v.id);
+        assert!(rec.contains("kind = \"project\""), "{}", v.id);
+        assert!(!get(".gitignore").unwrap().contains(".inorbit"), "{}", v.id);
+        let prompt = tpl.meta.agent_prompt.clone().unwrap().to_lowercase();
+        for word in ["macos", "service", "panel", "extension.toml"] {
+            assert!(!prompt.contains(word), "the prompt says {word}");
+        }
+        // The Rust demo talks to the host over a unix socket (`std::os::unix`), so it
+        // cannot be built on Windows; the macOS service it stands for is not there either.
+        if cfg!(windows) && v.id == "rust" {
+            return Some("rust: the demo uses a unix socket: not run on Windows".into());
+        }
+        let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
+        if !missing.is_empty() {
+            return Some(format!("{}: {missing:?} not on this PATH: not run", v.id));
+        }
+        // A documents project has nothing to run: init drops its Smoke step.
+        if v.is_docs_only() {
+            assert!(runner.as_ref().is_some_and(|r| r.test.is_empty()), "docs");
+            return None;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("my-shop");
+        scaffold(&dir, &files, &[], "blank").unwrap();
+        let (state, _) =
+            register_step(&dir, &tmp.path().join("projects"), "my-shop", "blank", "").unwrap();
+        let s = smoke(&dir, &state, "my-shop", runner.as_ref());
+        assert!(s.ok, "{}: {} / {}", v.id, s.said, s.output);
+        assert!(
+            s.heartbeat.is_none() && s.said.contains("passed"),
+            "{}",
+            v.id
+        );
+        None
     }
 
     #[test]
@@ -1592,63 +1673,133 @@ mod tests {
         assert!(one_line_description(None).contains("iohr project init"));
     }
 
-    /// Every live language of the demo: its files render, its manifest passes the lint, its
-    /// smoke test reads one heartbeat, and its own self-test passes. Skipped (said on stderr)
-    /// when the toolchain is not on this machine.
+    /// The demo child keeps the Program Files folders on Windows, which `NuGet` needs for a
+    /// restore, and still drops credentials; unix keeps neither and gets the fixed `PATH`.
     #[test]
-    fn every_live_demo_language_renders_runs_and_passes_its_own_test() {
+    fn the_demo_env_keeps_program_files_on_windows_only() {
+        let vars = || {
+            [
+                ("ProgramFiles", r"C:\Program Files"),
+                ("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                ("PATH", r"C:\tools"),
+                ("GH_TOKEN", "t"),
+                ("XDG_CONFIG_HOME", "/x"),
+            ]
+            .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v)))
+        };
+        let names = |env: Vec<(std::ffi::OsString, std::ffi::OsString)>| -> Vec<String> {
+            let mut n: Vec<String> = env
+                .into_iter()
+                .map(|(k, _)| k.to_string_lossy().into_owned())
+                .collect();
+            n.sort();
+            n
+        };
+        assert_eq!(
+            names(demo_env_from(vars(), false)),
+            ["PATH", "ProgramFiles", "ProgramFiles(x86)"]
+        );
+        assert_eq!(names(demo_env_from(vars(), true)), ["PATH"]);
+    }
+
+    /// Every live language of the demo: its files render, its manifest passes the lint, its
+    /// smoke test reads one heartbeat, and its own self-test passes. Skipped (the reason returned)
+    /// when the toolchain is not on this machine.
+    fn demo_variant_runs(variant: &str) -> Option<String> {
         let tpl =
             template::load(&Spec::Id("demo".into()), Path::new("/no-such-iohr-root")).unwrap();
-        for v in tpl.live_variants() {
-            if cfg!(windows) && v.id == "rust" {
-                eprintln!("rust: the demo uses a unix socket: not run on Windows");
-                continue;
-            }
-            let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
-            if !missing.is_empty() {
-                eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
-                continue;
-            }
-            let tmp = tempfile::tempdir().unwrap();
-            let dir = tmp.path().join("my-shop");
-            let (files, runner) = rendered_in("demo", "my-shop", &v.id);
-            assert!(check_manifest(&files).is_ok(), "{}", v.id);
-            for (p, x) in &files {
-                assert!(!p.contains("@@") && !x.contains("@@"), "{}: {p}", v.id);
-            }
-            let tv = tpl.with_variant(&v.id).unwrap();
-            let programs = template::programs(&tv, &[]);
-            scaffold(&dir, &files, &programs, "demo").unwrap();
-            let st = tmp.path().join("projects");
-            let (state, _) = register_step(&dir, &st, "my-shop", "demo", "").unwrap();
-            let said = smoke(&dir, &state, "my-shop", runner.as_ref());
-            assert!(said.ok, "{}: {} / {}", v.id, said.said, said.output);
-            let b = said.heartbeat.unwrap();
-            assert_eq!(b["id"], "local/my-shop", "{}", v.id);
-            assert_eq!(b["beats"], 1, "{}", v.id);
-            assert_eq!(b["token"], "refused", "{}", v.id);
-            // The project's own test, the way its README says.
-            let test = &v.test;
-            let (prog, args) = test.split_first().unwrap();
-            std::fs::create_dir_all(tmp.path().join("tstate")).unwrap();
-            std::fs::create_dir_all(tmp.path().join("tcache")).unwrap();
-            let out = Command::new(prog)
-                .args(args)
+        let v = tpl.variant(variant).unwrap();
+        if cfg!(windows) && v.id == "rust" {
+            return Some("rust: the demo uses a unix socket: not run on Windows".into());
+        }
+        let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
+        if !missing.is_empty() {
+            return Some(format!("{}: {missing:?} not on this PATH: not run", v.id));
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("my-shop");
+        let (files, runner) = rendered_in("demo", "my-shop", &v.id);
+        assert!(check_manifest(&files).is_ok(), "{}", v.id);
+        for (p, x) in &files {
+            assert!(!p.contains("@@") && !x.contains("@@"), "{}: {p}", v.id);
+        }
+        let tv = tpl.with_variant(&v.id).unwrap();
+        let programs = template::programs(&tv, &[]);
+        scaffold(&dir, &files, &programs, "demo").unwrap();
+        let st = tmp.path().join("projects");
+        let (state, _) = register_step(&dir, &st, "my-shop", "demo", "").unwrap();
+        let said = smoke(&dir, &state, "my-shop", runner.as_ref());
+        assert!(said.ok, "{}: {} / {}", v.id, said.said, said.output);
+        let b = said
+            .heartbeat
+            .unwrap_or_else(|| panic!("{}: no heartbeat: {} / {}", v.id, said.said, said.output));
+        assert_eq!(b["id"], "local/my-shop", "{}", v.id);
+        assert_eq!(b["beats"], 1, "{}", v.id);
+        assert_eq!(b["token"], "refused", "{}", v.id);
+        // The project's own test, the way its README says.
+        std::fs::create_dir_all(tmp.path().join("tstate")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("tcache")).unwrap();
+        // The rendered test command (`@@MODULE@@` filled in), with its paths expanded.
+        let test: Vec<String> = runner
+            .as_ref()
+            .unwrap()
+            .test
+            .iter()
+            .map(|w| {
+                paths_in(
+                    w,
+                    &dir,
+                    &tmp.path().join("tstate"),
+                    &tmp.path().join("tcache"),
+                )
+            })
+            .collect();
+        let (prog, args) = test.split_first().unwrap();
+        // A compiled language builds first, into the same cache, the way its README says.
+        let rt = runner.as_ref().unwrap();
+        if let Some((bp, bargs)) = rt.build.split_first() {
+            let bargs: Vec<String> = bargs
+                .iter()
+                .map(|w| {
+                    paths_in(
+                        w,
+                        &dir,
+                        &tmp.path().join("tstate"),
+                        &tmp.path().join("tcache"),
+                    )
+                })
+                .collect();
+            let built = Command::new(bp)
+                .args(&bargs)
                 .current_dir(&dir)
                 .env("CARGO_TARGET_DIR", tmp.path().join("tt"))
-                .env("STATE", tmp.path().join("tstate"))
-                .env("CACHE", tmp.path().join("tcache"))
-                .env("PYTHONDONTWRITEBYTECODE", "1")
-                .env("PYTHONPATH", dir.join("src"))
                 .output()
                 .unwrap();
             assert!(
-                out.status.success(),
-                "{} self-test: {}{}",
+                built.status.success(),
+                "{} build: {}{}",
                 v.id,
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
+                String::from_utf8_lossy(&built.stdout),
+                String::from_utf8_lossy(&built.stderr)
             );
         }
+        let out = Command::new(prog)
+            .args(args)
+            .current_dir(&dir)
+            .env("CARGO_TARGET_DIR", tmp.path().join("tt"))
+            .env("STATE", tmp.path().join("tstate"))
+            .env("CACHE", tmp.path().join("tcache"))
+            .env("PYTHONDONTWRITEBYTECODE", "1")
+            .env("PYTHONPATH", dir.join("src"))
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{} self-test: {}{}",
+            v.id,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        None
     }
 }

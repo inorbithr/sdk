@@ -68,15 +68,19 @@ mod unix {
         Ok(Paths::for_project(&data_dir(g)?, project))
     }
 
-    /// The Roles a project hosts: the packs it holds, else what its language selects.
+    /// The Roles a project hosts: the packs it holds, else what its stack selects. The root
+    /// every role inherits from is never a Role of its own.
     fn host_roles(project: &Path) -> Vec<String> {
         let mut names: Vec<String> = roles::locals(project)
             .into_iter()
             .map(|l| l.role.name)
             .collect();
         if names.is_empty() {
-            let lang = roles::detect_language(project);
-            names = roles::selection(lang).into_iter().map(|r| r.name).collect();
+            names = roles::selection(&roles::stack(project, None))
+                .into_iter()
+                .map(|r| r.name)
+                .filter(|n| n != roles::ROOT)
+                .collect();
         }
         names.sort();
         names.dedup();

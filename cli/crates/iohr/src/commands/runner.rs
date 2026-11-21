@@ -15,6 +15,7 @@ use semver::Version;
 use tokio::sync::watch;
 
 use crate::Env;
+use crate::auth::Config;
 use crate::cli::SignIn;
 use crate::cli::{Global, RunnerApiKeyCommand, RunnerCommand, RunnerConfigCommand};
 use crate::commands::session;
@@ -30,6 +31,7 @@ use crate::runner::drain::Drain;
 use crate::runner::exec::{ClaudeExec, Exec as _};
 use crate::runner::gate;
 use crate::runner::host_action::HostRunner;
+use crate::runner::host_action::extension::Extensions;
 use crate::runner::hygiene;
 use crate::runner::personal_use;
 use crate::runner::provider::{self, AuthState, LocalAuth};
@@ -43,7 +45,9 @@ use crate::runner::signing::{self, RunKey, Signer};
 use crate::runner::supervisor::{self, Surroundings};
 use crate::runner::workspace::Workspaces;
 use crate::ui::Listed;
-use iohr_auth::{Config, EntryKey, ProfileName, Redacted};
+use inorbithr::Secret;
+use inorbithr::login::EntryKey;
+use inorbithr::login::ProfileName;
 
 #[allow(clippy::too_many_lines, reason = "one arm per subcommand")]
 pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> Result<(), Error> {
@@ -481,13 +485,16 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     usize::try_from(me.capacity).unwrap_or(1)
                 },
                 declared: Some(declared),
-                build_floor: Some(BuildFloor::default()),
+                build_floor: build_floor(&set),
                 report_host: true,
-                gate: Some(GateCheck {
-                    // The pack names the checkout relative to the turns' working directory.
-                    workdir: exec.workdir.clone(),
-                    ..GateCheck::default()
-                }),
+                gate: Some(
+                    GateCheck {
+                        // The pack names the checkout relative to the turns' working directory.
+                        workdir: exec.workdir.clone(),
+                        ..GateCheck::default()
+                    }
+                    .with_profile(s.profile.as_ref().map(ToString::to_string).as_deref()),
+                ),
                 // Job leases get their own checkout, `checkouts/<job_id>` on `job/<id>`,
                 // and a replied turn's pull request, through the host's git and `gh`.
                 workspaces: Some(Arc::new(Workspaces::for_runner(exec.workdir.clone()))),
@@ -507,6 +514,14 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let mut asks = approvals_setup(&ctx, &s, &svc, &account, &set).await;
             if let Some(a) = asks.as_mut() {
                 a.drain = Some(drain.clone());
+                // Host actions an installed extension declares, each checked again
+                // against the installed copy before it runs.
+                match super::ext::host_extensions(g, &ctx) {
+                    Ok((store, policy)) => {
+                        a.tools.extensions = Some(Extensions::new(store, policy));
+                    }
+                    Err(e) => Out::note(&format!("extension host actions: off, {e}")),
+                }
             }
             let (stop_asks, asks_stopped) = watch::channel(false);
             let upgrader = Version::parse(env!("CARGO_PKG_VERSION")).ok().map(|current| {
@@ -1003,12 +1018,7 @@ fn effective(
     profile: Option<&ProfileName>,
     flags: &Flags,
 ) -> Result<Effective, Error> {
-    let own = profile.and_then(|p| {
-        config
-            .profile(p)
-            .and_then(|pr| pr.runner.as_ref())
-            .map(|r| (p.as_str(), r))
-    });
+    let own = profile.and_then(|p| config.profile_runner(p).map(|r| (p.as_str(), r)));
     settings::resolve(&config.runner, own, flags).map_err(Error::Failed)
 }
 
@@ -1079,11 +1089,24 @@ fn reload_on_hangup(
     }
 }
 
+/// The build-disk guard `run` keeps, read at start; with no `build_volume`, none, and a
+/// line says so.
+fn build_floor(set: &Effective) -> Option<BuildFloor> {
+    let floor = set.build_floor.as_ref().map(|f| f.value.clone());
+    if floor.is_none() {
+        Out::note("no build_volume is set: build turns never pause for disk space");
+    }
+    floor
+}
+
 /// `iohr runner config show`: each value and where it came from.
 #[allow(clippy::too_many_lines, reason = "one row per setting")]
 async fn show_settings(e: &Effective, out: Out) {
-    let floor = BuildFloor::default();
-    let free = settings::free_bytes(&floor.volume).await;
+    let floor = e.build_floor.as_ref();
+    let free = match floor {
+        Some(f) => settings::free_bytes(&f.value.volume).await,
+        None => None,
+    };
     let gb = |b: u64| b / 1_000_000_000;
     let (capacity, capacity_from) = e.capacity.as_ref().map_or_else(
         || ("as registered".to_owned(), "registration".to_owned()),
@@ -1110,7 +1133,8 @@ async fn show_settings(e: &Effective, out: Out) {
         || ("not set".to_owned(), "default".to_owned()),
         |c| (format!("{} GB", c.value), c.source.to_string()),
     );
-    let volume = floor.volume.display().to_string();
+    let volume = floor.map(|f| f.value.volume.display().to_string());
+    let floor_bytes = floor.map(|f| f.value.bytes);
     let free_text = free.map_or_else(|| "unknown".to_owned(), |f| format!("{} GB", gb(f)));
     if out.json {
         Out::print_json(&serde_json::json!({
@@ -1128,7 +1152,7 @@ async fn show_settings(e: &Effective, out: Out) {
             "core_checkout": { "value": e.core_checkout.as_ref().map(|c| &c.value), "source": core_checkout_from },
             "claude_auth": { "value": e.claude_auth.value.as_str(), "source": e.claude_auth.source.to_string() },
             "codex_auth": { "value": e.codex_auth.value.as_str(), "source": e.codex_auth.source.to_string() },
-            "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
+            "build_floor": { "volume": volume, "floor_bytes": floor_bytes, "free_bytes": free, "source": floor.map_or_else(|| "default".to_owned(), |f| f.source.to_string()) },
             "allow_host_git_credentials": { "value": e.allow_host_git_credentials.value, "source": e.allow_host_git_credentials.source.to_string() },
             "workspace_keep_days": { "value": e.workspace_keep_days.value, "source": e.workspace_keep_days.source.to_string() },
             "workspace_max_gb": { "value": e.workspace_max_gb.as_ref().map(|c| c.value), "source": max_gb_from },
@@ -1186,14 +1210,7 @@ async fn show_settings(e: &Effective, out: Out) {
             e.upgrade_sign.value.to_string(),
             e.upgrade_sign.source.to_string(),
         ],
-        vec![
-            "build_floor".to_owned(),
-            format!(
-                "{volume}: {free_text} free, build turns need {} GB",
-                gb(floor.bytes)
-            ),
-            "fixed".to_owned(),
-        ],
+        floor_row(floor, &free_text),
         vec![
             "allow_host_git_credentials".to_owned(),
             e.allow_host_git_credentials.value.to_string(),
@@ -1207,6 +1224,25 @@ async fn show_settings(e: &Effective, out: Out) {
         vec!["workspace_max_gb".to_owned(), max_gb, max_gb_from],
     ];
     Out::table(&["KEY", "VALUE", "SOURCE"], &rows);
+}
+
+/// The `build_floor` row of `config show`: the volume, its free space and the floor, or
+/// off when no `build_volume` is set.
+fn floor_row(floor: Option<&settings::Setting<BuildFloor>>, free_text: &str) -> Vec<String> {
+    let (value, source) = floor.map_or_else(
+        || ("not set (off)".to_owned(), "default".to_owned()),
+        |f| {
+            (
+                format!(
+                    "{}: {free_text} free, build turns need {} GB",
+                    f.value.volume.display(),
+                    f.value.bytes / 1_000_000_000
+                ),
+                f.source.to_string(),
+            )
+        },
+    );
+    vec!["build_floor".to_owned(), value, source]
 }
 
 /// The first 12 characters of a commit.
@@ -1322,9 +1358,9 @@ async fn run_key(
 /// A key this machine keeps in the profile's credential store, base64, under
 /// `{account}_{name}`; read once on open.
 struct StoredKey {
-    store: Arc<dyn iohr_auth::Store>,
+    store: Arc<dyn inorbithr::login::Store>,
     key: EntryKey,
-    value: Option<Redacted<String>>,
+    value: Option<Secret<String>>,
 }
 
 /// Removes the runner's keys of `account` (the runner key and the run key) from the
@@ -1363,7 +1399,7 @@ impl StoredKey {
         s: &crate::context::Session,
         account: &str,
         name: &str,
-    ) -> Result<(Arc<dyn iohr_auth::Store>, EntryKey), Error> {
+    ) -> Result<(Arc<dyn inorbithr::login::Store>, EntryKey), Error> {
         let profile = s.profile.clone().ok_or_else(|| {
             Error::Failed(
                 "the runner's keys are kept in your profile's credential store: sign in with `iohr login`, not with IOHR_TOKEN alone".into(),
@@ -1394,7 +1430,7 @@ impl StoredKey {
 
     async fn write(self, bytes: &[u8]) -> Result<(), Error> {
         use base64::Engine as _;
-        let secret = Redacted::new(base64::engine::general_purpose::STANDARD.encode(bytes));
+        let secret = Secret::new(base64::engine::general_purpose::STANDARD.encode(bytes));
         let key = self.key;
         blocking(self.store, move |st| st.set(&key, &secret)).await
     }
@@ -1414,13 +1450,13 @@ async fn stored_api_key(
     ctx: &Ctx,
     s: &crate::context::Session,
     account: &str,
-) -> Result<Option<Redacted<String>>, Error> {
+) -> Result<Option<Secret<String>>, Error> {
     let stored = StoredKey::open(ctx, s, account, API_KEY_ENTRY).await?;
     let Some(bytes) = stored.read("the stored Anthropic API key is damaged")? else {
         return Ok(None);
     };
     std::str::from_utf8(&bytes)
-        .map(|k| Some(Redacted::new(k.to_owned())))
+        .map(|k| Some(Secret::new(k.to_owned())))
         .map_err(|_| Error::Failed("the stored Anthropic API key is damaged".into()))
 }
 
@@ -1470,7 +1506,7 @@ fn check_auth(state: &AuthState, allowed: &LocalAuth) -> Result<(), Error> {
 fn local(g: &Global) -> Result<ClaudeExec, Error> {
     let parent: Vec<(OsString, OsString)> = std::env::vars_os().collect();
     let path = std::env::var_os("PATH");
-    let program = provider::find_on_path(claude_name(), path.as_ref()).ok_or_else(|| {
+    let program = path.as_deref().and_then(|p| crate::paths::find_program(claude_name(), p)).ok_or_else(|| {
         Error::Failed("claude was not found on PATH: install Claude Code and sign in with `claude`, then `/login`".into())
     })?;
     let claude_dir = claude::claude_dir(

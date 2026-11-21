@@ -120,6 +120,12 @@ fn setup(g: &Global, env: &Env) -> Result<(Registry, Policy), Error> {
         .or_else(|| ctx.config.ext.registry.clone())
         .unwrap_or_else(|| DEFAULT_REGISTRY.to_owned());
     let source = Source::parse(&raw)?;
+    let registry = Registry::new(source, env.ext_registry_auth.clone(), g.verbose)?;
+    Ok((registry, trust_policy(&ctx)?))
+}
+
+/// The trust policy the config's `ext.trusted_keys` make.
+fn trust_policy(ctx: &Ctx) -> Result<Policy, Error> {
     let keys = ctx
         .config
         .ext
@@ -128,8 +134,16 @@ fn setup(g: &Global, env: &Env) -> Result<(Registry, Policy), Error> {
         .map(|pem| TrustedKey::from_pem(pem))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| Error::Failed(format!("ext.trusted_keys: {e}")))?;
-    let registry = Registry::new(source, env.ext_registry_auth.clone(), g.verbose)?;
-    Ok((registry, Policy::inorbit(keys)))
+    Ok(Policy::inorbit(keys))
+}
+
+/// The installed extensions and the trust policy a runner checks each one against again
+/// before it carries out a host action the extension declares.
+///
+/// # Errors
+/// The store has no folder, or a trusted key does not read.
+pub(crate) fn host_extensions(g: &Global, ctx: &Ctx) -> Result<(Store, Policy), Error> {
+    Ok((store(g)?, trust_policy(ctx)?))
 }
 
 #[allow(clippy::too_many_lines, reason = "one arm per command")]
@@ -709,6 +723,7 @@ fn report(f: &Fetched, entry: &Entry, out: Out) {
             "name": m.name, "version": m.version, "digest": entry.digest,
             "signer": f.verified.signer.to_string(), "provenance": f.verified.provenance,
             "scopes": m.scopes, "privileges": m.privileges,
+            "host_actions": m.host_actions,
         }));
         return;
     }
@@ -719,7 +734,7 @@ fn report(f: &Fetched, entry: &Entry, out: Out) {
 fn installed_note(f: &Fetched, entry: &Entry) {
     let m = &f.manifest;
     Out::note(&format!(
-        "Installed {} {} ({}).\n  signed by   {}\n  built from  {}\n  may ask for {}\n  privileges  {}\nRun it as `iohr {} ...`.",
+        "Installed {} {} ({}).\n  signed by   {}\n  built from  {}\n  may ask for {}\n  privileges  {}\n{}Run it as `iohr {} ...`.",
         m.name,
         m.version,
         entry.digest,
@@ -741,8 +756,22 @@ fn installed_note(f: &Fetched, entry: &Entry) {
                 m.privileges.join(", ")
             )
         },
+        host_action_line(&m.host_actions),
         m.name
     ));
+}
+
+/// `  host actions  <id> (<effect>), ...` and a line break, or nothing when it declares
+/// none: what the runner may be asked to run with this extension, once approved.
+fn host_action_line(actions: &[crate::ext::host_actions::HostAction]) -> String {
+    if actions.is_empty() {
+        return String::new();
+    }
+    let each: Vec<String> = actions
+        .iter()
+        .map(|a| format!("{} ({})", a.id, a.effect))
+        .collect();
+    format!("  host actions  {}\n", each.join(", "))
 }
 
 fn list(store: &Store, out: Out) -> Result<(), Error> {
@@ -757,6 +786,7 @@ fn list(store: &Store, out: Out) -> Result<(), Error> {
             "name": entry.name, "version": entry.version, "digest": entry.digest,
             "signer": record.signer, "provenance": record.provenance,
             "scopes": record.manifest.scopes, "privileges": record.manifest.privileges,
+            "host_actions": record.manifest.host_actions,
             "registry": record.registry,
             "installed_at": record.installed_at,
         }));
@@ -807,7 +837,7 @@ fn verify(
     let mut rows = Vec::new();
     for n in &names {
         match store.verify(n, &policy) {
-            Ok((entry, record)) => {
+            Ok((entry, record, _)) => {
                 rows.push(vec![
                     n.clone(),
                     entry.version,

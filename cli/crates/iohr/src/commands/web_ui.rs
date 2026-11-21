@@ -1,6 +1,6 @@
 //! `iohr ui`: serve the InOrbit web UI (`sdk/ui`) on a loopback address (RFC 0217).
 //!
-//! The listener is the sign-in redirect's (`iohr_auth::loopback`): 127.0.0.1 first, else
+//! The listener is the sign-in redirect's (`inorbithr::login::bind_loopback`): 127.0.0.1 first, else
 //! `[::1]`, a read window and a head cap per connection. It adds what a file server
 //! needs and no HTTP stack: GET and HEAD only, a `Host` that names this listener (so a
 //! rebound DNS name cannot reach it), paths that cannot leave the UI folder or follow a
@@ -52,7 +52,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use iohr_auth::loopback::{MAX_HEAD, READ_WINDOW, bind_loopback};
+use inorbithr::login::{MAX_HEAD, READ_WINDOW, bind_loopback};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
@@ -60,7 +60,7 @@ use tokio::time::timeout;
 
 use crate::Env;
 use crate::cli::{Global, UiArgs, UiCommand, UiInstall, UiPackage, UiServe};
-use crate::commands::sdk_add::{resolve, run_program};
+use crate::commands::sdk_add::run_program;
 use crate::commands::session::data_dir;
 use crate::error::Error;
 use crate::ext::install::Store;
@@ -117,11 +117,13 @@ fn working_folder() -> Result<PathBuf, Error> {
 /// Runs the UI package's script `name` with pnpm and passes its exit code on.
 fn script(args: &UiPackage, name: &str, out: Out) -> Result<(), Error> {
     let dir = ui_package(args.package.as_deref(), &working_folder()?)?;
-    let pnpm = resolve(Path::new("pnpm")).ok_or_else(|| {
-        Error::Usage(
-            "pnpm is not on PATH: install it (`corepack enable pnpm`), then run this again".into(),
-        )
-    })?;
+    let pnpm = crate::paths::find_program("pnpm", &std::env::var_os("PATH").unwrap_or_default())
+        .ok_or_else(|| {
+            Error::Usage(
+                "pnpm is not on PATH: install it (`corepack enable pnpm`), then run this again"
+                    .into(),
+            )
+        })?;
     Out::note(&format!("Running `pnpm run {name}` in {}", dir.display()));
     run_program(
         &pnpm,
@@ -214,7 +216,7 @@ async fn open(g: &Global, out: Out) -> Result<(), Error> {
     if out.json {
         Out::print_json(&serde_json::json!({ "url": url }));
     }
-    if !crate::browser::open(&first) {
+    if !inorbithr::login::browser::open(&first) {
         if !out.json {
             Out::raw(format!("{first}\n").as_bytes());
         }
@@ -255,7 +257,7 @@ fn remember(folder: &Path, url: &str, root: &Path, launch: &str) -> io::Result<(
         "pid": std::process::id(),
         "launch": launch,
     });
-    iohr_auth::write_private(folder, SERVING, body.to_string().as_bytes())
+    inorbithr::login::write_private(folder, SERVING, body.to_string().as_bytes())
 }
 
 /// Removes the record when it still names `url`: a later `serve` may have replaced it.
@@ -304,7 +306,7 @@ async fn serve_until_stopped(g: &Global, env: &Env, args: &UiServe, out: Out) ->
             "`iohr ui open` will not find this server ({why})."
         ));
     }
-    if args.open && !crate::browser::open(&format!("{url}?launch={}", server.launch())) {
+    if args.open && !inorbithr::login::browser::open(&format!("{url}?launch={}", server.launch())) {
         Out::note("Run `iohr ui open` to open it in a browser, signed in.");
     }
     server
@@ -2223,6 +2225,7 @@ mod tests {
 
     /// Gives installed `name` a real program: it writes its pid to `pid`, prints `line`
     /// and sleeps, and the record's digest is the script's, so the trust check passes.
+    #[cfg(unix)]
     fn program(store: &Path, name: &str, line: &str, pid: &Path) {
         use std::os::unix::fs::PermissionsExt as _;
         let digest = Digest::of(name.as_bytes());
@@ -2242,6 +2245,7 @@ mod tests {
     }
 
     /// Whether the process `pid` names (written by [`program`]) is still there.
+    #[cfg(unix)]
     fn alive(pid: &Path) -> bool {
         let pid = std::fs::read_to_string(pid).expect("pid");
         std::process::Command::new("kill")

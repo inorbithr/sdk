@@ -261,7 +261,7 @@ pub(super) fn pr(root: &Path, id: &str, known: Option<&str>) -> Result<String, S
             .map(str::to_owned)
             .ok_or_else(|| format!("no pull request found for {}", branch_word(&s)))?
     };
-    if crate::browser::open(&url) {
+    if inorbithr::login::browser::open(&url) {
         Ok(format!("opened {url}"))
     } else {
         Ok(format!("no browser here: {url}"))

@@ -178,7 +178,7 @@ async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Er
     let hints = hints::Mode::parse(cfg.hints.as_deref()).map_err(Error::Usage)?;
     let menu_key = MenuKey::parse(cfg.menu_key.as_deref()).map_err(Error::Usage)?;
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let bin = ask::find_on_path(agent.name(), &path);
+    let bin = crate::paths::find_program(agent.name(), &path);
     // The question is only ever an argument of the agent; nothing below prints or stores it
     // except `--dry-run`, which prints the command line you asked to see.
     let question = args.question.join(" ");
@@ -711,7 +711,7 @@ fn asked_folders(
 /// The folders asked for from the flags, `IOHR_ASK_READ` and `[ask] read` ([`asked_folders`]).
 fn folders_from_everywhere(
     flags: &[std::path::PathBuf],
-    cfg: &iohr_auth::AskConfig,
+    cfg: &crate::auth::AskConfig,
 ) -> Vec<(access::Source, std::path::PathBuf)> {
     asked_folders(
         flags,
@@ -870,7 +870,7 @@ fn permission_session(
 
 /// The words that name a mode: the flag layer (`--mode`, `--permissions`, and their environment)
 /// and the `[ask]` layer.
-fn words<'a>(args: &'a AskArgs, cfg: &'a iohr_auth::AskConfig) -> (Words<'a>, Words<'a>) {
+fn words<'a>(args: &'a AskArgs, cfg: &'a crate::auth::AskConfig) -> (Words<'a>, Words<'a>) {
     (
         Words {
             mode: args.mode.as_deref(),
@@ -890,7 +890,7 @@ fn words<'a>(args: &'a AskArgs, cfg: &'a iohr_auth::AskConfig) -> (Words<'a>, Wo
 fn streamed(
     (flag, config): (Words<'_>, Words<'_>),
     args: &AskArgs,
-    cfg: &iohr_auth::AskConfig,
+    cfg: &crate::auth::AskConfig,
     terminal: bool,
 ) -> Result<(bool, bool), Error> {
     let mode = Mode::choose(flag, config, terminal).map_err(Error::Usage)?;

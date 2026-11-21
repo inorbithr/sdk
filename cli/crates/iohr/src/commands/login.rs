@@ -3,21 +3,40 @@ use std::io::{IsTerminal as _, Read as _};
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use iohr_auth::{
-    AuthError, Authorization, Browser, Claims, Device, EntryKey, Kind, Profile, ProfileName,
-    Provider, Redacted, Session, Storage,
-};
+use crate::auth::AuthError;
+
+use inorbithr::login::Claims;
+
+use inorbithr::login::EntryKey;
+
+use inorbithr::login::Kind;
+
+use inorbithr::login::Login as SignIn;
+
+use inorbithr::login::Profile;
+
+use inorbithr::login::ProfileName;
+
+use inorbithr::login::Provider;
+
+use inorbithr::Secret;
+
+use crate::auth::Session;
+
+use inorbithr::login::SignOut;
+
+use inorbithr::login::Storage;
 use time::OffsetDateTime;
 use zeroize::Zeroizing;
 
 use crate::Env;
-use crate::browser;
 use crate::cli::{Global, Login};
 use crate::commands::accounts::{Me, Why, choose};
 use crate::commands::profile::point_at;
 use crate::context::{Ctx, Prompts, blocking, session_for};
 use crate::error::Error;
 use crate::output::Out;
+use inorbithr::login::browser;
 
 /// The profile a first `login` creates when no `--profile` is given.
 const DEFAULT_PROFILE: &str = "default";
@@ -92,7 +111,7 @@ async fn person(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
         .with_scopes(&args.scopes);
     let use_device = args.how.device || (!args.how.web && !browser::available());
     let granted = if use_device {
-        let auth = Authorization::<Device>::start(provider).await?;
+        let auth = SignIn::device(&provider).await?;
         let mut text = format!(
             "To sign in, open {} in any browser and enter this code:\n\n    {}\n",
             auth.verification_uri(),
@@ -105,9 +124,7 @@ async fn person(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
         Out::note(&text);
         auth.finish().await?
     } else {
-        let auth = Authorization::<Browser>::start(provider)
-            .await?
-            .for_profile(name.as_str());
+        let auth = SignIn::browser(&provider).await?.for_profile(name.as_str());
         let url = auth.url().to_string();
         if browser::open(&url) {
             Out::note(&format!(
@@ -295,7 +312,7 @@ async fn settle_account(
 async fn check_store(ctx: &Ctx, name: &ProfileName, storage: Storage) -> Result<(), Error> {
     let probe = EntryKey::new(name.clone(), "iohr-store-check")?;
     blocking(ctx.store(storage, Prompts::Allowed)?, move |s| {
-        s.set(&probe, &Redacted::new("check".to_owned()))?;
+        s.set(&probe, &Secret::new("check".to_owned()))?;
         s.delete(&probe).map(drop)
     })
     .await
@@ -356,21 +373,20 @@ pub(crate) async fn logout(g: &Global, out: Out) -> Result<(), Error> {
         .ok_or_else(|| Error::Usage(format!("there is no profile {name}")))?;
     let key = EntryKey::new(name.clone(), &profile.account)?;
     let store = ctx.store(profile.storage, Prompts::Allowed)?;
-    // A person's session is ended at the sign-in service first; if that fails,
-    // nothing is removed, so the next try can still revoke.
+    // A person's session is revoked at the sign-in service when it can be, and the entry
+    // is deleted either way: a revoke that fails (offline, the service down) never keeps
+    // the secret on this machine, and the output says the session may still be alive.
     let mut revoked = false;
+    let mut unrevoked: Option<String> = None;
     if profile.kind == Kind::Person {
         let issuer = profile.issuer.as_deref().unwrap_or(g.issuer());
         let client_id = profile.client_id.as_deref().unwrap_or(&g.client_id);
         match Session::load(Arc::clone(&store), key.clone(), issuer, client_id).await {
-            Ok(session) => {
-                session.revoke().await.map_err(|e| {
-                    Error::Failed(format!(
-                        "{e}. Nothing was removed: try again, or sign this device out in the console."
-                    ))
-                })?;
-                revoked = true;
-            }
+            Ok(session) => match session.sign_out().await? {
+                SignOut::Revoked => revoked = true,
+                SignOut::Local { reason } => unrevoked = Some(reason),
+                _ => {}
+            },
             Err(AuthError::NotSignedIn { .. }) => {}
             Err(e) => return Err(e.into()),
         }
@@ -384,7 +400,14 @@ pub(crate) async fn logout(g: &Global, out: Out) -> Result<(), Error> {
     if out.json {
         Out::print_json(&serde_json::json!({
             "profile": name.as_str(), "removed": true, "secret_removed": removed, "session_revoked": revoked,
+            "revoke_failed": unrevoked,
         }));
+    } else if let Some(reason) = unrevoked {
+        Out::note(&format!(
+            "Signed out profile {name} on this machine, but the session was not revoked ({reason}). \
+             It stays valid at the sign-in service until it expires: sign this device out in the \
+             console, or run `iohr logout` again while online."
+        ));
     } else if profile.kind == Kind::Person {
         Out::note(&format!(
             "Signed out profile {name}: the session is revoked and removed from this machine."
@@ -398,7 +421,7 @@ pub(crate) async fn logout(g: &Global, out: Out) -> Result<(), Error> {
     Ok(())
 }
 
-fn read_token() -> Result<Redacted<String>, Error> {
+fn read_token() -> Result<Secret<String>, Error> {
     let stdin = std::io::stdin();
     if stdin.is_terminal() {
         return Err(Error::Usage(
@@ -417,7 +440,7 @@ fn read_token() -> Result<Redacted<String>, Error> {
             "standard input was empty: pipe a token into `iohr login --with-token`".into(),
         ));
     }
-    Ok(Redacted::new(token.to_owned()))
+    Ok(Secret::new(token.to_owned()))
 }
 
 pub(crate) fn storage_name(s: Storage) -> &'static str {
