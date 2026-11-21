@@ -64,6 +64,7 @@ ends its `--help` with real examples.
 | `iohr theme install NAME [--terminal] [--prompt] [--replace-prompt]` | Writes the Terminal.app profile `~/.inorbit/term/themes/NAME.terminal` and remembers the theme; `--terminal` opens the profile, `--prompt` turns on the zsh prompt, `--replace-prompt` replaces a prompt you set yourself | [The terminal theme](terminal-theme.md) |
 | `iohr theme off` | Turns the prompt off and forgets the chosen theme; an imported profile stays | [The terminal theme](terminal-theme.md) |
 | `iohr runner register \| run \| status \| revoke \| config show \| gate-report \| run-key \| api-key \| personal-use` | This machine as a coordinator runner | [Runner](runner.md) |
+| `iohr p2p register \| status \| unregister \| peers \| publish \| subscribe \| retract` | This machine in touch with peers through a bootstrap node, for signed scam reports; postponed on 2026-11-13, every verb exits 1 | [Peer to peer](p2p.md) |
 | `iohr session [DIR]`, `iohr stop [DIR]` | Open and stop a project's session | [Sessions](session-and-panel.md) |
 | `iohr coordinator ...` | The coordinator's jobs, asks and plans | [below](#iohr-coordinator) |
 | `iohr memory ...` | Memory kept as local files | [Memory](roles-and-memory.md#memory) |
