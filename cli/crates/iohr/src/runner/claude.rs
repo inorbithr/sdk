@@ -1065,7 +1065,7 @@ mod tests {
         );
     }
 
-    /// `job_01M5N5FG1B1FVJZGKVW6XPYW94`: the model tried a tool it lacks, then answered in
+    /// Seen on a real turn (RFC 0120): the model tried a tool it lacks, then answered in
     /// the reply shape. The answer is the turn's outcome; the denial is still reported.
     #[test]
     fn a_shaped_reply_after_a_denied_tool_is_replied_and_names_the_denial() {

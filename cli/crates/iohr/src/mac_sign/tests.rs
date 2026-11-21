@@ -78,7 +78,7 @@ fn the_message_is_core_s_decision_vector() {
 fn a_signed_decision_verifies_against_the_public_key_over_that_message() {
     let signer = TestSigner::new();
     let d = ToSign {
-        approval_id: "apr_01M6NZ452CGYK04BSGM9BNJD4Q",
+        approval_id: "apr_00000000000000000000000001",
         payload_sha256: "c0ffee",
         decision: "approve",
         note: "",
@@ -204,10 +204,10 @@ fn this_build_signs_only_on_a_mac() {
 #[test]
 fn the_enrol_request_names_the_mac_and_carries_the_phone_s_countersignature() {
     let key = TestSigner::new().public_key().expect("public");
-    let alone = enroll_body(&key, "Nevio's MacBook", "host-1", None);
+    let alone = enroll_body(&key, "Ada's example-mac", "host-1", None);
     assert_eq!(
         alone,
-        json!({"public_key": key, "platform": "macos", "label": "Nevio's MacBook", "device_id": "host-1"})
+        json!({"public_key": key, "platform": "macos", "label": "Ada's example-mac", "device_id": "host-1"})
     );
     let nonce = fresh_nonce().expect("nonce");
     let p = Proof {
@@ -216,7 +216,7 @@ fn the_enrol_request_names_the_mac_and_carries_the_phone_s_countersignature() {
         nonce: nonce.clone(),
         signature: "c2ln".to_owned(),
     };
-    let with = enroll_body(&key, "Nevio's MacBook", "host-1", Some(&p));
+    let with = enroll_body(&key, "Ada's example-mac", "host-1", Some(&p));
     assert_eq!(
         with["countersign"],
         json!({"key_id": "apk_phone", "signed_at": 1_800_000_000, "nonce": nonce, "signature": "c2ln"})

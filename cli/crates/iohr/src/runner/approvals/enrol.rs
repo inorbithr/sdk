@@ -215,7 +215,7 @@ mod tests {
 
     use super::*;
 
-    const ID: &str = "apr_01M5Z1KKYQ16SMN4XFYS5K5RFA";
+    const ID: &str = "apr_00000000000000000000000003";
 
     /// A service whose ask answers `statuses` in turn (the last one repeats).
     struct Fake {
@@ -259,7 +259,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((p.into(), l.into(), id.into(), pos.into()));
-            Ok(json!({"runner_id": "rnr_01M5Z1KKYQ16SMN4XFYS5K5RFB"}))
+            Ok(json!({"runner_id": "rnr_00000000000000000000000002"}))
         }
     }
 
@@ -296,7 +296,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             out,
-            Outcome::Enrolled("rnr_01M5Z1KKYQ16SMN4XFYS5K5RFB".into())
+            Outcome::Enrolled("rnr_00000000000000000000000002".into())
         );
         let e = svc.enrolled.lock().unwrap();
         let (public, label, id, possession) = &e[0];

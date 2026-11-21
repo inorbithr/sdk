@@ -46,7 +46,7 @@ fn the_reattribute_example_looks_up_and_its_effect_is_core_s_sentence() {
     assert_eq!(a.tool(), Tool::CoreMise);
     assert_eq!(
         d["effect"],
-        "Moves the proven rows of document ldoc_01M4P30371W9A3V5S3YCAHRTAN (documents 1, versions 2, comments 3) to Io; it can be reverted with labs:reattribute --revert <run>."
+        "Moves the proven rows of document ldoc_000000000000000000000000AB (documents 1, versions 2, comments 3) to Io; it can be reverted with labs:reattribute --revert <run>."
     );
 }
 
@@ -147,9 +147,9 @@ fn the_patterns_hold_at_their_edges() {
     assert!(!is_action_id("k8s.-x"));
     assert!(!is_action_id("K8s.x"));
     assert!(!is_action_id(&format!("a.{}", "b".repeat(63))));
-    assert!(is_runner_id("rnr_01M5Z0WF3MRKDQ75T7F72E3F9N"));
-    assert!(!is_runner_id("rnr_01m5z0wf3mrkdq75t7f72e3f9n"));
-    assert!(!is_runner_id("rnr_01M5Z0WF3MRKDQ75T7F72E3F9"));
+    assert!(is_runner_id("rnr_00000000000000000000000001"));
+    assert!(!is_runner_id("rnr_0000000000000000000000000a"));
+    assert!(!is_runner_id("rnr_0000000000000000000000000"));
     assert!(is_dns_label("a"));
     assert!(is_dns_label("tbd-dev"));
     assert!(is_dns_label(&"a".repeat(63)));
