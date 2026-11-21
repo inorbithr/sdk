@@ -150,7 +150,7 @@ pub(crate) fn read_state(dir: &Path) -> Option<State> {
 
 fn write_state(dir: &Path, s: &State) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(s).map_err(|e| format!("p2p state: {e}"))?;
-    iohr_auth::write_private(dir, STATE_FILE, &bytes)
+    inorbithr::login::write_private(dir, STATE_FILE, &bytes)
         .map_err(|e| format!("cannot write the p2p state: {}", e.kind()))
 }
 
@@ -325,7 +325,7 @@ pub(crate) async fn run(dir: &Path, bootstrap: &Bootstrap, timing: Timing) -> Re
 pub(crate) async fn unregister(dir: &Path, wait: Duration, tick: Duration) -> Result<bool, String> {
     let running = read_state(dir).is_some_and(|s| s.running(unix_now()));
     if running {
-        iohr_auth::write_private(dir, STOP_FILE, b"stop\n")
+        inorbithr::login::write_private(dir, STOP_FILE, b"stop\n")
             .map_err(|e| format!("cannot ask the p2p agent to stop: {}", e.kind()))?;
         let mut waited = Duration::ZERO;
         while read_state(dir).is_some_and(|s| s.phase != Phase::Stopped) {
