@@ -308,14 +308,22 @@ Io. `--account ID` acts on a team you belong to; the default is your own account
 
 ```sh
 iohr ui [serve [--port P] [--dir D] [--open]]
+iohr ui install [--dir D]
 iohr ui build|dev|check [--package DIR]
 iohr ui open
 ```
 
 `serve` serves the built web UI (`sdk/ui`, RFC 0217) on loopback: `127.0.0.1`, else `[::1]`,
-never another address. `--dir` (or `IOHR_UI_DIR`) names a built `dist/`; without it the
-nearest `ui/dist` above the working folder is used. With no verb it serves and opens the
+never another address. The UI comes from `--dir` (or `IOHR_UI_DIR`), else the nearest
+`ui/dist` above the working folder (a checkout's own build), else the copy `iohr ui install`
+keeps at `<data folder>/ui/dist`, so it works from any folder. With none of them it fails
+(exit 1) and names where it looked and how to fix it. With no verb it serves and opens the
 browser (`IOHR_NO_BROWSER` prints the address instead).
+
+`install` copies a built `ui/dist` (`--dir`, else the nearest above the working folder) to
+`<data folder>/ui/dist`, replacing the copy there in one step: it is copied beside the old
+one first, so a failed install leaves the old UI as it was. `mise run cli:preview-install`
+builds the UI and runs this, so `iohr-preview ui serve` works from any folder.
 
 - Pages are GET and HEAD only. The `Host` must be this listener's own address or `localhost` on its
   port. Paths cannot leave the folder or follow a link.
