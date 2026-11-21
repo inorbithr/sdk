@@ -39,6 +39,7 @@ The workflows (`release`, `cli-build`, `ci`, `fuzz`, `pr-title`) stay enabled on
 | Go OpenTelemetry | `go/otel/vX.Y.Z` | none: release-please tags it, and the module proxy fetches the tag on first request. It requires `go/vX.Y.Z`, so merge its release PR after the `go` one is tagged | none |
 | Rust | `rust/vX.Y.Z` | `cargo publish` via `crates-io-auth-action` | `release-crates` |
 | TypeScript | `typescript/vX.Y.Z` | `npm stage publish` (provenance automatic), then a maintainer approves it; `jsr publish` | `release-npm` |
+| Web UI frame (`@inorbithr/ui`, RFC 0217) | `ui/vX.Y.Z` | `npm stage publish` (provenance automatic), then a maintainer approves it; no JSR. The first release PR proposes the first version from `0.0.0` | `release-npm` |
 | Python | `python/vX.Y.Z` | `uv build`, `pypa/gh-action-pypi-publish` | `release-pypi` |
 | C# | `csharp/vX.Y.Z` | none yet (M4b): release-please only versions it, the `.csproj` `Version` | none |
 | Java | `java/vX.Y.Z` | none yet (M4b): release-please only versions it, `pom.xml` and `Client.SDK_VERSION` | none |
@@ -128,6 +129,10 @@ that environment, not in the repository. Build jobs hold read permissions only.
 - [x] On npm, add the trusted publisher for `@inorbithr/sdk` (workflow `release.yml`,
       environment `release-npm`), stage-only, and require 2FA with no bypass tokens.
       Done 2026-10-01.
+- [ ] `@inorbithr/ui` (RFC 0217): publish `@inorbithr/ui@0.0.0` by hand from `ui/` to
+      claim the name, then add its trusted publisher on npm (workflow `release.yml`,
+      environment `release-npm`), stage-only, 2FA required with no bypass tokens, as for
+      `@inorbithr/sdk`. Until then the `ui` job's staging fails and nothing ships.
 - [x] Create the three environments, deployable from `main` only (2026-10-01).
 - [x] Add a required reviewer to each environment (`release-crates`, `release-npm`,
       `release-pypi`, `release-go`, `release-cli`, `release-nuget`): the maintainer, `main`
@@ -203,7 +208,8 @@ release PR with `cargo update -p inorbithr --manifest-path cli/Cargo.toml`.
 The npm trusted publisher may only **stage** a version. After the publish job runs, the
 version waits on npmjs.com, invisible to installs, until a maintainer approves it:
 
-- web: npmjs.com, `@inorbithr/sdk`, **Staged Packages**, **Approve** (asks for 2FA);
+- web: npmjs.com, `@inorbithr/sdk` (or `@inorbithr/ui`), **Staged Packages**, **Approve**
+  (asks for 2FA);
 - CLI: `npm stage approve <stage-id>` (asks for 2FA).
 
 The CI token cannot approve, so a compromised workflow cannot ship a version on its own.
@@ -226,6 +232,9 @@ with 2FA. release-please does not run on a manual run, so nothing new is tagged.
 When the version is already staged on npm and a later step failed (the SBOM, the
 attestation, the release files or JSR), add `typescript_npm_staged`: the run builds and
 packs the same tag again but does not stage it a second time.
+`@inorbithr/ui` has no manual input yet. A `ui` job that failed before staging can be
+re-run from its run page; one that failed after staging cannot stage the same version
+again, so it needs a `ui_tag` input like `typescript_tag` first (not built yet).
 
 ## Examples gate (RFC 0165)
 

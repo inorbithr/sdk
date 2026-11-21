@@ -71,9 +71,11 @@ cli/
 - A refused refresh ends the session only after re-reading the store: another `iohr`
   process may have rotated the token.
 - Only the API host: paths are checked to stay on it, base URLs are HTTPS (loopback
-  excepted), redirects are not followed. No telemetry, no update check. `iohr p2p`
-  (ADR 0023) is postponed since 2026-11-13: every verb exits 1 and reaches no host. Its
-  record and guard (`p2p::record`, `p2p::guard`) stay for the reports API.
+  excepted), redirects are not followed. No telemetry; the exceptions (the extension
+  registry, the runner's heartbeat and its automatic upgrade) are listed once in
+  [SECURITY.md](../SECURITY.md#what-leaves-your-machine), and a new one goes there first.
+  `iohr p2p` (ADR 0023) is postponed since 2026-11-13: every verb exits 1 and reaches no
+  host. Its record and guard (`p2p::record`, `p2p::guard`) stay for the reports API.
 - The HTTP client is the Rust SDK (`inorbithr`, by path): retries, the error envelope,
   the user agent and the body cap are its; the command line adds the credential, the
   `--verbose` hook and the exit codes. Do not grow a transport layer here again.

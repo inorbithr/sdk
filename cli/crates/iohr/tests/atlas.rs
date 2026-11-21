@@ -86,7 +86,7 @@ fn doc(id: &str, kind: &str, number: i32, version: i32) -> serde_json::Value {
         "document_id": id, "space_id": SPACE, "kind": kind, "number": number,
         "slug": "x", "title": "T", "status": "draft",
         "public": false, "summary": "", "current_version": version, "superseded_by": "",
-        "path": "", "created_by": "ops:nevio",
+        "path": "", "created_by": "ops:ada",
         "created_at": "2026-10-06T00:00:00Z", "updated_at": "2026-10-07T00:00:00Z",
         "parent_id": "", "child_index": 0, "display_number": format!("{number:04}"),
         "children": 0, "headline": "", "headline_note": "", "supersedes_id": "",
@@ -133,7 +133,7 @@ async fn mount(server: &MockServer, read_version: i32, save_status: u16) {
             .and(path(format!("{DOCS}/{id}")))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "document": doc(id, kind, 7, read_version), "text": "remote",
-                "version": read_version, "message": "m", "author": "ops:nevio",
+                "version": read_version, "message": "m", "author": "ops:ada",
                 "saved_at": "2026-10-07T00:00:00Z", "findings": [], "children": [],
                 "mentions": [], "mentioned_in": [], "successors": [], "measured_by": [],
                 "context": [], "context_for": [], "diagrams": [], "implements": [],
