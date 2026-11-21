@@ -13,7 +13,7 @@ mod session;
 
 pub use config::{
     AskConfig, Config, DoctorConfig, ExtConfig, MemoryConfig, PanelConfig, ProjectConfig,
-    RunnerConfig, SyncConfig,
+    RunnerConfig, SyncConfig, ToolCeiling,
 };
 pub use credential::{Bearer, Credential, StaticToken};
 pub use error::AuthError;
