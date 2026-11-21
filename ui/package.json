@@ -1,9 +1,17 @@
 {
   "name": "@inorbithr/ui",
-  "private": true,
   "version": "0.0.0",
   "description": "The web UI that `iohr ui` serves: the shell frame and the extension panels (RFC 0217).",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inorbithr/sdk.git",
+    "directory": "ui"
+  },
+  "homepage": "https://docs.inorbit.hr",
+  "bugs": {
+    "url": "https://github.com/inorbithr/sdk/issues"
+  },
   "type": "module",
   "exports": {
     "./frame/tokens.css": "./src/frame/tokens.css",
@@ -16,7 +24,8 @@
   "files": [
     "lib",
     "src/frame/tokens.css",
-    "src/frame/shortcuts.json"
+    "src/frame/shortcuts.json",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22.18"
