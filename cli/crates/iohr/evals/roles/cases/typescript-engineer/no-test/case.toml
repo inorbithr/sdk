@@ -1,0 +1,17 @@
+# Shared case: a bug fix with no test for its path (the fixture has no tests at all).
+kind = "no-test"
+language = "typescript"
+task = "The profile page crashes for users who typed two spaces in their name. Fix initials in initials.ts."
+
+[defect]
+file = "initials.ts"
+lines = [6, 7]
+text = ".split(\" \")"
+class = "missing-test"
+words = ["initials", "spaces", "test"]
+
+[check]
+cmd = "node --test *.test.ts"
+
+[proof]
+ran = ["node --test|npm test"]

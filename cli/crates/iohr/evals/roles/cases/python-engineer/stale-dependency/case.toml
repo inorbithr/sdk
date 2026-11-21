@@ -1,0 +1,21 @@
+# Shared case: a stale dependency. requests 2.31.0 carries GHSA-9wx4-h78v-vm56 / CVE-2024-35195
+# (fixed in 2.32.0), GHSA-9hjg-9r4m-mvj7 / CVE-2024-47081 (fixed in 2.32.4) and
+# GHSA-gc5v-m9x4-r6x2 / CVE-2026-25645 (fixed in 2.33.0). Checked 2026-11-19 at osv.dev and
+# pypi.org (latest 2.34.2).
+kind = "stale"
+language = "python"
+task = "forecast in weather.py should accept an optional units argument (\"metric\" by default) and pass it to the service."
+
+[defect]
+file = "requirements.txt"
+lines = [1, 1]
+text = "requests==2.31.0"
+class = "stale-dependency"
+words = ["requests", "2.31.0"]
+ids = ["GHSA-9wx4-h78v-vm56", "CVE-2024-35195", "GHSA-9hjg-9r4m-mvj7", "CVE-2024-47081", "GHSA-gc5v-m9x4-r6x2", "CVE-2026-25645"]
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran_any = ["pip-audit", "osv-scanner", "uv pip", "pip index", "safety"]

@@ -1,0 +1,17 @@
+# An upstream call. Plan: typescript-engineer, row 3.
+kind = "planted"
+language = "typescript"
+task = "fetchUser in users.ts should send the header Accept: application/json."
+
+[defect]
+file = "users.ts"
+lines = [9, 9]
+text = "await fetch("
+class = "http-no-timeout"
+words = ["signal", "AbortSignal", "timeout", "hang"]
+
+[check]
+cmd = "node --test *.test.ts"
+
+[proof]
+ran = ["node --test|npm test|npx tsc|tsc"]

@@ -1,0 +1,120 @@
+name: role-evals
+
+# The built-in roles, measured with the real agent (ADR 0022): every case of every role,
+# with the role and without it, three runs each, then scored against the bar and the landing
+# rule in cli/crates/iohr/evals/roles/thresholds.toml. Nightly and on demand; not a
+# pull-request check (pull requests replay the committed transcripts offline in ci.yml).
+#
+# The live part signs in with the maintainer's Claude subscription token (the
+# CLAUDE_CODE_OAUTH_TOKEN secret, as claude-review uses), never an API key. Without the
+# secret it skips with a notice. The fixture checks need no secret and always run.
+# Recordings are uploaded, not pushed: a person commits them in a pull request.
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+    inputs:
+      roles:
+        description: "Roles to record, comma separated (empty: all)"
+        required: false
+        default: ""
+      arms:
+        description: "Arms to record: none, current or both"
+        required: false
+        default: "none,current"
+
+permissions: {}
+
+concurrency:
+  group: role-evals
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: fixture checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      MISE_YES: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          install_args: "go rust python node zizmor cargo-binstall cargo:cargo-nextest"
+      - name: every fix check fails on its fixture and passes on its clean twin
+        working-directory: cli
+        run: cargo nextest run --locked -p iohr --test role_evals --run-ignored only -E 'test(fixture_checks)'
+
+  live:
+    name: live ${{ matrix.role }}
+    runs-on: ubuntu-latest
+    # One role per job: about a hundred agent runs each.
+    timeout-minutes: 300
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [base-engineer, go-engineer, python-engineer, rust-engineer, security, typescript-engineer]
+    env:
+      MISE_YES: "1"
+      ROLE: ${{ matrix.role }}
+      ROLES_INPUT: ${{ inputs.roles }}
+      IOHR_EVAL_ARMS: ${{ inputs.arms || 'none,current' }}
+      # The agent, pinned to a release older than the minimum release age; mise installs it
+      # through its npm backend.
+      AGENT: "npm:@anthropic-ai/claude-code@2.1.327"
+    steps:
+      - name: gate on the subscription token
+        id: gate
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::notice title=role-evals::CLAUDE_CODE_OAUTH_TOKEN is not set: the live recording of $ROLE is skipped."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "$ROLES_INPUT" ] && ! printf ',%s,' "$ROLES_INPUT" | tr -d ' ' | grep -q ",$ROLE,"; then
+            echo "::notice title=role-evals::$ROLE is not in the roles asked for."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: steps.gate.outputs.skip == 'false'
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          install_args: "go rust python node zizmor cargo-binstall cargo:cargo-nextest"
+      - name: install the agent
+        if: steps.gate.outputs.skip == 'false'
+        run: mise install "$AGENT"
+      - name: record ${{ matrix.role }} with the live agent
+        if: steps.gate.outputs.skip == 'false'
+        working-directory: cli
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          IOHR_EVAL_ROLES: ${{ matrix.role }}
+        run: mise exec "$AGENT" -- cargo nextest run --locked -p iohr --test role_evals --run-ignored only -E 'test(record_live)' --no-capture
+      - name: score ${{ matrix.role }} against the bar and the landing rule
+        if: steps.gate.outputs.skip == 'false'
+        working-directory: cli
+        env:
+          IOHR_EVAL_ROLES: ${{ matrix.role }}
+          IOHR_UPDATE_EVALS: "1"
+        run: cargo nextest run --locked -p iohr --test role_evals -E 'test(replay)'
+      - if: always() && steps.gate.outputs.skip == 'false'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: role-evals-${{ matrix.role }}
+          path: |
+            cli/crates/iohr/evals/roles/transcripts/${{ matrix.role }}@*/
+            cli/crates/iohr/evals/roles/transcripts/none/*/${{ matrix.role }}/
+            cli/crates/iohr/evals/roles/scores/*/${{ matrix.role }}.toml
+          retention-days: 30
+          if-no-files-found: warn

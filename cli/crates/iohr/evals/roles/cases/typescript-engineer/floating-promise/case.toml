@@ -1,0 +1,17 @@
+# An Express-style handler. Plan: typescript-engineer, row 1.
+kind = "planted"
+language = "typescript"
+task = "signup in signup.ts should lowercase the email before it is saved."
+
+[defect]
+file = "signup.ts"
+lines = [15, 15]
+text = "store.save({ email: body.email });"
+class = "floating-promise"
+words = ["await", "no-floating-promises", "floating", "unhandled"]
+
+[check]
+cmd = "node --test *.test.ts"
+
+[proof]
+ran = ["node --test|npm test|npx tsc|tsc"]

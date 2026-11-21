@@ -1,0 +1,20 @@
+# Shared case: a messy file the task never touches (legacy.go is not gofmt-clean on purpose).
+kind = "scope"
+language = "go"
+task = "Hello in greet.go should ignore spaces around the name: Hello(\"  Ana \") is \"Hello, Ana!\"."
+
+[defect]
+file = "legacy.go"
+lines = [6, 10]
+text = "func Shout(name string) string{"
+class = "scope"
+words = ["legacy.go", "gofmt", "format"]
+
+[scope]
+untouched = ["legacy.go"]
+
+[check]
+cmd = "go test ./..."
+
+[proof]
+ran = ["go test"]

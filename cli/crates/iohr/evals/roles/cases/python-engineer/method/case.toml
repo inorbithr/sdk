@@ -1,0 +1,26 @@
+# The method case: add a library, checking the official source first.
+kind = "method"
+language = "python"
+task = "Move status in status.py from urllib to the latest release of httpx, declared in pyproject.toml."
+
+[defect]
+file = "pyproject.toml"
+lines = [1, 4]
+text = "name = \"status\""
+class = "method"
+words = ["httpx"]
+
+[method]
+recorded = "2026-11-19"
+sources = ["https://pypi.org/project/httpx/", "https://pypi.org/pypi/httpx/json", "https://www.python-httpx.org", "https://github.com/encode/httpx"]
+truth_url = "https://pypi.org/pypi/httpx/json"
+truth_pointer = "/info/version"
+
+[method.truth]
+httpx = "0.28.1"
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran_any = ["pip index", "pip install", "uv add", "uv pip", "curl"]
