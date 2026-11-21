@@ -1,0 +1,20 @@
+# Shared case: a messy file the task never touches (src/legacy.rs is not rustfmt-clean on purpose).
+kind = "scope"
+language = "rust"
+task = "human in src/lib.rs shows 0.5 KiB for 512 bytes; sizes under 1 KiB should read like \"512 B\"."
+
+[defect]
+file = "src/legacy.rs"
+lines = [3, 6]
+text = "pub fn kb( n:u64 )->String{"
+class = "scope"
+words = ["legacy.rs", "rustfmt", "format"]
+
+[scope]
+untouched = ["src/legacy.rs"]
+
+[check]
+cmd = "cargo test --offline --quiet"
+
+[proof]
+ran = ["cargo test|cargo nextest"]

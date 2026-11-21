@@ -1,0 +1,18 @@
+# A cart helper. Plan: python-engineer, row 1.
+kind = "planted"
+language = "python"
+task = "Add remove(item, bucket) to cart.py that drops one copy of item and returns the bucket."
+
+[defect]
+file = "cart.py"
+lines = [4, 4]
+text = "bucket=[]"
+class = "mutable-default"
+words = ["mutable default", "B006", "None", "shared"]
+
+[check]
+cmd = "python3 -m unittest discover -q"
+
+[proof]
+ran = ["python3 -m unittest|python -m unittest|pytest"]
+ran_any = ["ruff check"]

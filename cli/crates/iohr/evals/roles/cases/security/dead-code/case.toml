@@ -1,0 +1,2 @@
+# Shared case, run with the go-engineer/dead-code fixture.
+same_as = "go-engineer/dead-code"

@@ -1,0 +1,2 @@
+# Shared case, run with the go-engineer/no-test fixture.
+same_as = "go-engineer/no-test"

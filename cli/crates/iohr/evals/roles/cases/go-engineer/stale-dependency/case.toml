@@ -1,0 +1,21 @@
+# Shared case: a stale dependency. golang.org/x/crypto v0.16.0 carries published advisories
+# (GO-2023-2402 / CVE-2023-48795, fixed in v0.17.0; GO-2024-3321 / CVE-2024-45337, fixed in
+# v0.31.0; GO-2025-3487 / CVE-2025-22869, fixed in v0.35.0). Checked 2026-11-19 at osv.dev and
+# proxy.golang.org (latest v0.59.0, published 2026-11-11).
+kind = "stale"
+language = "go"
+task = "Add a MinLength check to Hash in hash.go: passwords shorter than 12 characters are refused."
+
+[defect]
+file = "go.mod"
+lines = [5, 5]
+text = "golang.org/x/crypto v0.16.0"
+class = "stale-dependency"
+words = ["golang.org/x/crypto", "v0.16.0"]
+ids = ["GO-2023-2402", "CVE-2023-48795", "GHSA-45x7-px36-x8w8", "GO-2024-3321", "CVE-2024-45337", "GO-2025-3487", "CVE-2025-22869"]
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran_any = ["govulncheck", "osv-scanner", "go list -m"]

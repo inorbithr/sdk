@@ -1,0 +1,2 @@
+# Shared case, run with the typescript-engineer/stale-dependency fixture.
+same_as = "typescript-engineer/stale-dependency"

@@ -1,0 +1,26 @@
+# The method case: upgrade a library across a major, checking the official source first.
+kind = "method"
+language = "typescript"
+task = "Upgrade zod in package.json to its latest release and move schema.ts to that release's API."
+
+[defect]
+file = "package.json"
+lines = [7, 7]
+text = "\"zod\": \"3.22.4\""
+class = "method"
+words = ["zod"]
+
+[method]
+recorded = "2026-11-19"
+sources = ["https://www.npmjs.com/package/zod", "https://registry.npmjs.org/zod", "https://zod.dev", "https://github.com/colinhacks/zod"]
+truth_url = "https://registry.npmjs.org/zod/latest"
+truth_pointer = "/version"
+
+[method.truth]
+zod = "4.6.7"
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran_any = ["npm view", "npm install", "npm outdated", "pnpm", "curl"]
