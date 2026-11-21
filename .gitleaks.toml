@@ -13,6 +13,7 @@ regexes = [
   '''^sk-live-0123456789$''',   # attach.rs and tests/shell_ask.rs: redaction input
   '''^AKIAABCDEFGHIJKLMNOP$''', # ext/lint.rs: the lint's own example of an AWS key id
   '''^dGhlIHNhbXBsZSBub25jZQ==$''', # conformance: the RFC 6455 sample Sec-WebSocket-Key
+  '''^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.c2ln$''', # conformance/cases/credentials: unsigned test JWTs signed with the word "sig"
 ]
 
 [[allowlists]]
