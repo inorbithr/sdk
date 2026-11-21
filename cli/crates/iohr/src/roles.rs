@@ -1,7 +1,9 @@
 //! The built-in roles `iohr project init` and `iohr atlas init` give a project
-//! (RFC 0124.1, RFC 0205): `security` for every project, and one engineer for the language
-//! chosen. The catalogue is data in `roles/*.toml`, versioned with this binary; every
-//! line carries the primary source it comes from.
+//! (RFC 0124.1, RFC 0205): `base-engineer` and `security` for every project, one engineer for
+//! each language it holds, and each role its files turn on (`markers`, ADR 0021). The
+//! catalogue is data in `roles/*.toml`, versioned with this binary; every line carries the
+//! primary source it comes from, and a role's `[[check]]` gates are the commands it runs
+//! before it says the work is done.
 //!
 //! A project gets readable packs under `atlas/roles/` and, when the person is signed
 //! in, the same roles in InOrbit through `POST /v1/coordinator/personalities/import` (the
@@ -26,10 +28,17 @@ pub const DIR: &str = "atlas/roles";
 const LEGACY_DIR: &str = "atlas/personalities";
 /// The one role every project gets, whatever its language.
 pub const BASE: &str = "security";
-/// The root of the tree. Never written as a pack and never routed to: its lines reach every
-/// role by inheritance (in the pack, in `--role` and in InOrbit's brief). Imported when the
-/// account has no root, and upgraded when the account's root is this one, unchanged.
+/// The root of the tree, written as a pack beside every role (ADR 0021) and never routed to:
+/// its lines also reach every role by inheritance (in the pack, in `--role` and in InOrbit's
+/// brief). Imported when the account has no root, and upgraded when the account's root is
+/// this one, unchanged.
 pub const ROOT: &str = "base-engineer";
+/// The most tokens one pack's own core may hold (characters over four, as the service counts).
+pub const PACK_CORE_MAX: usize = 700;
+/// The most core tokens a run loads: the root's and one role's together (ADR 0021).
+pub const LOADED_CORE_MAX: usize = 1_400;
+/// The pack's heading over its gates, read by `--role` with the core.
+pub const CHECKS_HEADING: &str = "Before you say done, run";
 
 // The wire names. Core renamed the word Personality to Role (#1365) but kept every published
 // name on the wire, and published names are never renamed. So these say `personalities`
@@ -80,12 +89,12 @@ pub fn kept_local(why: &str) -> String {
     )
 }
 
-/// The language both inits pick the roles by: the `hint` (a template's answer) when it names
-/// one the catalogue has, else what the folder declares or builds with ([`detect_language`]).
+/// What both inits pick the roles by ([`Stack`]): the `hint` (a template's answer) when it
+/// names a language the catalogue has, then every language the folder declares or builds
+/// with, and the roles its files turn on.
 #[must_use]
-pub fn language(root: &Path, hint: Option<&str>) -> Option<&'static str> {
-    hint.and_then(canonical_language)
-        .or_else(|| detect_language(root))
+pub fn stack(root: &Path, hint: Option<&str>) -> Stack {
+    stack_in(&catalogue(), root, hint)
 }
 
 /// One line of a role: its text and the sources it comes from.
@@ -134,6 +143,34 @@ pub struct Role {
     pub model: String,
     #[serde(default, rename = "line")]
     pub lines: Vec<Line>,
+    /// The gates: what to run before saying the work is done (`[[check]]`).
+    #[serde(default, rename = "check")]
+    pub checks: Vec<Check>,
+    /// The files that turn this role on in a project, beside its language engineer
+    /// ([`marker_matches`]): `Dockerfile` (a file of that name), `*.tf` (a file name with a
+    /// wildcard) or `migrations/` (a folder of that name).
+    #[serde(default)]
+    pub markers: Vec<String>,
+}
+
+/// A gate of a role (`[[check]]`): a command the agent runs before it says the work is done.
+/// A command is not a line: the line lint ([`lint::findings`]) never reads it, so a flag such
+/// as `--ignore-scripts` is kept as written.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Check {
+    /// The command, one line, as a person types it.
+    pub command: String,
+    /// What a pass shows.
+    pub proves: String,
+    /// Whether a failure stops the work from counting as done (`true` unless it says `false`):
+    /// a check that does not block is run and its result reported.
+    #[serde(default = "blocks_by_default")]
+    pub blocks: bool,
+}
+
+const fn blocks_by_default() -> bool {
+    true
 }
 
 /// The whole catalogue, root first.
@@ -171,48 +208,212 @@ pub fn canonical_language(text: &str) -> Option<&'static str> {
     }
 }
 
-/// What a project gets: `security`, and the engineer of its language when there is one.
+/// What a project is built with, as the roles are picked by it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Stack {
+    /// Each language it holds, as the catalogue names them, in the order found: a template's
+    /// answer first, then what `inorbit.toml` declares, else the build files, in
+    /// [`LANGUAGE_FILES`] order.
+    pub languages: Vec<&'static str>,
+    /// The catalogue roles its files turn on (`markers`), by name, in catalogue order.
+    pub marked: Vec<String>,
+}
+
+impl Stack {
+    /// A project known only by one language (a template's answer, or none).
+    #[must_use]
+    pub fn of(lang: Option<&str>) -> Self {
+        Self {
+            languages: lang.and_then(canonical_language).into_iter().collect(),
+            marked: Vec::new(),
+        }
+    }
+
+    /// The first language, the one a single-language reader (memory gaps, a starter's
+    /// wording) takes.
+    #[must_use]
+    pub fn language(&self) -> Option<&'static str> {
+        self.languages.first().copied()
+    }
+}
+
+/// What a project gets: `base-engineer` and `security`, the engineer of each of its languages,
+/// and each role its files turn on, in catalogue order. The root comes first: its lines are
+/// loaded beside every role (ADR 0021).
 #[must_use]
-pub fn selection(lang: Option<&str>) -> Vec<Role> {
-    let want = lang.and_then(canonical_language);
-    catalogue()
-        .into_iter()
-        .filter(|p| p.name == BASE || (want.is_some() && p.language.as_deref() == want))
+pub fn selection(s: &Stack) -> Vec<Role> {
+    select(catalogue(), s)
+}
+
+fn select(cat: Vec<Role>, s: &Stack) -> Vec<Role> {
+    cat.into_iter()
+        .filter(|p| {
+            p.name == ROOT
+                || p.name == BASE
+                || p.language
+                    .as_deref()
+                    .and_then(canonical_language)
+                    .is_some_and(|l| s.languages.contains(&l))
+                || s.marked.contains(&p.name)
+        })
         .collect()
 }
 
-/// The language of the project at `root`: `language` in `inorbit.toml` (at the top or under
-/// `[project]`), else the build file it has.
+/// The build files that say a folder holds a language, as the catalogue names it. The one
+/// table: `iohr sdk add` reads it too ([`languages_at`]).
+pub(crate) const LANGUAGE_FILES: &[(&str, &str)] = &[
+    ("Cargo.toml", "rust"),
+    ("go.mod", "go"),
+    ("package.json", "typescript"),
+    ("tsconfig.json", "typescript"),
+    ("deno.json", "typescript"),
+    ("deno.jsonc", "typescript"),
+    ("pyproject.toml", "python"),
+    ("requirements.txt", "python"),
+    ("setup.py", "python"),
+    ("uv.lock", "python"),
+    ("poetry.lock", "python"),
+    ("pdm.lock", "python"),
+];
+
+/// The languages whose build files are in `dir` itself, in [`LANGUAGE_FILES`] order.
 #[must_use]
-pub fn detect_language(root: &Path) -> Option<&'static str> {
-    let declared = std::fs::read_to_string(root.join("inorbit.toml"))
-        .ok()
-        .and_then(|t| t.parse::<toml::Table>().ok())
-        .and_then(|t| {
-            let at = |t: &toml::Table| {
-                t.get("language")
-                    .and_then(toml::Value::as_str)
-                    .and_then(canonical_language)
-            };
-            at(&t).or_else(|| {
-                t.get("project")
-                    .and_then(toml::Value::as_table)
-                    .and_then(at)
-            })
-        });
-    declared.or_else(|| {
-        let has = |f: &str| root.join(f).is_file();
-        if has("Cargo.toml") {
-            Some("rust")
-        } else if has("go.mod") {
-            Some("go")
-        } else if has("tsconfig.json") || has("package.json") {
-            Some("typescript")
-        } else if has("pyproject.toml") || has("requirements.txt") || has("setup.py") {
-            Some("python")
-        } else {
-            None
+pub(crate) fn languages_at(dir: &Path) -> Vec<&'static str> {
+    languages_of(
+        LANGUAGE_FILES
+            .iter()
+            .map(|(f, _)| *f)
+            .filter(|f| dir.join(f).is_file()),
+    )
+}
+
+fn languages_of<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<&'static str> {
+    let names: Vec<&str> = names.into_iter().collect();
+    let mut out: Vec<&'static str> = Vec::new();
+    for (file, lang) in LANGUAGE_FILES {
+        if names.contains(file) && !out.contains(lang) {
+            out.push(lang);
         }
+    }
+    out
+}
+
+/// How deep the detection reads: the root, its folders and theirs (where workspace members
+/// live: `ui/package.json`, `apps/web/package.json`, `db/migrations/`).
+const SCAN_DEPTH: usize = 2;
+/// The most folders the detection reads, so a huge tree stays quick.
+const SCAN_DIRS: usize = 2_000;
+/// Folders that hold what was built, fetched or kept as test data, never the project's own.
+const SCAN_SKIP: &[&str] = &[
+    "node_modules",
+    "target",
+    "vendor",
+    "dist",
+    "build",
+    "out",
+    "venv",
+    "__pycache__",
+    "testdata",
+    "fixtures",
+];
+
+/// What the folder holds near its top: the names of the files and of the folders in it, its
+/// folders and theirs ([`SCAN_DEPTH`]), hidden and built folders left out.
+#[derive(Debug, Default)]
+struct Seen {
+    files: Vec<String>,
+    dirs: Vec<String>,
+}
+
+fn scan(root: &Path) -> Seen {
+    let mut seen = Seen::default();
+    let mut todo: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
+    let mut read = 0usize;
+    while let Some((dir, depth)) = todo.pop() {
+        if read == SCAN_DIRS {
+            break;
+        }
+        read += 1;
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut entries: Vec<std::fs::DirEntry> = rd.filter_map(Result::ok).collect();
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+        for e in entries {
+            let name = e.file_name().to_string_lossy().into_owned();
+            // A link is not followed: it could lead out of the project or round in a loop.
+            let Ok(kind) = e.file_type() else { continue };
+            if kind.is_dir() {
+                if name.starts_with('.') || SCAN_SKIP.contains(&name.as_str()) {
+                    continue;
+                }
+                if depth < SCAN_DEPTH {
+                    todo.push((e.path(), depth + 1));
+                }
+                seen.dirs.push(name);
+            } else if kind.is_file() {
+                seen.files.push(name);
+            }
+        }
+    }
+    seen
+}
+
+/// Whether `marker` names something the folder holds: `name/` a folder, a name with one `*` a
+/// file whose name has that start and end (`*.tf`, `next.config.*`), else a file of that name.
+#[must_use]
+pub fn marker_matches(marker: &str, file_names: &[String], dir_names: &[String]) -> bool {
+    if let Some(dir) = marker.strip_suffix('/') {
+        return dir_names.iter().any(|d| d == dir);
+    }
+    match marker.split_once('*') {
+        Some((head, tail)) => file_names.iter().any(|f| {
+            f.len() >= head.len() + tail.len() && f.starts_with(head) && f.ends_with(tail)
+        }),
+        None => file_names.iter().any(|f| f == marker),
+    }
+}
+
+fn stack_in(cat: &[Role], root: &Path, hint: Option<&str>) -> Stack {
+    let seen = scan(root);
+    let found = declared_language(root).map_or_else(
+        || languages_of(seen.files.iter().map(String::as_str)),
+        |l| vec![l],
+    );
+    let mut languages: Vec<&'static str> = hint.and_then(canonical_language).into_iter().collect();
+    for l in found {
+        if !languages.contains(&l) {
+            languages.push(l);
+        }
+    }
+    let marked = cat
+        .iter()
+        .filter(|p| {
+            p.markers
+                .iter()
+                .any(|m| marker_matches(m, &seen.files, &seen.dirs))
+        })
+        .map(|p| p.name.clone())
+        .collect();
+    Stack { languages, marked }
+}
+
+/// `language` in `inorbit.toml` (at the top or under `[project]`): what the person declared
+/// stands for the build files.
+fn declared_language(root: &Path) -> Option<&'static str> {
+    let t = std::fs::read_to_string(root.join("inorbit.toml"))
+        .ok()?
+        .parse::<toml::Table>()
+        .ok()?;
+    let at = |t: &toml::Table| {
+        t.get("language")
+            .and_then(toml::Value::as_str)
+            .and_then(canonical_language)
+    };
+    at(&t).or_else(|| {
+        t.get("project")
+            .and_then(toml::Value::as_table)
+            .and_then(at)
     })
 }
 
@@ -272,7 +473,7 @@ pub const PACK_INTRO: &str = "A built-in role of the `iohr` catalogue. Its lines
 
 /// The readable pack of a role: front matter (name, parent, domain, source version, the day
 /// it was checked), then the lines it inherits and its own under their headings, each with
-/// its sources.
+/// its sources, and after the core the gates (inherited first) under [`CHECKS_HEADING`].
 #[must_use]
 pub fn pack(p: &Role) -> String {
     let mut out = format!(
@@ -312,14 +513,48 @@ pub fn pack(p: &Role) -> String {
                 }
             }
         }
+        if place == "core" {
+            write_checks(&mut out, &chain, p);
+        }
     }
     out
 }
 
-/// The pack files a project of `lang` starts with, as relative path and text.
+/// The gates of `p` and of the roles it inherits from, root first, as a section of the pack:
+/// nothing when there are none.
+fn write_checks(out: &mut String, chain: &[Role], p: &Role) {
+    let from: Vec<(&Role, bool)> = chain
+        .iter()
+        .map(|r| (r, true))
+        .chain([(p, false)])
+        .collect();
+    if from.iter().all(|(r, _)| r.checks.is_empty()) {
+        return;
+    }
+    let _ = write!(
+        out,
+        "\n## {CHECKS_HEADING}\n\nEach must pass before the work counts as done; one marked \
+         (reports only) informs and does not block.\n\n"
+    );
+    for (role, inherited) in from {
+        for c in &role.checks {
+            let tick = if c.command.contains('`') { "``" } else { "`" };
+            let _ = write!(out, "- {tick}{}{tick}", c.command);
+            if inherited {
+                let _ = write!(out, " (inherited from {})", role.name);
+            }
+            if !c.blocks {
+                out.push_str(" (reports only)");
+            }
+            let _ = writeln!(out, "\n  Proves: {}", c.proves);
+        }
+    }
+}
+
+/// The pack files a project of `s` starts with, as relative path and text.
 #[must_use]
-pub fn pack_files(lang: Option<&str>) -> Vec<(String, String)> {
-    selection(lang)
+pub fn pack_files(s: &Stack) -> Vec<(String, String)> {
+    selection(s)
         .iter()
         .map(|p| (pack_rel(&p.name), pack(p)))
         .collect()
@@ -327,8 +562,8 @@ pub fn pack_files(lang: Option<&str>) -> Vec<(String, String)> {
 
 /// The `[roles]` table of `inorbit.toml`: which built-ins the project uses.
 #[must_use]
-pub fn record(lang: Option<&str>) -> String {
-    let names: Vec<String> = selection(lang)
+pub fn record(s: &Stack) -> String {
+    let names: Vec<String> = selection(s)
         .iter()
         .map(|p| format!("\"{}\"", p.name))
         .collect();
@@ -342,11 +577,11 @@ pub fn record(lang: Option<&str>) -> String {
 }
 
 /// Adds the record to `inorbit.toml` among a template's files, unless it has one already.
-pub fn add_record(files: &mut [(String, String)], lang: Option<&str>) {
+pub fn add_record(files: &mut [(String, String)], s: &Stack) {
     if let Some((_, text)) = files.iter_mut().find(|(p, _)| p == "inorbit.toml")
         && !text.contains("[roles]")
     {
-        text.push_str(&record(lang));
+        text.push_str(&record(s));
     }
 }
 
@@ -355,7 +590,7 @@ pub fn add_record(files: &mut [(String, String)], lang: Option<&str>) {
 /// # Errors
 ///
 /// A message saying what could not be written.
-pub fn ensure_record(root: &Path, lang: Option<&str>) -> Result<bool, String> {
+pub fn ensure_record(root: &Path, s: &Stack) -> Result<bool, String> {
     let path = root.join("inorbit.toml");
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Ok(false);
@@ -367,7 +602,7 @@ pub fn ensure_record(root: &Path, lang: Option<&str>) -> Result<bool, String> {
     if !next.ends_with('\n') {
         next.push('\n');
     }
-    next.push_str(&record(lang));
+    next.push_str(&record(s));
     std::fs::write(&path, next).map_err(|e| format!("cannot write inorbit.toml: {e}"))?;
     Ok(true)
 }
@@ -1387,11 +1622,28 @@ mod tests {
         for p in catalogue() {
             assert_eq!(lint::findings(&p), Vec::<String>::new(), "{}", p.name);
             assert!(
-                brief_core_tokens(&p) <= 700,
-                "{} core with what it inherits is {} tokens",
+                core_tokens(&p) <= PACK_CORE_MAX,
+                "{} own core is {} tokens",
                 p.name,
-                brief_core_tokens(&p)
+                core_tokens(&p)
             );
+            // The base loads with every role: the two together, gates included, stay in budget.
+            let mut chain = ancestors(&p);
+            chain.push(p.clone());
+            let gates: usize = chain
+                .iter()
+                .flat_map(|r| &r.checks)
+                .map(|c| tokens(&c.command) + tokens(&c.proves))
+                .sum();
+            assert!(
+                brief_core_tokens(&p) + gates <= LOADED_CORE_MAX,
+                "{} core with the base it loads beside is {} tokens",
+                p.name,
+                brief_core_tokens(&p) + gates
+            );
+            for c in &p.checks {
+                assert!(crate::privacy::refuse(&c.command).is_none(), "{}", p.name);
+            }
             assert!(crate::privacy::refuse(&p.title).is_none(), "{}", p.name);
             if p.parent.is_empty() {
                 continue;
@@ -1401,7 +1653,7 @@ mod tests {
                 assert!(!widen.is_match(&l.text), "{}: {}", p.name, l.text);
             }
         }
-        assert_eq!(selection(None).len(), 1);
+        assert_eq!(selection(&Stack::default()).len(), 2);
     }
 
     #[test]
@@ -1459,18 +1711,141 @@ mod tests {
     }
 
     #[test]
-    fn a_project_gets_security_and_its_language() {
-        let names = |l: Option<&str>| selection(l).into_iter().map(|p| p.name).collect::<Vec<_>>();
-        assert_eq!(names(None), ["security"]);
-        assert_eq!(names(Some("rust")), ["security", "rust-engineer"]);
-        assert_eq!(names(Some("golang")), ["security", "go-engineer"]);
-        assert_eq!(names(Some("TS")), ["security", "typescript-engineer"]);
-        assert_eq!(names(Some("cobol")), ["security"]);
+    fn a_project_gets_the_base_security_and_its_language() {
+        let names = |l: Option<&str>| {
+            selection(&Stack::of(l))
+                .into_iter()
+                .map(|p| p.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(None), [ROOT, "security"]);
+        assert_eq!(names(Some("rust")), [ROOT, "security", "rust-engineer"]);
+        assert_eq!(names(Some("golang")), [ROOT, "security", "go-engineer"]);
+        assert_eq!(names(Some("TS")), [ROOT, "security", "typescript-engineer"]);
+        assert_eq!(names(Some("cobol")), [ROOT, "security"]);
+    }
+
+    #[test]
+    fn a_repo_of_two_languages_gets_both_engineers() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("go.mod"), "module x\n").unwrap();
+        std::fs::create_dir(dir.path().join("web")).unwrap();
+        std::fs::write(dir.path().join("web/package.json"), "{}").unwrap();
+        let s = stack(dir.path(), None);
+        assert_eq!(s.languages, ["go", "typescript"]);
+        let names: Vec<String> = selection(&s).into_iter().map(|p| p.name).collect();
+        assert_eq!(
+            names,
+            [ROOT, "security", "typescript-engineer", "go-engineer"]
+        );
+        // A template's answer comes first and is not repeated.
+        let s = stack(dir.path(), Some("ts"));
+        assert_eq!(s.languages, ["typescript", "go"]);
+        // A dependency folder is not the project's.
+        std::fs::create_dir_all(dir.path().join("node_modules/x")).unwrap();
+        std::fs::write(dir.path().join("node_modules/x/Cargo.toml"), "").unwrap();
+        std::fs::create_dir_all(dir.path().join(".hidden")).unwrap();
+        std::fs::write(dir.path().join(".hidden/pyproject.toml"), "").unwrap();
+        assert_eq!(stack(dir.path(), None).languages, ["go", "typescript"]);
+    }
+
+    fn fixture(name: &str, markers: &[&str]) -> Role {
+        let mut r = catalogue().remove(1);
+        r.name = name.to_owned();
+        r.language = None;
+        r.markers = markers.iter().map(|m| (*m).to_owned()).collect();
+        r
+    }
+
+    #[test]
+    fn files_turn_on_the_roles_that_name_them() {
+        let cat = || {
+            let mut c = catalogue();
+            c.push(fixture("infra", &["Dockerfile", "*.tf"]));
+            c.push(fixture("sql", &["migrations/", "*.sql"]));
+            c
+        };
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            stack_in(&cat(), dir.path(), None).marked,
+            Vec::<String>::new()
+        );
+        std::fs::create_dir(dir.path().join("deploy")).unwrap();
+        std::fs::write(dir.path().join("deploy/main.tf"), "").unwrap();
+        let s = stack_in(&cat(), dir.path(), None);
+        assert_eq!(s.marked, ["infra"]);
+        std::fs::create_dir(dir.path().join("migrations")).unwrap();
+        let s = stack_in(&cat(), dir.path(), Some("rust"));
+        assert_eq!(s.marked, ["infra", "sql"]);
+        let names: Vec<String> = select(cat(), &s).into_iter().map(|p| p.name).collect();
+        assert_eq!(names, [ROOT, "security", "rust-engineer", "infra", "sql"]);
+        // Each kind of marker, alone.
+        let files = |f: &[&str]| f.iter().map(|x| (*x).to_owned()).collect::<Vec<_>>();
+        assert!(marker_matches("Dockerfile", &files(&["Dockerfile"]), &[]));
+        assert!(!marker_matches(
+            "Dockerfile",
+            &files(&["Dockerfile.dev"]),
+            &[]
+        ));
+        assert!(marker_matches("*.sql", &files(&["001_init.sql"]), &[]));
+        assert!(!marker_matches("*.sql", &files(&["sql"]), &[]));
+        assert!(marker_matches("migrations/", &[], &files(&["migrations"])));
+        assert!(!marker_matches("migrations/", &files(&["migrations"]), &[]));
+    }
+
+    #[test]
+    fn a_check_parses_and_blocks_unless_it_says_not() {
+        let gates: toml::Table = r#"
+[[check]]
+command = "cargo nextest run"
+proves = "the tests pass"
+
+[[check]]
+command = "cargo deny check"
+proves = "no banned licence"
+blocks = false
+"#
+        .parse()
+        .unwrap();
+        let mut t: toml::Table = FILES[1].1.parse().unwrap();
+        t.extend(gates);
+        let r: Role = t.clone().try_into().unwrap();
+        assert_eq!(r.checks.len(), 2);
+        assert!(r.checks[0].blocks);
+        assert!(!r.checks[1].blocks);
+        let text = pack(&r);
+        let gates = text.find(CHECKS_HEADING).unwrap();
+        assert!(gates > text.find("## Core").unwrap());
+        assert!(text.contains("- `cargo nextest run`\n  Proves: the tests pass"));
+        assert!(text.contains("- `cargo deny check` (reports only)"));
+        // A misspelt field is refused, not dropped.
+        let mut bad = t;
+        bad.insert(
+            "check".to_owned(),
+            toml::Value::Array(vec![toml::Value::Table(
+                "command = \"x\"\nproves = \"y\"\nblock = false\n"
+                    .parse()
+                    .unwrap(),
+            )]),
+        );
+        assert!(Role::deserialize(bad).is_err());
+    }
+
+    #[test]
+    fn a_role_without_checks_has_no_gate_section() {
+        for p in catalogue() {
+            assert_eq!(
+                pack(&p).contains(CHECKS_HEADING),
+                !p.checks.is_empty(),
+                "{}",
+                p.name
+            );
+        }
     }
 
     #[test]
     fn the_pack_has_front_matter_and_every_source() {
-        let p = selection(Some("rust")).remove(1);
+        let p = selection(&Stack::of(Some("rust"))).remove(2);
         let text = pack(&p);
         assert_eq!(atlas::get(&text, "name").as_deref(), Some("rust-engineer"));
         assert_eq!(
@@ -1503,7 +1878,11 @@ mod tests {
 
     #[test]
     fn the_import_body_is_what_the_service_takes() {
-        let sel = selection(Some("python"));
+        // The root goes once, as the root: what a project sends is its roles without it.
+        let sel: Vec<Role> = selection(&Stack::of(Some("python")))
+            .into_iter()
+            .filter(|p| p.name != ROOT)
+            .collect();
         let refs: Vec<&Role> = sel.iter().collect();
         let body = import_body(&refs, "base-engineer", true);
         let list = body[WIRE_ROLES_KEY].as_array().unwrap();
@@ -1535,11 +1914,11 @@ mod tests {
     #[test]
     fn language_is_read_from_the_record_then_the_build_file() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(detect_language(dir.path()), None);
+        assert_eq!(stack(dir.path(), None).language(), None);
         std::fs::write(dir.path().join("go.mod"), "module x\n").unwrap();
-        assert_eq!(detect_language(dir.path()), Some("go"));
+        assert_eq!(stack(dir.path(), None).language(), Some("go"));
         std::fs::write(dir.path().join("inorbit.toml"), "language = \"python\"\n").unwrap();
-        assert_eq!(detect_language(dir.path()), Some("python"));
+        assert_eq!(stack(dir.path(), None).languages, ["python"]);
     }
 
     #[test]
@@ -1548,8 +1927,8 @@ mod tests {
             ("inorbit.toml".to_owned(), "name = \"x\"\n".to_owned()),
             ("CLAUDE.md".to_owned(), "# Mine\n".to_owned()),
         ];
-        add_record(&mut files, Some("rust"));
-        add_record(&mut files, Some("rust"));
+        add_record(&mut files, &Stack::of(Some("rust")));
+        add_record(&mut files, &Stack::of(Some("rust")));
         add_agents(&mut files, "iohr");
         add_agents(&mut files, "iohr");
         assert_eq!(files[0].1.matches("[roles]").count(), 1);

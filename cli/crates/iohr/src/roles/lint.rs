@@ -92,4 +92,20 @@ mod tests {
         assert!(f[1].starts_with("model \"gpt\""), "{f:?}");
         assert!(f[2].contains("ignore, override or unless"), "{f:?}");
     }
+
+    #[test]
+    fn a_check_command_is_not_read_as_a_rule() {
+        // `npm ci --ignore-scripts` holds a word the lint refuses in a child's core line; as a
+        // gate it is a command, and the lint reads only the lines.
+        let mut p = super::super::catalogue().remove(1);
+        assert_ne!(p.parent, "");
+        p.checks.push(crate::roles::Check {
+            command: "npm ci --ignore-scripts".to_owned(),
+            proves: "the install runs no package scripts".to_owned(),
+            blocks: true,
+        });
+        assert_eq!(findings(&p), Vec::<String>::new());
+        p.lines[0].text = "Run npm ci --ignore-scripts.".to_owned();
+        assert_eq!(findings(&p).len(), 1, "{:?}", findings(&p));
+    }
 }
