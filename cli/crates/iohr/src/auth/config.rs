@@ -490,13 +490,19 @@ pub struct PanelConfig {
     /// (never drawn, `?` stays the shell's). `IOHR_PANEL_CHAT` overrides it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat: Option<String>,
+    /// How long, in milliseconds, a lone Esc waits for the key after it, so Option+h that
+    /// reaches the panel in two reads is still Option+h (like tmux's `escape-time`); 40 by
+    /// default, at most 5000. A slow remote link may need more. `IOHR_PANEL_ESC_HOLD_MS`
+    /// overrides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub esc_hold_ms: Option<u64>,
 }
 
 impl PanelConfig {
     /// Whether nothing is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.mouse.is_none() && self.chat.is_none()
+        self.mouse.is_none() && self.chat.is_none() && self.esc_hold_ms.is_none()
     }
 }
 

@@ -825,12 +825,13 @@ running the command is the explicit choice.
 
 ### 4.8 The panel table
 
-The floating panel (`iohr`, `iohr panel`) has two settings.
+The floating panel (`iohr`, `iohr panel`) has three settings.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
 | `mouse` | `menu`: the panel takes mouse reports only while a view is open (a click on a row opens it, a click outside closes it, the wheel moves the selection) and the shell keeps normal drag-to-select the rest of the time; `always`: also at rest, where a click on the pill opens the menu and every other click goes through to the program; `off`: no mouse reports at all | `menu` | `iohr`, `iohr panel`; `IOHR_PANEL_MOUSE` overrides it |
 | `chat` | `on`: the framed chat box (RFC 0212) at the bottom of the terminal, four rows reserved with a scroll region, where `?` and `??` take one Enter and the answer shows a progress row and a Stop button; `hidden`: the box starts folded to a corner chip; `off`: no box and no chip, the panel as it was | `on` | `iohr`, `iohr panel` around zsh (other shells have no box); `IOHR_PANEL_CHAT` overrides it |
+| `esc_hold_ms` | how long, in milliseconds, a lone Esc waits for the key after it, so Option+h that reaches the panel in two reads (Esc, then `h`) is still Option+h and not the shell's ESC-h; like tmux's `escape-time`. A slow remote link may need more; an Esc on its own reaches the program that much later. At most 5000 | `40` | `iohr`, `iohr panel`; `IOHR_PANEL_ESC_HOLD_MS` overrides it |
 
 The key that opens the menu is not a setting: the pill shows the one that works in your terminal
 (`^G` in Terminal.app, iTerm2, VS Code, Ghostty, WezTerm and Hyper, whose default makes Option+i a
