@@ -88,7 +88,16 @@ pub(crate) struct TurnSpec<'a> {
     pub(crate) max_turns: u32,
     pub(crate) allowed_tools: &'a [String],
     pub(crate) session: &'a Session,
+    /// Under a tool ceiling (SR-35), the built-in tools that exist at all in the session:
+    /// `--restricted --tools <these>`, so no settings file in the checkout can add one,
+    /// and the secret files denied ([`SECRET_RULES`]). `None`: the coordinator's list as
+    /// it is (`tool_ceiling = "coordinator"`).
+    pub(crate) tools: Option<&'a [String]>,
 }
+
+/// The files a turn under a ceiling may never read: the one list every path that runs a
+/// model uses.
+pub(crate) const SECRET_RULES: &[&str] = crate::permissions::secrets::READ_RULES;
 
 /// Resume only when this runner ran the previous turn, the session is on its disk and
 /// its last measured context is not over `ceiling`; otherwise a fresh session with
@@ -343,6 +352,11 @@ pub(crate) fn build_args(spec: &TurnSpec<'_>) -> Result<Vec<String>, ArgError> {
             return Err(ArgError::FlagLike(v.to_owned()));
         }
     }
+    for t in spec.tools.unwrap_or_default() {
+        if t.starts_with('-') || t.trim().is_empty() || t.contains(',') {
+            return Err(ArgError::FlagLike(t.clone()));
+        }
+    }
     let (keep, prompt) = match spec.session {
         Session::Resume(id) => (Keep::Resume(id), Prompt::Own),
         Session::Fresh(id) => (Keep::Fresh(id), Prompt::Replace(spec.system_prompt)),
@@ -357,6 +371,15 @@ pub(crate) fn build_args(spec: &TurnSpec<'_>) -> Result<Vec<String>, ArgError> {
             keep,
             prompt,
             allowed: spec.allowed_tools.to_vec(),
+            // One value, `""` for none: the list form would swallow the next argument.
+            restricted: spec.tools.is_some(),
+            tools: spec.tools.map(|t| t.join(",")),
+            // One flag per rule: the secret files, under a ceiling.
+            disallowed: if spec.tools.is_some() {
+                SECRET_RULES.iter().map(|r| (*r).to_owned()).collect()
+            } else {
+                Vec::new()
+            },
             ..Call::default()
         },
         &Auth::OwnSignIn,
@@ -661,6 +684,7 @@ mod tests {
             max_turns: 12,
             allowed_tools: t,
             session,
+            tools: None,
         })
     }
 
@@ -797,7 +821,63 @@ mod tests {
             max_turns,
             allowed_tools: t,
             session: s,
+            tools: None,
         })
+    }
+
+    #[test]
+    fn under_a_ceiling_only_the_named_tools_exist_and_secrets_are_denied() {
+        let fresh = Session::Fresh(ID.into());
+        let kept = tools(&["Read", "Bash(git status:*)"]);
+        let names = tools(&["Read", "Bash"]);
+        let a = build_args(&TurnSpec {
+            system_prompt: "P",
+            model: "sonnet",
+            max_turns: 3,
+            allowed_tools: &kept,
+            session: &fresh,
+            tools: Some(&names),
+        })
+        .unwrap();
+        let at = a.iter().position(|x| x == "--tools").unwrap();
+        assert_eq!(a[at - 1], "--restricted");
+        assert_eq!(a[at + 1], "Read,Bash");
+        assert!(
+            a.contains(&"--disallowedTools=Read(~/.ssh/**)".to_owned()),
+            "{a:?}"
+        );
+        // The variadic allow list is still last.
+        let allow = a.iter().position(|x| x == "--allowedTools").unwrap();
+        assert_eq!(&a[allow + 1..], kept.as_slice());
+        // No tools at all is one empty value, never a missing one.
+        let none = build_args(&TurnSpec {
+            system_prompt: "P",
+            model: "sonnet",
+            max_turns: 3,
+            allowed_tools: &[],
+            session: &fresh,
+            tools: Some(&[]),
+        })
+        .unwrap();
+        let at = none.iter().position(|x| x == "--tools").unwrap();
+        assert_eq!(none[at + 1], "");
+        assert!(!none.contains(&"--allowedTools".to_owned()));
+        // A flag smuggled in as a tool name is refused.
+        let bad = tools(&["--bare"]);
+        assert!(matches!(
+            build_args(&TurnSpec {
+                system_prompt: "P",
+                model: "sonnet",
+                max_turns: 3,
+                allowed_tools: &[],
+                session: &fresh,
+                tools: Some(&bad),
+            }),
+            Err(ArgError::FlagLike(_))
+        ));
+        // `coordinator` keeps today's argument vector: no --restricted, no --tools.
+        let open = args(&fresh, &kept).unwrap();
+        assert!(!open.iter().any(|x| x == "--restricted" || x == "--tools"));
     }
 
     #[test]
@@ -962,6 +1042,7 @@ mod tests {
             max_turns: 3,
             allowed_tools: &[],
             session: &Session::Fresh(ID.into()),
+            tools: None,
         })
         .unwrap();
         assert!(!args.iter().any(|a| a == "--fork-session"));

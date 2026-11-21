@@ -3,7 +3,7 @@
 What this repository does against common secure-development frameworks, with an honest
 status. Status words: **met** (in place and enforced), **partial** (in place with a known
 gap), **planned** (decided, not yet in place). Updated in the same pull request as any
-change to a control. Last update: 2026-10-03.
+change to a control. Last update: 2026-11-08.
 
 This page covers the SDK repository. InOrbit's company-wide programme (policies, the
 hosted API, audits) is maintained separately and is not public.
