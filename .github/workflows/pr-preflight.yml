@@ -1,0 +1,54 @@
+name: pr-preflight
+
+# Names, in one place, every check this pull request will fail: the title (pr-title's list),
+# the document lines the merge guard reads, and the legs the change runs (ci-changed.sh's path
+# rules). Advisory: it always passes and is not in ci-ok's needs (PRD 0221 item 5, ADR 0019).
+# Findings go to the job summary and as error annotations; on a same-repo pull request the
+# job also edits one marked comment. A fork's token cannot write, so a fork gets the summary.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: pr-preflight-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  MISE_YES: "1"
+  MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+jobs:
+  preflight:
+    name: preflight (advisory)
+    # GitHub-hosted: it runs on pull requests from forks.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          install_args: "python"
+      # Title and body are data: they reach the script through env and are only matched.
+      - name: preflight
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: mise run pr:preflight -- --github --out "$RUNNER_TEMP/pr-preflight.md"
+      - name: comment
+        if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: mise run pr:preflight -- --comment "$RUNNER_TEMP/pr-preflight.md"

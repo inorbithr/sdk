@@ -45,6 +45,7 @@ mod panel;
 mod paths;
 mod permissions;
 mod planner;
+mod privacy;
 mod prompt;
 mod runner;
 #[cfg(unix)]

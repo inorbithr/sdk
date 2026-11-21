@@ -1675,8 +1675,10 @@ async fn gate_report_runs_the_check_and_sends_a_report_signed_by_the_runner_key(
         })),
     )
     .await;
-    // The check also proves it ran with a scrubbed environment.
-    let command = "echo ok; test -z \"$GH_TOKEN$FOO_SECRET$ANTHROPIC_API_KEY$IOHR_PROFILE\"";
+    // The check also proves it ran with a scrubbed environment: no credential reaches it.
+    // The profile name (`IOHR_PROFILE`) does since the gate-slot lease signs in with it
+    // (control change, ADR 0018); a token never does.
+    let command = "echo ok; test -z \"$GH_TOKEN$FOO_SECRET$ANTHROPIC_API_KEY$IOHR_TOKEN\"";
     let work_s = work.to_str().unwrap();
     let o = run(&mut iohr(&server, dir.path(), &gate_args(work_s, command)));
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));

@@ -1,10 +1,11 @@
 //! Disk hygiene of the runner's job checkouts (RFC 0189, ADR 0177).
 //!
-//! **One build directory per repository.** A job's gate check and its model's `cargo`
-//! build into `<state>/target/<owner>/<repo>` (`CARGO_TARGET_DIR`), not into a `target/`
-//! in each checkout. Cargo locks that directory, so two builds of one repository take
-//! turns ("Blocking waiting for file lock"): slower together, but one copy of the
-//! dependencies on disk, not one per job.
+//! **One build directory per job checkout.** A job's gate check and its model's `cargo`
+//! build into `<state>/target/<owner>/<repo>/<job>` (`CARGO_TARGET_DIR`), not into a
+//! `target/` in each checkout and not one directory per repository. Cargo locks its
+//! build directory, so two jobs of one repository sharing one queued on each other
+//! ("Blocking waiting for file lock"); the host's rule (core `docs/ci.md`) is one target
+//! per checkout, and the sweep below removes a job's directory with its checkout.
 //!
 //! **Nothing unused stays for ever.** A job's checkout (`<state>/coordinate/checkouts/<job>`),
 //! a repository's mirror (`<state>/mirrors/<owner>/<repo>.git`) and its build directory
@@ -36,12 +37,15 @@ use super::workspace::{is_repository_part, valid_job_id};
 /// The variable that points a child's `cargo` at the shared directory.
 pub(crate) const TARGET_VAR: &str = "CARGO_TARGET_DIR";
 
-/// The shared build directory of a checkout's repository, from the checkout's `.git`
-/// file (`gitdir: <state>/mirrors/<owner>/<repo>.git/worktrees/<job>`). `None` for
-/// anything that is not one of this runner's worktrees.
+/// The build directory of a checkout, from the checkout's `.git` file
+/// (`gitdir: <state>/mirrors/<owner>/<repo>.git/worktrees/<job>`): one per job.
+/// `None` for anything that is not one of this runner's worktrees.
 pub(crate) fn target_from_gitfile(text: &str, state: &Path) -> Option<PathBuf> {
     let (owner, name) = repo_from_gitfile(text, state)?;
-    Some(state.join("target").join(owner).join(name))
+    let gitdir = Path::new(text.lines().next()?.strip_prefix("gitdir:")?.trim());
+    let job = gitdir.file_name()?.to_str()?;
+    valid_job_id(job).ok()?;
+    Some(state.join("target").join(owner).join(name).join(job))
 }
 
 /// [`target_from_gitfile`] for the checkout at `checkout`, under the runner's `workdir`
@@ -382,8 +386,37 @@ fn scan(
     }
     for (owner, owner_dir) in dirs_in(&state.join("target")) {
         for (name, path) in dirs_in(&owner_dir) {
-            let idle = idle_since(newest_within(&path, 2), now);
-            items.push(item(Kind::Target, path, idle, Some((owner.clone(), name))));
+            let repo = Some((owner.clone(), name));
+            // A job's own build directory (`<repo>/<job>`), unless a lease holds the job.
+            let jobs: Vec<_> = dirs_in(&path)
+                .into_iter()
+                .filter(|(j, _)| valid_job_id(j).is_ok())
+                .collect();
+            for (job, jpath) in &jobs {
+                if is_held(&checkouts, job) {
+                    continue;
+                }
+                let idle = idle_since(newest_within(jpath, 2), now);
+                let mut it = item(Kind::Target, jpath.clone(), idle, repo.clone());
+                it.job = Some(job.clone());
+                items.push(it);
+            }
+            // The earlier layout: the repository's one shared directory, kept while it
+            // has anything but job directories in it.
+            let only_jobs = !jobs.is_empty()
+                && fs::read_dir(&path)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .all(|e| {
+                        e.file_name()
+                            .to_str()
+                            .is_some_and(|n| valid_job_id(n).is_ok())
+                    });
+            if !only_jobs {
+                let idle = idle_since(newest_within(&path, 2), now);
+                items.push(item(Kind::Target, path, idle, repo));
+            }
         }
     }
     items
@@ -396,6 +429,14 @@ fn has_checkout(items: &[Item], why: &[Option<&'static str>], held: &[Repo], rep
             .iter()
             .zip(why)
             .any(|(i, w)| w.is_none() && i.kind == Kind::Checkout && &i.repo == repo)
+}
+
+/// Whether the checkout of `job` stays (is not being removed by this plan).
+fn job_checkout_stays(items: &[Item], why: &[Option<&'static str>], job: &str) -> bool {
+    items
+        .iter()
+        .zip(why)
+        .any(|(i, w)| w.is_none() && i.kind == Kind::Checkout && i.job.as_deref() == Some(job))
 }
 
 /// Whether `repo`'s mirror stays.
@@ -419,6 +460,18 @@ pub(crate) fn plan(state: &Path, r: Retention, now: SystemTime) -> Plan {
         .iter()
         .map(|i| (i.kind == Kind::Checkout && i.idle > r.keep).then_some("unused"))
         .collect();
+    // A job's build directory goes with its checkout, or once nothing used it for the
+    // grace period and no checkout of that job stays: the job ended or was reaped.
+    for k in 0..items.len() {
+        let it = &items[k];
+        if it.kind == Kind::Target
+            && let Some(job) = &it.job
+            && it.idle > GRACE
+            && (it.idle > r.keep || !job_checkout_stays(&items, &why, job))
+        {
+            why[k] = Some("unused");
+        }
+    }
     // A mirror no checkout is left on; then a build directory whose mirror is gone.
     for kind in [Kind::Mirror, Kind::Target] {
         for k in 0..items.len() {
@@ -496,7 +549,13 @@ pub(crate) fn apply(state: &Path, r: Retention, plan: Plan, now: SystemTime) -> 
     // What an earlier prune was stopped in the middle of removing.
     let mut parents = vec![checkouts.clone()];
     for top in ["mirrors", "target"] {
-        parents.extend(dirs_in(&state.join(top)).into_iter().map(|(_, p)| p));
+        for (_, owner_dir) in dirs_in(&state.join(top)) {
+            if top == "target" {
+                // A job's build directory is one level deeper.
+                parents.extend(dirs_in(&owner_dir).into_iter().map(|(_, p)| p));
+            }
+            parents.push(owner_dir);
+        }
     }
     for dir in parents {
         for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
@@ -509,11 +568,19 @@ pub(crate) fn apply(state: &Path, r: Retention, plan: Plan, now: SystemTime) -> 
     }
     let mut done: Vec<Done> = Vec::new();
     for it in plan.remove {
-        let limit = if it.why == "over_cap" { GRACE } else { r.keep };
+        // A job's build directory goes after the grace period, not the days kept.
+        let limit = if it.why == "over_cap" || (it.kind == Kind::Target && it.job.is_some()) {
+            GRACE
+        } else {
+            r.keep
+        };
         let result = match (it.kind, it.job.as_deref()) {
             (Kind::Checkout, Some(job)) => remove_checkout(&checkouts, job, &it.path, limit, now),
             (Kind::Mirror, _) if mirror_idle(&it.path, now) <= limit => {
                 Err("used again since: kept".into())
+            }
+            (Kind::Target, Some(job)) if is_held(&checkouts, job) => {
+                Err("a lease holds it now: kept".into())
             }
             (Kind::Target, _) if idle_since(newest_within(&it.path, 2), now) <= limit => {
                 Err("used again since: kept".into())
@@ -548,6 +615,12 @@ pub(crate) fn apply(state: &Path, r: Retention, plan: Plan, now: SystemTime) -> 
             (Kind::Mirror | Kind::Target, _) => {
                 if let Some(owner_dir) = it.path.parent() {
                     let _ = fs::remove_dir(owner_dir);
+                    // A job's directory leaves its repository's, then the owner's.
+                    if it.job.is_some()
+                        && let Some(top) = owner_dir.parent()
+                    {
+                        let _ = fs::remove_dir(top);
+                    }
                 }
             }
             _ => {}
@@ -723,23 +796,28 @@ mod tests {
     }
 
     #[test]
-    fn a_worktree_builds_into_its_repository_shared_directory() {
+    fn a_worktree_builds_into_a_directory_of_its_own() {
         let state = Path::new("/s/runner");
         let git = "gitdir: /s/runner/mirrors/inorbithr/core.git/worktrees/job_1\n";
         assert_eq!(
             target_from_gitfile(git, state),
-            Some(PathBuf::from("/s/runner/target/inorbithr/core"))
+            Some(PathBuf::from("/s/runner/target/inorbithr/core/job_1"))
         );
-        // Another repository's job shares nothing with it; the same one shares all.
+        // Nothing is shared: another repository's job, and another job of the same one,
+        // each get their own directory (cargo locks a target dir, so a shared one queues).
         let other = "gitdir: /s/runner/mirrors/inorbithr/sdk.git/worktrees/job_2";
         assert_ne!(
             target_from_gitfile(other, state),
             target_from_gitfile(git, state)
         );
         let same = "gitdir: /s/runner/mirrors/inorbithr/core.git/worktrees/job_9";
-        assert_eq!(
+        assert_ne!(
             target_from_gitfile(same, state),
             target_from_gitfile(git, state)
+        );
+        assert_eq!(
+            target_from_gitfile(same, state),
+            Some(PathBuf::from("/s/runner/target/inorbithr/core/job_9"))
         );
     }
 
@@ -785,7 +863,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             target_for(&workdir, &checkout),
-            Some(state_path.join("target/o/r"))
+            Some(state_path.join("target/o/r/job_1"))
         );
         // A folder with no `.git` file is not one of ours.
         assert_eq!(target_for(&workdir, &workdir), None);
@@ -934,6 +1012,26 @@ mod tests {
             line.contains("removed 1 checkouts, 1 mirrors, 1 build directories"),
             "{line}"
         );
+    }
+
+    #[test]
+    fn a_job_build_directory_goes_with_its_checkout_and_stays_while_the_checkout_does() {
+        let (_t, s) = state();
+        // job_gone has no checkout (it ended or was reaped); job_live still has one.
+        let gone = target(&s, "o/r/job_gone", 10);
+        let live_t = target(&s, "o/r/job_live", 10);
+        let live_c = checkout(&s, "job_live", "o/r", 10);
+        let m = mirror(&s, "o/r", 10);
+        for p in [&gone, &live_t, &live_c, &m] {
+            age(p, 2 * 3600 * Duration::from_secs(1) / 1);
+        }
+        let r = Retention::of(KEEP_DAYS, None);
+        let plan = plan(&s, r, SystemTime::now());
+        assert_eq!(removed(&plan), [(Kind::Target, "job_gone".into())]);
+        let done = apply(&s, r, plan, SystemTime::now());
+        assert!(done.iter().all(|(_, r)| r.is_ok()), "{done:?}");
+        assert!(!gone.exists() && live_t.is_dir() && live_c.is_dir());
+        // The sweep that removed it is the one sweep: the lease lock keeps a held one.
     }
 
     #[test]

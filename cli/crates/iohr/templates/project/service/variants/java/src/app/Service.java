@@ -120,12 +120,8 @@ public final class Service {
         } else {
             reply = json(404, "{\"error\":\"not found\"}");
         }
-        byte[] body = Obs.utf8(reply.body());
-        ex.getResponseHeaders().set("Content-Type", reply.type());
-        ex.sendResponseHeaders(reply.status(), body.length);
-        try (OutputStream out = ex.getResponseBody()) {
-            out.write(body);
-        }
+        // Logged and counted before the reply goes out, so a client that has the reply
+        // already finds it in the log and in /metrics.
         double ms = span.millis();
         if (span.parentId() != null) {
             log.info("span", "trace_id", span.traceId(), "span_id", span.spanId(),
@@ -139,6 +135,12 @@ public final class Service {
         log.info("request", "trace_id", span.traceId(), "method", method, "route", route,
                 "status", reply.status(), "duration_ms", ms);
         metrics.inc(route, reply.status());
+        byte[] body = Obs.utf8(reply.body());
+        ex.getResponseHeaders().set("Content-Type", reply.type());
+        ex.sendResponseHeaders(reply.status(), body.length);
+        try (OutputStream out = ex.getResponseBody()) {
+            out.write(body);
+        }
     }
 
     /**

@@ -1,0 +1,29 @@
+name: Maven cache
+description: >-
+  Restores the local Maven repository (~/.m2/repository) before a job's first mvn run,
+  and saves it at the end of a job only from main, so pull requests read main's cache
+  and never evict it. Maven Central answers HTTP 429 to the shared runner addresses on
+  busy days, and three to five downloads of the same BOMs per run failed java and
+  examples jobs on 2026-11-19 (Study 0094.91).
+inputs:
+  mode:
+    description: restore (first step before mvn) or save (last step of the job).
+    required: true
+runs:
+  using: composite
+  steps:
+    # The key follows every pom.xml the jobs build: the Java SDK and the project
+    # templates the command line compiles. A changed pom misses the exact key and
+    # restores main's newest cache by prefix, so only the new artifacts download.
+    - if: inputs.mode == 'restore'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.m2/repository
+        key: maven-${{ runner.os }}-${{ hashFiles('java/pom.xml', 'cli/crates/iohr/templates/project/**/pom.xml') }}
+        restore-keys: maven-${{ runner.os }}-
+    # Two legs of one matrix can save the same key; the second only warns.
+    - if: inputs.mode == 'save' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.m2/repository
+        key: maven-${{ runner.os }}-${{ hashFiles('java/pom.xml', 'cli/crates/iohr/templates/project/**/pom.xml') }}

@@ -15,7 +15,7 @@ import {
   StaticToken,
   TooLargeError,
 } from "../src/index.js";
-import { backoffMs, retryAfter, retryAfterMs } from "../src/retry.js";
+import { backoffMs, retryAfter, retryAfterMs, sleep } from "../src/retry.js";
 import { parseTimestamp } from "../src/timestamp.js";
 
 function raw(status: number, body: string, headers: Record<string, string> = {}): RawResponse {
@@ -235,6 +235,25 @@ describe("retry", () => {
     for (let i = 0; i < 10; i++) {
       assert.ok(backoffMs(i) <= 8000);
     }
+  });
+});
+
+describe("sleep", () => {
+  it("never returns before the asked wait when the timer fires 1 ms early", async () => {
+    let clock = 0;
+    const fires: number[] = [];
+    // A timer whose first firing comes 1 ms before it was asked to; later ones are on time.
+    const early = (fn: () => void, ms: number) => {
+      fires.push(ms);
+      const first = fires.length === 1;
+      return setTimeout(() => {
+        clock += first ? ms - 1 : ms;
+        fn();
+      }, 0);
+    };
+    await sleep(1000, undefined, early, () => clock);
+    assert.ok(clock >= 1000, `woke after ${clock} ms, want at least 1000`);
+    assert.deepEqual(fires, [1000, 1]);
   });
 });
 

@@ -1895,7 +1895,7 @@ pub enum AtlasCommand {
     /// Send the atlas documents to the project's Decisions space.
     Sync(SyncArgs),
     /// The built-in roles of this project.
-    #[command(subcommand, alias = "personalities")]
+    #[command(subcommand, alias = crate::roles::LEGACY_CLI_ALIAS)]
     Roles(RolesCommand),
     /// Search the text of the sites this project crawled (PRD 0192).
     ///

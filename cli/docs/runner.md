@@ -167,9 +167,16 @@ a pull request by the runner itself, never by `claude`.
 
 Job checkouts are in `runner/coordinate/checkouts/<job_id>` in the config directory, as
 worktrees of one mirror per repository (`runner/mirrors/<owner>/<repo>.git`). A job's check
-and its model's `cargo` build into one shared `CARGO_TARGET_DIR` per repository,
-`runner/target/<owner>/<repo>`, so the dependencies are on disk once. Cargo locks that
-directory, so two builds of one repository take turns.
+and its model's `cargo` build into a `CARGO_TARGET_DIR` of the job's own,
+`runner/target/<owner>/<repo>/<job_id>`: cargo locks a target directory, so a directory
+shared by a repository made jobs queue on each other. The idle sweep (`hygiene`) removes it
+an hour after its checkout is gone, and with the checkout otherwise; a job whose lease is
+held is kept.
+
+The check keeps the host's build rules: `CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS` and
+`GATE_SLOTS` pass through the environment scrub. The check, and only the check (never a turn), is also
+given the runner's profile name as `IOHR_PROFILE`, which the gate-slot lease in the
+repository's CI uses to sign in. A token (`IOHR_TOKEN*`) never passes. A job in its check counts against the runner's capacity.
 
 ## Staying current
 
