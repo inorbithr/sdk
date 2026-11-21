@@ -1,0 +1,18 @@
+# Shared case: dead code next to the change.
+kind = "dead"
+language = "go"
+task = "Add Format(cents int64) string to money.go that renders cents as 12.50 (and -3.05 for negatives)."
+
+[defect]
+file = "money.go"
+lines = [11, 14]
+text = "func roundHalfEven("
+class = "dead-code"
+words = ["roundHalfEven", "unused", "dead"]
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran = ["go test"]
+ran_any = ["grep", "rg", "git grep", "staticcheck", "deadcode", "golangci-lint"]

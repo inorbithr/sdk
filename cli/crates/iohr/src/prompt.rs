@@ -5,7 +5,7 @@
 use std::io::{self, BufRead as _, IsTerminal as _, Read as _, Write as _};
 use std::path::Path;
 
-use iohr_auth::Redacted;
+use inorbithr::Secret;
 use zeroize::Zeroizing;
 
 use crate::error::Error;
@@ -19,14 +19,14 @@ pub(crate) fn interactive() -> bool {
 }
 
 /// Asks for a secret without echoing it. The answer is wrapped as it is read.
-pub(crate) fn secret(label: &str) -> Result<Redacted<String>, Error> {
+pub(crate) fn secret(label: &str) -> Result<Secret<String>, Error> {
     if !interactive() {
         return Err(Error::Usage(format!(
             "{label} is needed and there is no terminal to ask on: pass --secret-file FIELD=PATH \
              or --secret-stdin FIELD"
         )));
     }
-    let answer = Redacted::new(
+    let answer = Secret::new(
         rpassword::prompt_password(format!("{label} (not shown): "))
             .map_err(|e| Error::Failed(format!("cannot read {label} from the terminal: {e}")))?,
     );
@@ -34,14 +34,14 @@ pub(crate) fn secret(label: &str) -> Result<Redacted<String>, Error> {
 }
 
 /// Reads a secret from a file, at most 64 KiB; surrounding white space is dropped.
-pub(crate) fn secret_from_file(label: &str, path: &Path) -> Result<Redacted<String>, Error> {
+pub(crate) fn secret_from_file(label: &str, path: &Path) -> Result<Secret<String>, Error> {
     let file = std::fs::File::open(path)
         .map_err(|e| Error::Usage(format!("cannot read {label} from {}: {e}", path.display())))?;
     read_secret(file, label, &format!("{}", path.display()))
 }
 
 /// Reads a secret from standard input, at most 64 KiB.
-pub(crate) fn secret_from_stdin(label: &str) -> Result<Redacted<String>, Error> {
+pub(crate) fn secret_from_stdin(label: &str) -> Result<Secret<String>, Error> {
     let stdin = io::stdin();
     if stdin.is_terminal() {
         return Err(Error::Usage(format!(
@@ -52,7 +52,7 @@ pub(crate) fn secret_from_stdin(label: &str) -> Result<Redacted<String>, Error> 
     read_secret(stdin.lock(), label, "standard input")
 }
 
-fn read_secret(r: impl io::Read, label: &str, from: &str) -> Result<Redacted<String>, Error> {
+fn read_secret(r: impl io::Read, label: &str, from: &str) -> Result<Secret<String>, Error> {
     let mut text = Zeroizing::new(String::new());
     r.take(MAX_SECRET + 1)
         .read_to_string(&mut text)
@@ -62,16 +62,16 @@ fn read_secret(r: impl io::Read, label: &str, from: &str) -> Result<Redacted<Str
             "{label} from {from} is longer than 64 KiB"
         )));
     }
-    nonempty(Redacted::new(text.trim().to_owned()), label)
+    nonempty(Secret::new(text.trim().to_owned()), label)
 }
 
-fn nonempty(s: Redacted<String>, label: &str) -> Result<Redacted<String>, Error> {
+fn nonempty(s: Secret<String>, label: &str) -> Result<Secret<String>, Error> {
     if s.expose().trim().is_empty() {
         Err(Error::Usage(format!("{label} was empty")))
     } else if s.expose().trim().len() == s.expose().len() {
         Ok(s)
     } else {
-        Ok(Redacted::new(s.expose().trim().to_owned()))
+        Ok(Secret::new(s.expose().trim().to_owned()))
     }
 }
 

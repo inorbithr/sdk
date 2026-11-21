@@ -356,12 +356,17 @@ impl Session {
         self.emit(&bytes);
     }
 
-    /// The shell's pty has the rows the box leaves it.
+    /// The shell's pty has the rows the box leaves it, and a phone showing it gets the same size.
     pub(super) fn push_size(&mut self) {
         let want = (self.proxy.child_rows(), self.proxy.cols);
         if want != self.proxy.pty_size {
             let _ = rustix::termios::tcsetwinsize(&self.master, winsize(want.0, want.1));
             self.proxy.pty_size = want;
+            if let (Some(p), Ok(r), Ok(c)) =
+                (&self.phone, u16::try_from(want.0), u16::try_from(want.1))
+            {
+                p.send(phone::Cmd::Resize(c, r));
+            }
         }
     }
 
@@ -404,6 +409,13 @@ impl Session {
         if OpenKey::is_hide(bytes) {
             self.proxy.chat.toggle();
             self.redraw();
+            return true;
+        }
+        // The switch key moves the keyboard between the box and the terminal; the draft stays.
+        if OpenKey::is_switch(bytes) && p.reserved && !p.model.open() && !self.reader.pending() {
+            if self.proxy.chat.switch() {
+                self.redraw();
+            }
             return true;
         }
         let now = StdInstant::now();

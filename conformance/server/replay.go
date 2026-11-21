@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -132,6 +134,11 @@ func (s *Server) loadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, problem("bad_request", err.Error()))
+		return
+	}
+
+	if err := substituteReplay(c, s.endpoints.baseURL(c.transport())); err != nil {
+		writeJSON(w, http.StatusInternalServerError, problem("internal", err.Error()))
 		return
 	}
 
@@ -574,4 +581,31 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("content-length", strconv.Itoa(buf.Len()))
 	w.WriteHeader(status)
 	_, _ = w.Write(buf.Bytes())
+}
+
+// idTokenMark is `{id_token:CLIENT}` in a response: an unsigned OpenID Connect ID token
+// from this server for the client CLIENT. A token endpoint answer carries one at
+// sign-in, and its `iss` is the listener's address, which a case cannot spell out.
+var idTokenMark = regexp.MustCompile(`\{id_token:([A-Za-z0-9_.-]+)\}`)
+
+// substituteReplay writes the listener's address where an exchange says `{replay}`, the
+// way a driver does for `env` and `config_file`: a sign-in service's discovery answer
+// names its own issuer and endpoints, and they are this server (RFC 0231). It also
+// expands `{id_token:CLIENT}`.
+func substituteReplay(c *Case, base string) error {
+	data, err := json.Marshal(c.Exchanges)
+	if err != nil {
+		return err
+	}
+	text := strings.ReplaceAll(string(data), "{replay}", base)
+	text = idTokenMark.ReplaceAllStringFunc(text, func(m string) string {
+		client := idTokenMark.FindStringSubmatch(m)[1]
+		enc := func(v map[string]any) string {
+			b, _ := json.Marshal(v)
+			return base64.RawURLEncoding.EncodeToString(b)
+		}
+		return enc(map[string]any{"alg": "RS256"}) + "." +
+			enc(map[string]any{"iss": base, "aud": []string{client}, "sub": "usr_1"}) + ".c2ln"
+	})
+	return json.Unmarshal([]byte(text), &c.Exchanges)
 }

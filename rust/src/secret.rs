@@ -68,9 +68,25 @@ impl<T: Zeroize> fmt::Display for Secret<T> {
     }
 }
 
+/// Two secrets are equal when their values are, so a stored token can be compared with a
+/// fresh one (a rotated refresh token) without reading either.
+impl<T: Zeroize + PartialEq> PartialEq for Secret<T> {
+    fn eq(&self, other: &Self) -> bool {
+        *self.0 == *other.0
+    }
+}
+
+impl<T: Zeroize + Eq> Eq for Secret<T> {}
+
 #[cfg(test)]
 mod tests {
     use super::Secret;
+
+    #[test]
+    fn secrets_compare_by_value() {
+        assert_eq!(Secret::from("a"), Secret::from("a"));
+        assert_ne!(Secret::from("a"), Secret::from("b"));
+    }
 
     #[test]
     fn every_way_to_print_it_is_redacted() {

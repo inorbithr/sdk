@@ -1,0 +1,17 @@
+# A socket reader. Plan: rust-engineer, a sibling of row 1 (indexing input from the network).
+kind = "planted"
+language = "rust"
+task = "Add frames(buf) in src/lib.rs that returns every frame in buf, using first_frame."
+
+[defect]
+file = "src/lib.rs"
+lines = [6, 7]
+text = "buf[0], buf[1]"
+class = "index-out-of-bounds"
+words = ["index", "panic", "bounds", "get", "short"]
+
+[check]
+cmd = "cargo test --offline --quiet"
+
+[proof]
+ran = ["cargo test|cargo nextest"]

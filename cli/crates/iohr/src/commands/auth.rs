@@ -1,7 +1,9 @@
 //! `iohr auth token`: a profile's access token for another program (`docs/config.md`
 //! section 5.4).
 
-use iohr_auth::{Claims, Credential as _};
+use inorbithr::login::Claims;
+
+use crate::auth::Credential as _;
 use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -41,7 +43,10 @@ pub(crate) async fn token(g: &Global, env: &Env, args: &AuthToken, out: Out) -> 
         serde_json::to_string(&Printed {
             access_token: bearer.expose(),
             expires_at,
-            profile: s.profile.as_ref().map(iohr_auth::ProfileName::as_str),
+            profile: s
+                .profile
+                .as_ref()
+                .map(inorbithr::login::ProfileName::as_str),
             account,
         })
         .map_err(|e| Error::Failed(e.to_string()))?

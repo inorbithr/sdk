@@ -1,5 +1,5 @@
 use inorbithr::Method;
-use iohr_auth::Kind;
+use inorbithr::login::Kind;
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;

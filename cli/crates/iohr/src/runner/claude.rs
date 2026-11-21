@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use iohr_auth::Redacted;
+use inorbithr::Secret;
 use serde_json::Value;
 
 /// Flags that must never reach `claude`. `--bare` skips the user's own sign-in and
@@ -164,7 +164,7 @@ pub(crate) enum Auth {
     /// An Anthropic API key from the credential store. It reaches the `claude` child as
     /// `ANTHROPIC_API_KEY` and nothing else: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` keeps it
     /// out of the shells, hooks and MCP servers `claude` starts.
-    ApiKey(Redacted<String>),
+    ApiKey(Secret<String>),
 }
 
 /// The variable `claude` reads an Anthropic API key from.
@@ -175,12 +175,12 @@ pub(crate) const SUBPROCESS_SCRUB_VAR: &str = "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"
 /// The environment a call on `auth` adds after the scrubbed one: nothing on its own
 /// sign-in, the key and the subprocess scrub on a key. The value stays redacted until
 /// the spawn.
-pub(crate) fn auth_env(auth: &Auth) -> Vec<(&'static str, Redacted<String>)> {
+pub(crate) fn auth_env(auth: &Auth) -> Vec<(&'static str, Secret<String>)> {
     match auth {
         Auth::OwnSignIn => Vec::new(),
         Auth::ApiKey(key) => vec![
             (API_KEY_VAR, key.clone()),
-            (SUBPROCESS_SCRUB_VAR, Redacted::new("1".to_owned())),
+            (SUBPROCESS_SCRUB_VAR, Secret::new("1".to_owned())),
         ],
     }
 }
@@ -254,7 +254,7 @@ pub(crate) struct Call<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Built {
     pub(crate) args: Vec<String>,
-    pub(crate) env: Vec<(&'static str, Redacted<String>)>,
+    pub(crate) env: Vec<(&'static str, Secret<String>)>,
 }
 
 /// The argument vector and sign-in environment of one call: `-p`, the output, the model
@@ -857,7 +857,7 @@ mod tests {
             ..Call::default()
         };
         let own = build(&call, &Auth::OwnSignIn).unwrap();
-        let key = build(&call, &Auth::ApiKey(Redacted::new(KEY.to_owned()))).unwrap();
+        let key = build(&call, &Auth::ApiKey(Secret::new(KEY.to_owned()))).unwrap();
         assert_eq!(own.args, key.args);
         assert_eq!(own.env.len(), 0, "the own sign-in adds no environment");
         let env: Vec<(&str, &str)> = key

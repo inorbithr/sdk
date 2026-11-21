@@ -16,6 +16,35 @@ use crate::error::{ConfigError, Error, Headers, MAX_BODY};
 use crate::middleware::{Body, Request, Response};
 use crate::socket::Io;
 
+/// Why an answer could not be read whole.
+pub(crate) enum Capped {
+    /// More than the limit: the answer is dropped unread beyond it.
+    TooLarge,
+    /// The connection failed while reading.
+    Read(reqwest::Error),
+}
+
+/// Reads an answer's body, never holding more than `max` bytes: a `Content-Length` over
+/// the limit is refused before any byte is read, and a body without one is cut off while
+/// it streams (SR-19, study 0094.60). The one reader every answer goes through, the
+/// sign-in service's too.
+pub(crate) async fn read_capped(
+    mut resp: reqwest::Response,
+    max: usize,
+) -> Result<Vec<u8>, Capped> {
+    if resp.content_length().is_some_and(|n| n > max as u64) {
+        return Err(Capped::TooLarge);
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(Capped::Read)? {
+        if body.len() + chunk.len() > max {
+            return Err(Capped::TooLarge);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 /// Sends requests: the innermost step of every pipeline.
 pub(crate) struct Transport {
     pub(crate) http: reqwest::Client,
@@ -107,7 +136,7 @@ impl Transport {
         if let Some(b) = req.body {
             rb = rb.body(b);
         }
-        let mut resp = rb.send().await.map_err(|e| failed(&host, &e))?;
+        let resp = rb.send().await.map_err(|e| failed(&host, &e))?;
         if self.caller && resp.url().origin() != req.url.origin() {
             return Err(Error::Connection {
                 host,
@@ -129,19 +158,13 @@ impl Transport {
                 rate_limit: None,
             });
         }
-        if resp.content_length().is_some_and(|n| n > MAX_BODY as u64) {
-            return Err(Error::TooLarge);
-        }
-        let mut body = Vec::new();
-        while let Some(chunk) = resp.chunk().await.map_err(|e| Error::Connection {
-            host: host.clone(),
-            reason: transport_reason(&e),
-        })? {
-            if body.len() + chunk.len() > MAX_BODY {
-                return Err(Error::TooLarge);
-            }
-            body.extend_from_slice(&chunk);
-        }
+        let body = read_capped(resp, MAX_BODY).await.map_err(|e| match e {
+            Capped::TooLarge => Error::TooLarge,
+            Capped::Read(e) => Error::Connection {
+                host: host.clone(),
+                reason: transport_reason(&e),
+            },
+        })?;
         Ok(Response {
             status,
             headers,

@@ -39,7 +39,7 @@ code 0 means the bar is met, 1 that it is missed, 2 that the dataset or the bar 
 @@README_TEST@@
 ```
 
-The test grades the fixture with the network switched off and expects the bar to be met; then
+The test grades the fixture @@OFFLINE_NOTE@@ and expects the bar to be met; then
 it lowers one expected answer and expects the suite to fail and name the case. It also checks
 that a chatty answer fails the format scorer, that a solver that raises is an error and not a
 pass, and that a broken dataset or a scorer with no bar stops the run.

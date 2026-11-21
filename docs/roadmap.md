@@ -93,3 +93,38 @@ Not needed for M6; each lifts a limit the SDK documents:
    to repeat.
 6. **Docs:** `docs/auth/README.md` says rate limiting is not in Envoy yet (it is) and
    that a machine token lives an hour (keys and the command line get 15 minutes).
+
+## Eye sign-in through the SDK (RFC 0231, PRD 0220, ADR 0237, Study 0179)
+
+Moves person sign-in from `cli/crates/iohr-auth` into the `inorbithr` crate behind the
+opt-in `login` cargo feature, so a program signs in once and every client shares one
+store. Slices, each its own PR:
+
+- [x] 1. The contract (config.md section 5.6) and the pending tests (#565)
+- [x] 2. The primitives: `inorbithr::login::{Config, Profile, Kind, Storage, ProfileName}`,
+      PKCE, claims, the token store, the browser check; `Redacted` and `Secret` are one
+      type; the optional store crates are compiled only with `login`; `iohr` and
+      `iohr-auth` use them (one profile table, one store, one `account_pinned` key list).
+      Tests: `rust/tests/login_features.rs` (the default build pulls in no store or
+      keychain crate), `login_store.rs` (two sessions, one store), `login_profile.rs`.
+      Found 2026-11-14: the SDK left five command-line keys alone but `iohr` writes six
+      (`account_pinned`); fixed with a test.
+- [x] 3. The flows (authorization code with PKCE, device code, refresh, sign-out):
+      `inorbithr::login::{Provider, Login, Authorization, Session, SignOut, open_browser}`;
+      the flows moved out of `iohr-auth`, the provider answers use the transport's capped
+      reader. Tests: `login_flows.rs`, `login_secrets.rs`, `login_hydra.rs` (`mise run
+      cli:hydra`). Behaviour change: `iohr logout` now always deletes the local session,
+      even when the revoke fails, and says so (it used to keep it and exit 1). The RFC
+      names `Session::save`; the code also has `Session::access_token()` in place of a
+      `Credential` impl, which the `login` source will use in slice 4.
+- [x] 4. The `login` credential source in the chain (config.md section 5.1)
+- [x] 5. Delete `iohr-auth`: `iohr` imports `inorbithr::login` directly and keeps its own
+      `auth` module for what is the command line's (the `[runner]`, `[ask]`, `[panel]`
+      tables, the `Credential` wrapper). No re-export shim remains, because `iohr` was the
+      only user. Also: `INORBIT_LOGIN_CLIENT_ID`, a serial guard on the store tests that
+      share the macOS Keychain's process-wide prompt flag, a conformance store that no
+      longer depends on read order, and the `login-device` example (a check against the
+      replay server). SDK 0.4.1 is proposed by release-please from these commits.
+
+Open: the RFC's Keychain hypothesis (one signed binary, one "Always Allow") is checked on
+a Mac, not here; slice 2 was built and tested on Linux.

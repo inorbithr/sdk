@@ -3,5 +3,5 @@
 #![no_main]
 
 libfuzzer_sys::fuzz_target!(|data: &[u8]| {
-    let _ = iohr_auth::loopback::parse_request(data);
+    let _ = inorbithr::login::fuzz_parse_request(data);
 });

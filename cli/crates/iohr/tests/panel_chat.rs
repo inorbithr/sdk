@@ -84,6 +84,13 @@ impl Rig {
 
     /// The same, in the terminal `$TERM_PROGRAM` names.
     fn panel_in(&self, chat: &str, term_program: &str) -> Pty {
+        self.panel_holding(chat, term_program, "")
+    }
+
+    /// The same, holding a lone Esc for `esc_hold_ms` (`IOHR_PANEL_ESC_HOLD_MS`; "" leaves the
+    /// default). The Esc tests hold far longer than their pauses, because a loaded host can
+    /// stretch a 5 ms sleep past the default 40 ms.
+    fn panel_holding(&self, chat: &str, term_program: &str, esc_hold_ms: &str) -> Pty {
         let mut c = Command::new(bin());
         c.args(["panel", "--", zsh().to_str().unwrap(), "-f"])
             .current_dir(self.home.join("work"))
@@ -102,6 +109,9 @@ impl Rig {
             .env("PS1", "READY> ");
         if !chat.is_empty() {
             c.env("IOHR_PANEL_CHAT", chat);
+        }
+        if !esc_hold_ms.is_empty() {
+            c.env("IOHR_PANEL_ESC_HOLD_MS", esc_hold_ms);
         }
         let mut s = Pty::spawn(c);
         s.until("the prompt", |sc| any(sc, "READY>"));
@@ -202,6 +212,40 @@ fn one_enter_sends_a_question_mark_question() {
         !any(s.screen.screen(), "no matches found"),
         "a bare ? reached the shell as a glob:\n{}",
         s.screen.screen().contents()
+    );
+}
+
+/// Ctrl-Space, the key that moves the keyboard between the box and the terminal.
+const SWITCH: &[u8] = &[0x00];
+
+#[test]
+fn one_key_moves_between_the_chat_and_the_terminal_and_the_draft_stays() {
+    let rig = Rig::new("switch", QUICK);
+    let mut s = rig.panel("");
+    s.until("the box at the prompt", |sc| boxed(sc) && ready(sc));
+    s.send(SWITCH);
+    s.until("the box taking the keys", |sc| {
+        any(sc, "ask anything about this shell") && any(sc, "typing here")
+    });
+    s.send(b"why is the roll slow");
+    s.until("the draft in the box", |sc| any(sc, "why is the roll slow"));
+    s.send(SWITCH);
+    s.until("the keys back in the terminal", |sc| {
+        any(sc, "draft") && !any(sc, "typing here") && any(sc, "why is the roll slow")
+    });
+    // The terminal types and runs a command; no keystroke goes to the box.
+    line(&mut s, "echo SHELL\"\"TYPED");
+    s.until("the command ran", |sc| any(sc, "SHELLTYPED"));
+    s.send(SWITCH);
+    s.until("the draft waiting", |sc| {
+        any(sc, "typing here") && any(sc, "why is the roll slow")
+    });
+    s.send(b"\r");
+    s.until("the answer", |sc| any(sc, "ANSWER-ONE"));
+    assert!(
+        rig.saw("claude.stdin").contains("why is the roll slow"),
+        "the draft did not reach the agent: {}",
+        rig.saw("claude.stdin")
     );
 }
 
@@ -545,7 +589,7 @@ fn option_h_hides_the_box_and_brings_it_back_in_each_of_its_forms() {
 #[test]
 fn escape_and_h_in_two_reads_is_option_h_and_not_the_shells() {
     let rig = Rig::new("opthsplit", QUICK);
-    let mut s = rig.panel_in("", "xterm");
+    let mut s = rig.panel_holding("", "xterm", "1000");
     s.until("the box", |sc| any(sc, HIDE) && ready(sc));
     fresh(&mut s);
     s.send(b"\x1b");
@@ -553,6 +597,28 @@ fn escape_and_h_in_two_reads_is_option_h_and_not_the_shells() {
     s.send(b"h");
     s.until("the box folded", folded);
     // The shell got neither the Esc nor the h.
+    assert!(!prompt_row(s.screen.screen()).contains('h'));
+}
+
+/// A panel that is late to run (a loaded hosted runner: tens of milliseconds with no time slice)
+/// finds the held Esc's time up and the `h` already waiting: that is still Option+h, since the
+/// two were written close together. The stall is made by stopping the panel between the writes
+/// for longer than the hold, so the hold runs out while it is stopped and only the last look at
+/// the terminal can see the `h`.
+#[test]
+fn escape_and_h_written_close_together_are_option_h_even_when_the_panel_runs_late() {
+    let rig = Rig::new("opthstall", QUICK);
+    let mut s = rig.panel_holding("", "xterm", "1000");
+    s.until("the box", |sc| any(sc, HIDE) && ready(sc));
+    fresh(&mut s);
+    let pid = rustix::process::Pid::from_child(&s.child);
+    s.send(b"\x1b");
+    std::thread::sleep(Duration::from_millis(10));
+    rustix::process::kill_process(pid, rustix::process::Signal::STOP).unwrap();
+    s.send(b"h");
+    std::thread::sleep(Duration::from_millis(1500));
+    rustix::process::kill_process(pid, rustix::process::Signal::CONT).unwrap();
+    s.until("the box folded", folded);
     assert!(!prompt_row(s.screen.screen()).contains('h'));
 }
 

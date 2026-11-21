@@ -22,6 +22,7 @@ from . import ID, VERSION
 from .channel import Refused, token
 
 SCOPES = ["identity:read"]
+# The project folder, or once built the folder the zipapp sits in (its panel page is beside it).
 HERE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PANEL = os.path.join(HERE, "panel", "index.html")
 

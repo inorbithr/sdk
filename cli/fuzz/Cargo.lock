@@ -394,7 +394,7 @@ checksum = "4f8abc12baad266b1c8cec146854c195b5864b4221d4b2ca7296a7ae82d9e451"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -429,7 +429,7 @@ checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -663,7 +663,7 @@ dependencies = [
  "heck",
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -962,7 +962,7 @@ checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1039,7 +1039,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1114,9 +1114,9 @@ checksum = "b7ac824320a75a52197e8f2d787f6a38b6718bb6897a35142d749af3c0e8f4fe"
 
 [[package]]
 name = "flate2"
-version = "1.1.10"
+version = "1.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb"
+checksum = "626d4928326b646e70f65ed36fc7cf9f206bdb68a0019ee7c6b4709da4e084c4"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
@@ -1192,7 +1192,7 @@ checksum = "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1670,26 +1670,33 @@ dependencies = [
 
 [[package]]
 name = "inorbithr"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
+ "apple-native-keyring-store",
  "base64",
  "futures-core",
  "futures-util",
  "getrandom 0.4.3",
+ "keyring-core",
  "reqwest",
  "rustls",
  "rustls-platform-verifier",
  "rustls-webpki",
+ "security-framework",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "time",
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
  "toml",
+ "toml_edit",
  "tracing",
  "url",
+ "windows-native-keyring-store",
+ "zbus-secret-service-keyring-store",
  "zeroize",
 ]
 
@@ -1705,7 +1712,7 @@ dependencies = [
 
 [[package]]
 name = "iohr"
-version = "0.1.0-alpha.39"
+version = "0.1.1"
 dependencies = [
  "aws-lc-rs",
  "base64",
@@ -1723,7 +1730,6 @@ dependencies = [
  "indicatif",
  "inorbithr",
  "iohr-atlas-core",
- "iohr-auth",
  "iohr-codegen",
  "iohr-lab",
  "iohr-openapi",
@@ -1751,7 +1757,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-atlas-core"
-version = "0.1.0-alpha.39"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "serde",
@@ -1762,33 +1768,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "iohr-auth"
-version = "0.1.0-alpha.39"
-dependencies = [
- "apple-native-keyring-store",
- "base64",
- "etcetera",
- "getrandom 0.4.3",
- "keyring-core",
- "reqwest",
- "security-framework",
- "serde",
- "serde_json",
- "sha2",
- "thiserror",
- "time",
- "tokio",
- "toml",
- "toml_edit",
- "url",
- "windows-native-keyring-store",
- "zbus-secret-service-keyring-store",
- "zeroize",
-]
-
-[[package]]
 name = "iohr-codegen"
-version = "0.1.0-alpha.39"
+version = "0.1.1"
 dependencies = [
  "clap",
  "heck",
@@ -1799,7 +1780,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "syn 3.0.9",
+ "syn 3.0.10",
  "thiserror",
  "typify",
 ]
@@ -1810,14 +1791,13 @@ version = "0.0.0"
 dependencies = [
  "inorbithr",
  "iohr",
- "iohr-auth",
  "libfuzzer-sys",
  "time",
 ]
 
 [[package]]
 name = "iohr-lab"
-version = "0.1.0-alpha.39"
+version = "0.1.1"
 dependencies = [
  "regex",
  "serde",
@@ -1827,7 +1807,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-openapi"
-version = "0.1.0-alpha.39"
+version = "0.1.1"
 dependencies = [
  "heck",
  "serde",
@@ -2479,7 +2459,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bfe0f4c752e450fc2faf62654f1c134747922825d5b04ca717b8874f41a40c0"
 dependencies = [
  "proc-macro2",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -2554,7 +2534,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2750,7 +2730,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2807,7 +2787,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2969,7 +2949,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3015,7 +2995,7 @@ checksum = "8d3b1629de253c70a0508c3899572da79ca359fdab27c7920ff00406df418906"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3036,7 +3016,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3366,9 +3346,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.9"
+version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
+checksum = "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3392,7 +3372,7 @@ checksum = "901704edd0dfe137f1987838ee4f259e4e063c31371bdb423f7ae38ec6f77f02"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3434,10 +3414,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3487,7 +3467,7 @@ checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3591,7 +3571,7 @@ checksum = "78773a2a397f451582ce068015985c33193cf6dea8b74d2a639fe457b2f07b0e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3811,7 +3791,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "syn 3.0.9",
+ "syn 3.0.10",
  "thiserror",
  "unicode-ident",
 ]
@@ -3829,7 +3809,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tokenstream",
- "syn 3.0.9",
+ "syn 3.0.10",
  "typify-impl",
 ]
 
@@ -3924,9 +3904,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vt100"
-version = "0.16.2"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "054ff75fb8fa83e609e685106df4faeffdf3a735d3c74ebce97ec557d5d36fd9"
+checksum = "eb05cdd19ae8707bf6a0a269972c07e6358103a7079faec749dec318a5b3dc23"
 dependencies = [
  "itoa",
  "unicode-width",
@@ -4020,7 +4000,7 @@ dependencies = [
  "bumpalo",
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
  "wasm-bindgen-shared",
 ]
 
@@ -4080,7 +4060,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4320,7 +4300,7 @@ checksum = "ec8ebde2db3681e8c9980cc27822030e68752690ddfa9473e739aeb4dbde6d71"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
  "synstructure",
 ]
 
@@ -4379,7 +4359,7 @@ dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
  "zbus_names",
  "zvariant",
  "zvariant_utils",
@@ -4442,7 +4422,7 @@ checksum = "f75b4683f6c7f45248d4d64056a24298c6281e0993356d7d1b4a1a962ef10d4a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
  "synstructure",
 ]
 
@@ -4498,7 +4478,7 @@ checksum = "34df6fc39dbd26ddc9c10e6a2984476e13acce22e64e4487636ef494369225da"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -4537,7 +4517,7 @@ dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
  "zvariant_utils",
 ]
 
@@ -4550,6 +4530,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "syn 3.0.9",
+ "syn 3.0.10",
  "winnow",
 ]

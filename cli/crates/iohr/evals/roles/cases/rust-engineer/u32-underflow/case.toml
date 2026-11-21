@@ -1,0 +1,17 @@
+# A quota check. Plan: rust-engineer, row 6.
+kind = "planted"
+language = "rust"
+task = "Add Quota::refill(&mut self, n: u32) in src/lib.rs that gives back n requests, never above the starting limit."
+
+[defect]
+file = "src/lib.rs"
+lines = [28, 28]
+text = "self.left -= cost;"
+class = "integer-underflow"
+words = ["checked_sub", "underflow", "overflow", "wrap", "u32"]
+
+[check]
+cmd = "cargo test --offline --quiet"
+
+[proof]
+ran = ["cargo test|cargo nextest"]

@@ -36,7 +36,7 @@ cat <<RUBY
 # release, not edited by hand.
 class Iohr < Formula
   desc "InOrbit command-line tool: sign in, keep several accounts, call the API"
-  homepage "https://docs.inorbit.hr"
+  homepage "https://developers.inorbit.hr"
   license "Apache-2.0"
 
   on_macos do

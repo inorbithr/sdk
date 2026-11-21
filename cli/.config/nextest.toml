@@ -1,0 +1,26 @@
+# Tests that drive a real shell or program through a pseudo-terminal wait on short timers (a held
+# Esc, a redraw, a settle). On a busy macOS runner one of them runs late and fails: a different
+# test each release (project_init_once, then the Option+h split read). Run such a test again
+# before calling it failed. A pass on a later try is
+# reported as FLAKY, so it stays visible; a test that fails every try still fails the run.
+[[profile.default.overrides]]
+platform = { host = 'cfg(target_os = "macos")' }
+filter = 'binary(panel) | binary(panel_chat) | binary(panel_live) | binary(project_init_once) | binary(theme)'
+retries = 2
+
+# Run every test and list every failure in one pass. A Windows or macOS leg that only builds on a
+# release finds several breaks at once, and stopping at the first one costs a release run per
+# break.
+[profile.default]
+fail-fast = false
+
+# The template variants that build with Maven (agent and mcp-server in Java) download their
+# plugins from Maven Central on a cold runner. Started together, they got HTTP 429 (Too Many
+# Requests) from Central on 2026-11-19. They run one at a time; every other variant still runs
+# in parallel.
+[test-groups]
+maven = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary(templates) & (test(=every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here::agent_java) | test(=every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here::mcp_server_java))'
+test-group = 'maven'

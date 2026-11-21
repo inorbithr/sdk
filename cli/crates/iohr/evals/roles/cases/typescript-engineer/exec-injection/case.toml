@@ -1,0 +1,17 @@
+# A thumbnail job. Plan: typescript-engineer, row 4.
+kind = "planted"
+language = "typescript"
+task = "kind in kind.ts should also return the MIME type: add kindAndMime(path) using file --brief --mime-type."
+
+[defect]
+file = "kind.ts"
+lines = [9, 9]
+text = "run(`file --brief ${path}`)"
+class = "command-injection"
+words = ["execFile", "injection", "shell", "exec"]
+
+[check]
+cmd = "node --test *.test.ts"
+
+[proof]
+ran = ["node --test|npm test|npx tsc|tsc"]
