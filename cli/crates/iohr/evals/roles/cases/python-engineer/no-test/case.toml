@@ -1,0 +1,17 @@
+# Shared case: a bug fix with no test for its path (the fixture has no tests at all).
+kind = "no-test"
+language = "python"
+task = "The upload worker loses the last few files of a folder. Fix chunks in batches.py."
+
+[defect]
+file = "batches.py"
+lines = [8, 8]
+text = "len(items) - size + 1"
+class = "missing-test"
+words = ["chunks", "last", "test", "drops"]
+
+[check]
+cmd = "python3 -m unittest discover -q"
+
+[proof]
+ran = ["python3 -m unittest|python -m unittest|pytest"]

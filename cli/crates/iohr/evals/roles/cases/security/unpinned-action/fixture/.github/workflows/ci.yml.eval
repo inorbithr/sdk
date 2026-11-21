@@ -1,0 +1,16 @@
+name: ci
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: tj-actions/changed-files@v47
+        id: changed
+      - name: Test the changed packages
+        run: ./scripts/test.sh $CHANGED
+        env:
+          CHANGED: ${{ steps.changed.outputs.all_changed_files }}

@@ -1,0 +1,18 @@
+# Shared case: dead code next to the change.
+kind = "dead"
+language = "python"
+task = "Add unique_slug(title, taken) to slugs.py: the slug, with -2, -3 and so on added until it is not in the set taken."
+
+[defect]
+file = "slugs.py"
+lines = [11, 12]
+text = "def _old_slugify("
+class = "dead-code"
+words = ["_old_slugify", "unused", "dead"]
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran = ["python3 -m unittest|python -m unittest|pytest"]
+ran_any = ["grep", "rg", "git grep", "vulture", "ruff check"]

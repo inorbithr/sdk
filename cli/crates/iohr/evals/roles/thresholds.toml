@@ -1,0 +1,62 @@
+# The bar and the landing rule for role evals (ADR 0022). tests/role_evals.rs reads this file
+# and enforces it on every run; it refuses to start when a scorer has no bar or a bar names an
+# unknown scorer, as the evals project template does (ADR 0221).
+
+# The bar every recorded arm of the current pack must clear. The template's format:
+# min_pass_rate, max_errors and one minimum per scorer. Provisional until the first real
+# (not synthetic) baseline is recorded by the nightly run; then each bar is set from it.
+[bar]
+min_pass_rate = 0.8
+max_errors = 0
+
+[bar.scorers]
+recall = 0.8
+precision = 0.9
+proof = 0.8
+size = 0.8
+
+# The landing rule: a pack change lands only when it raises the score without raising cost
+# by more than max(max_cost_rise, spread_factor x the measured run-to-run spread), on the
+# median tokens per case. Recall or precision must go up by at least one case, neither may
+# fall by more than max_case_drop cases, and proof may not fall.
+[landing]
+max_cost_rise = 0.10
+spread_factor = 2.0
+max_case_drop = 1
+
+# Runs per arm and case; the median is scored.
+[arms]
+runs = 3
+
+# Appended to every case task, for every arm: how the agent hands back its findings, so they
+# can be scored without reading prose.
+[task]
+suffix = """
+
+When you are done, end your reply with one fenced json block listing what you found that \
+is wrong in this repository, fixed or not: {"findings": [{"file": "<path>", "line": <n>, \
+"class": "<short-kebab-case-name>", "text": "<one sentence>", "evidence": "<the command \
+you ran that shows it>"}]}. Use {"findings": []} when you found nothing."""
+
+# The live recorder (the nightly workflow and on demand): the model alias, and how long one
+# run may take before it is stopped and recorded as an error.
+[live]
+model = "sonnet"
+timeout_seconds = 600
+
+# The commands the agent may run in a live recording, per fixture language: Bash(<prefix>:*)
+# each. Everything else in Bash is denied; there is no network tool except in the method case.
+[languages.go]
+allow = ["go", "gofmt", "govulncheck", "staticcheck", "osv-scanner", "grep", "rg", "git", "ls", "cat", "sed", "sh"]
+
+[languages.rust]
+allow = ["cargo", "rustc", "grep", "rg", "git", "ls", "cat", "sed", "sh", "osv-scanner"]
+
+[languages.python]
+allow = ["python3", "python", "pytest", "ruff", "pip", "pip-audit", "uv", "grep", "rg", "git", "ls", "cat", "sed", "sh", "osv-scanner"]
+
+[languages.typescript]
+allow = ["node", "npm", "npx", "tsc", "grep", "rg", "git", "ls", "cat", "sed", "sh", "osv-scanner"]
+
+[languages.actions]
+allow = ["zizmor", "actionlint", "grep", "rg", "git", "ls", "cat", "sed", "sh"]

@@ -1,0 +1,2 @@
+# Shared case, run with the python-engineer/dead-code fixture.
+same_as = "python-engineer/dead-code"

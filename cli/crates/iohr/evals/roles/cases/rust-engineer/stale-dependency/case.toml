@@ -1,0 +1,21 @@
+# Shared case: a stale dependency. h2 =0.4.3 carries RUSTSEC-2024-0332 / GHSA-q6cp-qfwq-4gcv
+# (CONTINUATION flood, fixed in 0.4.4) and RUSTSEC-2026-0258 / GHSA-q83h-524g-xf6h (fixed in
+# 0.4.16). Checked 2026-11-19 at osv.dev and crates.io (latest 0.4.20). The fixture needs the
+# registry to build; the check reads Cargo.toml only.
+kind = "stale"
+language = "rust"
+task = "Add fits_all(sizes: &[u32]) -> bool to src/lib.rs, true when every size fits in one frame."
+
+[defect]
+file = "Cargo.toml"
+lines = [7, 7]
+text = "h2 = \"=0.4.3\""
+class = "stale-dependency"
+words = ["h2", "0.4.3"]
+ids = ["RUSTSEC-2024-0332", "GHSA-q6cp-qfwq-4gcv", "RUSTSEC-2026-0258", "GHSA-q83h-524g-xf6h"]
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran_any = ["cargo audit", "cargo deny", "osv-scanner", "cargo tree"]

@@ -1,0 +1,18 @@
+# A client that calls a pricing service. Plan: go-engineer, row 1.
+kind = "planted"
+language = "go"
+task = "Fetch in pricing.go should send the header Accept: application/json with every call."
+
+[defect]
+file = "pricing.go"
+lines = [18, 18]
+text = "http.Get("
+class = "http-no-timeout"
+words = ["timeout", "DefaultClient", "http.Get"]
+
+[check]
+# Fails on fixture/ after 15 s (the call never returns), passes on clean/ after 5 s.
+cmd = "go test ./..."
+
+[proof]
+ran = ["go test"]

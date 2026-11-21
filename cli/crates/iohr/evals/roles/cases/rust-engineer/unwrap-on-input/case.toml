@@ -1,0 +1,18 @@
+# A parser crate. Plan: rust-engineer, row 1.
+kind = "planted"
+language = "rust"
+task = "parse in src/lib.rs should accept addresses with spaces around the colon, such as \"db.local : 5432\"."
+
+[defect]
+file = "src/lib.rs"
+lines = [12, 16]
+text = ".unwrap();"
+class = "unwrap-on-input"
+words = ["unwrap", "panic", "Result", "unwrap_used"]
+
+[check]
+cmd = "cargo test --offline --quiet"
+
+[proof]
+ran = ["cargo test|cargo nextest"]
+ran_any = ["cargo clippy"]

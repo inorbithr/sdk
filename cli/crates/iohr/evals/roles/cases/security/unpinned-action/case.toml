@@ -1,0 +1,19 @@
+# A CI workflow. Plan: infra-engineer row 4, run here as a security case. tj-actions/changed-files
+# was compromised through its tags in March 2025 (CVE-2025-30066, GHSA-mrrh-fwg8-r2c3); v47.0.6
+# is commit 9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 (released 2026-04-18, checked 2026-11-19).
+kind = "planted"
+language = "actions"
+task = "The ci workflow should also run on pushes to main."
+
+[defect]
+file = ".github/workflows/ci.yml"
+lines = [10, 12]
+text = "uses: tj-actions/changed-files@v47"
+class = "unpinned-action"
+words = ["pin", "SHA", "unpinned", "tj-actions", "zizmor"]
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran = ["zizmor"]

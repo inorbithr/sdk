@@ -1,0 +1,18 @@
+# Shared case: dead code next to the change, hidden by #[allow(dead_code)].
+kind = "dead"
+language = "rust"
+task = "Add slug_max(title, max) to src/lib.rs: the slug cut to at most max bytes at a word boundary."
+
+[defect]
+file = "src/lib.rs"
+lines = [14, 17]
+text = "fn legacy_slug("
+class = "dead-code"
+words = ["legacy_slug", "dead_code", "unused", "dead"]
+
+[check]
+cmd = "sh check.sh"
+
+[proof]
+ran = ["cargo test|cargo nextest"]
+ran_any = ["grep", "rg", "git grep", "cargo clippy"]
