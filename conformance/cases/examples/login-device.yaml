@@ -1,0 +1,28 @@
+name: login-device
+area: examples
+summary: "A person signs in with the device flow, the session is kept, and a client calls the API as that person."
+notes: "The check path (tools/run-examples.py) runs a program with environment variables and no browser, so the example uses the device flow against the replay server's sign-in service (INORBIT_BASE_URL is the issuer), approved at once; the browser flow has its own conformance cases. Rust only: the login feature is Rust-only until the other SDKs ship theirs (RFC 0231)."
+action: { op: example }
+exchanges:
+  - request: { method: GET, path: /.well-known/openid-configuration }
+    response:
+      status: 200
+      json:
+        issuer: "{replay}"
+        authorization_endpoint: "{replay}/oauth2/auth"
+        token_endpoint: "{replay}/oauth2/token"
+        device_authorization_endpoint: "{replay}/oauth2/device/auth"
+        revocation_endpoint: "{replay}/oauth2/revoke"
+  - request: { method: POST, path: /oauth2/device/auth, form: { client_id: iohr-cli } }
+    response:
+      status: 200
+      json: { device_code: dc-1, user_code: ABCD-EFGH, verification_uri: "{replay}/device", expires_in: 600, interval: 1 }
+  - request:
+      method: POST
+      path: /oauth2/token
+      form: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: dc-1 }
+    response: { status: 200, json: { access_token: eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c3JfMSIsImF1ZCI6WyJpb2hyLWFwaSJdLCJvcmciOiJhY2NfMSIsImp0aSI6ImV4YW1wbGUifQ.c2ln, refresh_token: rt-1, token_type: bearer, expires_in: 900, id_token: "{id_token:iohr-cli}" } }
+  - request: { method: GET, path: /v1/me, headers: { authorization: "Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c3JfMSIsImF1ZCI6WyJpb2hyLWFwaSJdLCJvcmciOiJhY2NfMSIsImp0aSI6ImV4YW1wbGUifQ.c2ln" } }
+    response: { status: 200, json: { subject: usr_1, kind: user, scopes: [iohr.api] } }
+expect:
+  attempts: 1

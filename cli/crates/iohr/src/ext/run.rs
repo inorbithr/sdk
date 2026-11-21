@@ -6,7 +6,13 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 
-use iohr_auth::{Claims, Credential as _, Kind, Redacted};
+use inorbithr::login::Claims;
+
+use crate::auth::Credential as _;
+
+use inorbithr::login::Kind;
+
+use inorbithr::Secret;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::sync::OnceCell;
@@ -71,7 +77,7 @@ impl Minter for ProfileMinter {
             .and_then(|t| t.format(&Rfc3339).ok())
             .unwrap_or_default();
         Ok(Minted {
-            access_token: Redacted::new(bearer.expose().to_owned()),
+            access_token: Secret::new(bearer.expose().to_owned()),
             expires_at,
         })
     }

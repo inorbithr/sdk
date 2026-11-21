@@ -1448,7 +1448,8 @@ mod tests {
 
     #[tokio::test]
     async fn the_runner_token_is_asked_for_by_lease_and_never_shows_in_debug_or_errors() {
-        use iohr_auth::{Redacted, StaticToken};
+        use crate::auth::StaticToken;
+        use inorbithr::Secret;
         use std::sync::Arc;
         use wiremock::matchers::{body_json, method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1470,7 +1471,7 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let person = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+        let person = Arc::new(AnyCredential::Token(StaticToken::new(Secret::new(
             "person-token".to_owned(),
         ))));
         let api = Api::new(&server.uri(), person, false).unwrap();
@@ -1494,7 +1495,7 @@ mod tests {
             ))
             .mount(&old)
             .await;
-        let person = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+        let person = Arc::new(AnyCredential::Token(StaticToken::new(Secret::new(
             "person-token".to_owned(),
         ))));
         let api = Api::new(&old.uri(), person, false).unwrap();
@@ -1513,7 +1514,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_refused_wait_is_left_out_for_a_while_and_then_asked_again() {
-        use iohr_auth::{Redacted, StaticToken};
+        use crate::auth::StaticToken;
+        use inorbithr::Secret;
         use std::sync::Arc;
         use wiremock::matchers::{body_string_contains, method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1543,7 +1545,7 @@ mod tests {
             .with_priority(5)
             .mount(&server)
             .await;
-        let person = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+        let person = Arc::new(AnyCredential::Token(StaticToken::new(Secret::new(
             "person-token".to_owned(),
         ))));
         let api = Api::new(&server.uri(), person, false).unwrap();
@@ -1583,7 +1585,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_beat_carries_the_machine_only_when_it_was_read() {
-        use iohr_auth::{Redacted, StaticToken};
+        use crate::auth::StaticToken;
+        use inorbithr::Secret;
         use std::sync::Arc;
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1599,7 +1602,7 @@ mod tests {
             .expect(2)
             .mount(&server)
             .await;
-        let person = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+        let person = Arc::new(AnyCredential::Token(StaticToken::new(Secret::new(
             "person-token".to_owned(),
         ))));
         let api = Api::new(&server.uri(), person, false).unwrap();

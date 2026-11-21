@@ -8,7 +8,7 @@
 //! times and counts, never a report or a subject.
 //!
 //! The bootstrap host is the one named exception to "the SDK talks only to the API host"
-//! (ADR 0242, sdk ADR 0018): HTTPS addresses only, plain HTTP on loopback for tests.
+//! (ADR 0242, sdk ADR 0023): HTTPS addresses only, plain HTTP on loopback for tests.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

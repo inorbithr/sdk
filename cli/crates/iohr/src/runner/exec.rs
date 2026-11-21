@@ -77,7 +77,7 @@ pub(crate) struct ClaudeExec {
     pub(crate) runner_id: String,
     pub(crate) user: String,
     /// The sign-in `claude` gets from iohr: an API key from the credential store, or
-    /// none (its own sign-in). Redacted in `Debug`.
+    /// none (its own sign-in). Secret in `Debug`.
     auth: claude::Auth,
     /// What this machine allows, as config.toml says now (SIGHUP reloads it).
     local: watch::Receiver<LocalAuth>,
@@ -646,10 +646,10 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
     const API_KEY: &str = r#"{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty"}"#;
     const STORED: &str = "sk-ant-api03-STORED-KEY-never-printed";
 
-    /// RFC 0189: the model's `cargo` builds into its repository's shared directory, so
-    /// jobs of one repository do not each keep a `target/` of their own.
+    /// RFC 0189: the model's `cargo` builds into a directory of its job's checkout, which
+    /// the hygiene sweep removes with the checkout (no lock shared between jobs).
     #[tokio::test]
-    async fn a_turn_in_a_worktree_builds_into_its_repository_shared_directory() {
+    async fn a_turn_in_a_worktree_builds_into_its_own_job_directory() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().canonicalize().unwrap();
         let e = exec(&state, SUB);
@@ -666,7 +666,10 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         let f = e.execute(p).await;
         assert_eq!(f.outcome, "replied", "{}", f.detail);
         let env = std::fs::read_to_string(state.join("env.txt")).unwrap();
-        let want = format!("CARGO_TARGET_DIR={}", state.join("target/o/r").display());
+        let want = format!(
+            "CARGO_TARGET_DIR={}",
+            state.join("target/o/r/job_1").display()
+        );
         assert!(
             env.lines().any(|l| l == want),
             "{want} not in the child's environment"
@@ -888,9 +891,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
     async fn a_stored_key_reaches_claude_alone_and_never_prints() {
         let dir = tempfile::tempdir().unwrap();
         let e = exec(dir.path(), API_KEY)
-            .with_auth(claude::Auth::ApiKey(iohr_auth::Redacted::new(
-                STORED.into(),
-            )))
+            .with_auth(claude::Auth::ApiKey(inorbithr::Secret::new(STORED.into())))
             .with_local(watch::channel(LocalAuth::default()).1);
         assert!(matches!(e.auth, claude::Auth::ApiKey(_)));
         assert!(e.env_is_clean());
@@ -919,9 +920,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         // Under `plan` the stored key stays out: claude runs on its own sign-in.
         let dir = tempfile::tempdir().unwrap();
         let e = exec(dir.path(), SUB)
-            .with_auth(claude::Auth::ApiKey(iohr_auth::Redacted::new(
-                STORED.into(),
-            )))
+            .with_auth(claude::Auth::ApiKey(inorbithr::Secret::new(STORED.into())))
             .with_local(
                 watch::channel(LocalAuth {
                     claude: provider::AuthPolicy::Plan,

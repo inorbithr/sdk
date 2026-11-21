@@ -140,6 +140,19 @@ pub(crate) struct GateCheck {
     pub(crate) env: Vec<(OsString, OsString)>,
 }
 
+impl GateCheck {
+    /// The check signs in to the gate-slot lease with the runner's own profile: its name
+    /// (never a token) goes in as `IOHR_PROFILE`, replacing one the runner was started
+    /// with, so a runner started with `--profile` still takes the lease.
+    pub(crate) fn with_profile(mut self, profile: Option<&str>) -> Self {
+        if let Some(name) = profile {
+            self.env.retain(|(k, _)| k != "IOHR_PROFILE");
+            self.env.push(("IOHR_PROFILE".into(), name.into()));
+        }
+        self
+    }
+}
+
 impl Default for GateCheck {
     fn default() -> Self {
         Self {
@@ -826,7 +839,9 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                             return (End::Revoked, stats);
                         }
                         for lease in beat.offered {
-                            let taken = busy.len() + accepting.len() + fetching.len();
+                            // A job whose check runs (or whose gate report is being sent) still holds
+                            // its lease and its slot: the coordinator counts it, so the runner does.
+                            let taken = busy.len() + accepting.len() + fetching.len() + gating.len();
                             let held_already = accepting_ids.contains(&lease.lease_id)
                                 || held_leases(&busy, &fetching, &gating, &outbox)
                                     .iter()
@@ -3069,6 +3084,52 @@ mod tests {
         assert!(
             gate_at < report_at,
             "the lease is held until the gate is sent"
+        );
+    }
+
+    #[test]
+    fn the_runners_profile_reaches_the_check_as_iohr_profile() {
+        let g = GateCheck {
+            env: vec![
+                ("IOHR_PROFILE".into(), "old".into()),
+                ("PATH".into(), "/bin".into()),
+            ],
+            ..GateCheck::default()
+        };
+        let g = g.with_profile(Some("runner"));
+        let named: Vec<_> = g.env.iter().filter(|(k, _)| k == "IOHR_PROFILE").collect();
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].1, "runner");
+        assert!(g.env.iter().any(|(k, _)| k == "PATH"));
+        // No profile (a token session): the environment is left as it was.
+        let h = GateCheck {
+            env: vec![("PATH".into(), "/bin".into())],
+            ..GateCheck::default()
+        };
+        assert_eq!(h.clone().with_profile(None).env, h.env);
+    }
+
+    /// check is not accepted (the check is what fills the host).
+    #[tokio::test]
+    async fn a_job_in_its_check_counts_as_taken() {
+        let (root, _origin, _work) = gate::tests::repos();
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 7)]);
+        for _ in 0..3 {
+            offer(&fake, &[]);
+        }
+        offer(&fake, &[lease("lease_2", 8)]);
+        *fake.pack.lock().unwrap() = Some(job_pack());
+        let c = LoopConfig {
+            gate: Some(gate_cfg("sleep 1", root.path())),
+            ..cfg_cap(8, 1)
+        };
+        let _ = go(&fake, c).await;
+        assert_eq!(calls_of(&fake, "accept lease_1"), 1);
+        assert_eq!(
+            calls_of(&fake, "accept lease_2"),
+            0,
+            "taken ignored the check"
         );
     }
 

@@ -2,5 +2,5 @@
 #![no_main]
 
 libfuzzer_sys::fuzz_target!(|data: &str| {
-    let _ = iohr_auth::Claims::read(data, time::OffsetDateTime::UNIX_EPOCH);
+    let _ = inorbithr::login::Claims::read(data, time::OffsetDateTime::UNIX_EPOCH);
 });

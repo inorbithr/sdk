@@ -15,6 +15,7 @@ use semver::Version;
 use tokio::sync::watch;
 
 use crate::Env;
+use crate::auth::Config;
 use crate::cli::SignIn;
 use crate::cli::{Global, RunnerApiKeyCommand, RunnerCommand, RunnerConfigCommand};
 use crate::commands::session;
@@ -44,7 +45,9 @@ use crate::runner::signing::{self, RunKey, Signer};
 use crate::runner::supervisor::{self, Surroundings};
 use crate::runner::workspace::Workspaces;
 use crate::ui::Listed;
-use iohr_auth::{Config, EntryKey, ProfileName, Redacted};
+use inorbithr::Secret;
+use inorbithr::login::EntryKey;
+use inorbithr::login::ProfileName;
 
 #[allow(clippy::too_many_lines, reason = "one arm per subcommand")]
 pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> Result<(), Error> {
@@ -484,11 +487,14 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 declared: Some(declared),
                 build_floor: build_floor(&set),
                 report_host: true,
-                gate: Some(GateCheck {
-                    // The pack names the checkout relative to the turns' working directory.
-                    workdir: exec.workdir.clone(),
-                    ..GateCheck::default()
-                }),
+                gate: Some(
+                    GateCheck {
+                        // The pack names the checkout relative to the turns' working directory.
+                        workdir: exec.workdir.clone(),
+                        ..GateCheck::default()
+                    }
+                    .with_profile(s.profile.as_ref().map(ToString::to_string).as_deref()),
+                ),
                 // Job leases get their own checkout, `checkouts/<job_id>` on `job/<id>`,
                 // and a replied turn's pull request, through the host's git and `gh`.
                 workspaces: Some(Arc::new(Workspaces::for_runner(exec.workdir.clone()))),
@@ -1012,12 +1018,7 @@ fn effective(
     profile: Option<&ProfileName>,
     flags: &Flags,
 ) -> Result<Effective, Error> {
-    let own = profile.and_then(|p| {
-        config
-            .profile(p)
-            .and_then(|pr| pr.runner.as_ref())
-            .map(|r| (p.as_str(), r))
-    });
+    let own = profile.and_then(|p| config.profile_runner(p).map(|r| (p.as_str(), r)));
     settings::resolve(&config.runner, own, flags).map_err(Error::Failed)
 }
 
@@ -1357,9 +1358,9 @@ async fn run_key(
 /// A key this machine keeps in the profile's credential store, base64, under
 /// `{account}_{name}`; read once on open.
 struct StoredKey {
-    store: Arc<dyn iohr_auth::Store>,
+    store: Arc<dyn inorbithr::login::Store>,
     key: EntryKey,
-    value: Option<Redacted<String>>,
+    value: Option<Secret<String>>,
 }
 
 /// Removes the runner's keys of `account` (the runner key and the run key) from the
@@ -1398,7 +1399,7 @@ impl StoredKey {
         s: &crate::context::Session,
         account: &str,
         name: &str,
-    ) -> Result<(Arc<dyn iohr_auth::Store>, EntryKey), Error> {
+    ) -> Result<(Arc<dyn inorbithr::login::Store>, EntryKey), Error> {
         let profile = s.profile.clone().ok_or_else(|| {
             Error::Failed(
                 "the runner's keys are kept in your profile's credential store: sign in with `iohr login`, not with IOHR_TOKEN alone".into(),
@@ -1429,7 +1430,7 @@ impl StoredKey {
 
     async fn write(self, bytes: &[u8]) -> Result<(), Error> {
         use base64::Engine as _;
-        let secret = Redacted::new(base64::engine::general_purpose::STANDARD.encode(bytes));
+        let secret = Secret::new(base64::engine::general_purpose::STANDARD.encode(bytes));
         let key = self.key;
         blocking(self.store, move |st| st.set(&key, &secret)).await
     }
@@ -1449,13 +1450,13 @@ async fn stored_api_key(
     ctx: &Ctx,
     s: &crate::context::Session,
     account: &str,
-) -> Result<Option<Redacted<String>>, Error> {
+) -> Result<Option<Secret<String>>, Error> {
     let stored = StoredKey::open(ctx, s, account, API_KEY_ENTRY).await?;
     let Some(bytes) = stored.read("the stored Anthropic API key is damaged")? else {
         return Ok(None);
     };
     std::str::from_utf8(&bytes)
-        .map(|k| Some(Redacted::new(k.to_owned())))
+        .map(|k| Some(Secret::new(k.to_owned())))
         .map_err(|_| Error::Failed("the stored Anthropic API key is damaged".into()))
 }
 

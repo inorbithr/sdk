@@ -711,7 +711,7 @@ fn asked_folders(
 /// The folders asked for from the flags, `IOHR_ASK_READ` and `[ask] read` ([`asked_folders`]).
 fn folders_from_everywhere(
     flags: &[std::path::PathBuf],
-    cfg: &iohr_auth::AskConfig,
+    cfg: &crate::auth::AskConfig,
 ) -> Vec<(access::Source, std::path::PathBuf)> {
     asked_folders(
         flags,
@@ -870,7 +870,7 @@ fn permission_session(
 
 /// The words that name a mode: the flag layer (`--mode`, `--permissions`, and their environment)
 /// and the `[ask]` layer.
-fn words<'a>(args: &'a AskArgs, cfg: &'a iohr_auth::AskConfig) -> (Words<'a>, Words<'a>) {
+fn words<'a>(args: &'a AskArgs, cfg: &'a crate::auth::AskConfig) -> (Words<'a>, Words<'a>) {
     (
         Words {
             mode: args.mode.as_deref(),
@@ -890,7 +890,7 @@ fn words<'a>(args: &'a AskArgs, cfg: &'a iohr_auth::AskConfig) -> (Words<'a>, Wo
 fn streamed(
     (flag, config): (Words<'_>, Words<'_>),
     args: &AskArgs,
-    cfg: &iohr_auth::AskConfig,
+    cfg: &crate::auth::AskConfig,
     terminal: bool,
 ) -> Result<(bool, bool), Error> {
     let mode = Mode::choose(flag, config, terminal).map_err(Error::Usage)?;

@@ -253,7 +253,7 @@ follow section 2.3. "File" says whether the key may appear in the config file.
 | `scopes` | `INORBIT_SCOPES` | yes | list | none | Scopes to ask for with a key; required with a key |
 | `token` | `INORBIT_TOKEN` | **never** | secret | none | A bearer token used as is (an API token, RFC 0016) |
 | `token_file` | `INORBIT_TOKEN_FILE` | yes | path | none | A file holding a bearer token, re-read when it changes |
-| `credential_sources` | `INORBIT_CREDENTIAL_SOURCES` | yes | list of `env`, `workload`, `file`, `cli` | all four | Which credential sources the chain may use (section 5.1). Code is always allowed |
+| `credential_sources` | `INORBIT_CREDENTIAL_SOURCES` | yes | list of `env`, `workload`, `file`, `login`, `cli` | all five | Which credential sources the chain may use (section 5.1). Code is always allowed |
 | `cli_path` | `INORBIT_CLI_PATH` | yes | path | `iohr` on `PATH` | The command line the `cli` source runs |
 
 ### 3.3 Time and retries
@@ -825,12 +825,13 @@ running the command is the explicit choice.
 
 ### 4.8 The panel table
 
-The floating panel (`iohr`, `iohr panel`) has two settings.
+The floating panel (`iohr`, `iohr panel`) has three settings.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
 | `mouse` | `menu`: the panel takes mouse reports only while a view is open (a click on a row opens it, a click outside closes it, the wheel moves the selection) and the shell keeps normal drag-to-select the rest of the time; `always`: also at rest, where a click on the pill opens the menu and every other click goes through to the program; `off`: no mouse reports at all | `menu` | `iohr`, `iohr panel`; `IOHR_PANEL_MOUSE` overrides it |
 | `chat` | `on`: the framed chat box (RFC 0212) at the bottom of the terminal, four rows reserved with a scroll region, where `?` and `??` take one Enter and the answer shows a progress row and a Stop button; `hidden`: the box starts folded to a corner chip; `off`: no box and no chip, the panel as it was | `on` | `iohr`, `iohr panel` around zsh (other shells have no box); `IOHR_PANEL_CHAT` overrides it |
+| `esc_hold_ms` | how long, in milliseconds, a lone Esc waits for the key after it, so Option+h that reaches the panel in two reads (Esc, then `h`) is still Option+h and not the shell's ESC-h; like tmux's `escape-time`. A slow remote link may need more; an Esc on its own reaches the program that much later. At most 5000 | `40` | `iohr`, `iohr panel`; `IOHR_PANEL_ESC_HOLD_MS` overrides it |
 
 The key that opens the menu is not a setting: the pill shows the one that works in your terminal
 (`^G` in Terminal.app, iTerm2, VS Code, Ghostty, WezTerm and Hyper, whose default makes Option+i a
@@ -873,6 +874,7 @@ the developer's login.
 | 2 | Environment | `env` | `INORBIT_[<P>_]TOKEN`, `_TOKEN_FILE` or `_KEY_ID` is set | Static token, token file, or client credentials with `_KEY_SECRET` or `_KEY_SECRET_FILE` |
 | 3 | Workload identity | `workload` | `INORBIT_[<P>_]WEB_IDENTITY_TOKEN_FILE`, or `ACTIONS_ID_TOKEN_REQUEST_URL` with `INORBIT_[<P>_]FEDERATED_KEY_ID` | **Reserved.** The platform cannot exchange an outside identity token yet (section 5.5). The source is skipped with "not offered by the platform yet" |
 | 4 | Config file | `file` | the profile's table sets `token_file` or `key_id` | Token file, or client credentials with `key_secret_file` |
+| 4.5 | The stored session | `login` | the chosen profile has `kind = "person"` and the store holds an entry for it (needs the Rust `login` cargo feature) | The profile's session, refreshed by the SDK itself (section 5.6); no child process |
 | 5 | The `iohr` login | `cli` | the chosen profile exists in the file with a `kind` (the command line made it) | A token from `iohr auth token` (section 5.4) |
 
 When no source has credentials, `load` fails with a `ConfigError` that lists each source
@@ -883,9 +885,14 @@ no credentials found for profile "default"; tried:
   env: INORBIT_TOKEN, INORBIT_TOKEN_FILE and INORBIT_KEY_ID are not set
   workload: not offered by the platform yet
   file: no config file at /home/ana/.config/iohr/config.toml
+  login: skipped, no profile chosen
   cli: skipped, no profile chosen
-Set INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES, or run `iohr login`.
+Set INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES, or sign in with `iohr login`.
 ```
+
+The reasons a `login` source is skipped: "no profile chosen", "profile X is not a person's
+sign-in", "no stored session for profile X", "not in credential_sources", and, in a build
+without the cargo feature, "needs the `login` cargo feature". It is never a panic.
 
 Rules:
 
@@ -1006,13 +1013,54 @@ token or a key in a repository secret. [recipes.md](recipes.md) shows both.
 
 ### 5.6 Person sign-in (`login`)
 
-**Status: the contract for RFC 0231, not built yet.** Today a person signs in through
-`iohr` only, and the SDK reads that login through the `cli` source (section 5.4). This
-section fixes what the SDK's own sign-in and its `login` source will do, so every
-language writes to one text. Nothing here is released until the SDK says so in its
-changelog; the conformance cases for it are `pending` until then. The Rust crate will offer
-it behind the opt-in cargo feature `login` (off by default; a program that only uses keys
-compiles none of the store code).
+**Status: built in the Rust crate (slices 3 and 4 of RFC 0231); other languages follow
+the same text.** A person signs in with the SDK's own flows, and the `login` source reads
+the stored session. The Rust crate offers it behind the opt-in cargo feature `login` (off
+by default; a program that only uses keys compiles none of the store code). The
+conformance cases for it stay `pending` for a language until its SDK has it.
+
+**Where the build is (slice 3 of RFC 0231).** The Rust crate has the opt-in cargo feature
+`login`: `inorbithr::login` holds the primitives `iohr` used to keep for itself, the
+profile table (`Config`, `Profile`, `Kind`, `Storage`, `ProfileName`; one reader of the
+file's `default` and command-line keys, which keeps `[sdk]`, unknown keys and comments),
+PKCE, the token claims, the credential store (the OS keychain, an owner-only file, an
+in-memory one) and the browser check, and now the sign-in flows themselves:
+
+- `Provider` reads the issuer's OIDC discovery and refuses an answer whose issuer differs
+  or whose endpoints are not on the issuer's origin. The default client is `iohr-cli`,
+  scopes `openid offline_access iohr.api`; the client id is a setting.
+- `Login::browser(&provider)` and `Login::device(&provider)` start a typestate
+  `Authorization<Browser | Device>`; `.finish().await` gives `Granted`. The browser flow
+  listens on loopback only, on an OS-picked port, for five minutes, answers only
+  `GET /callback`, compares `state` in constant time, and its pages load nothing and send
+  no referrer. The device flow follows RFC 8628 3.5 (5 s more on `slow_down`, a floor, a
+  hard limit) and shows the user code and link, never the device code.
+- `Session::save(granted, store, key)` keeps the session; `Session::access_token()` returns
+  it, refreshing when under a minute is left, writing the rotated refresh token back, and
+  on a refused refresh re-reading the store once and retrying (a second process may have
+  rotated it).
+- `Session::sign_out()` revokes when the provider offers it, then always deletes the
+  entry. A failed revoke still deletes locally and returns `SignOut::Local { reason }`, so
+  the caller can say the session may stay valid until it expires.
+- `open_browser()` opens the system browser and honours `IOHR_NO_BROWSER`.
+- Every answer from the sign-in service is read with the SDK's size cap (the reader the
+  transport uses); a larger one is refused unread. Tokens stay `Secret`: none appears in a
+  log, URL, `Debug` or error string (tested).
+
+`iohr login`, `logout` and `auth token` call these. The command line has no second copy
+of them: its `auth` module keeps only what is the command line's own (the `[runner]`,
+`[ask]`, `[panel]` and other tables, and the `Credential` wrapper over the SDK's session).
+
+**Slice 4: the chain.** `StoredSession` is a `TokenProvider` over `Session`: it does not
+refresh, rotate or re-read the store itself, it asks `Session`, and it caches by the
+`CachedToken` rules (a token with under a minute left is renewed; `invalidate` makes the
+next call get a fresh one). The `login` source in the chain (section 5.1) uses it, so
+`DefaultCredential` picks it up unchanged, and a signed-in profile works with no `iohr`
+on the machine. In a build without the `login` feature the source is skipped with the
+reason above. `LoadOptions::login_store` injects a store for tests. A newer, still fresh
+access token that another process wrote is taken as is, not refreshed again. A failed refresh
+with a still-valid token is logged as `token_refresh_failed`, like every other credential,
+and names no token.
 
 **The source.** `login` is a credential source named `login`, ranked between `file` (4)
 and `cli` (5) in the chain of section 5.1, so `cli` stays last, for a machine where only
@@ -1060,8 +1108,11 @@ required, loopback redirects on any port, refresh tokens that rotate. It can be 
 code (`client_id`), in the environment (`INORBIT_LOGIN_CLIENT_ID`) or in the profile
 table, in the precedence of section 2.1 (code, then environment, then the profile).
 A session belongs to the client that made it, and the profile's `client_id` names that
-client; a session refreshes with the client id the profile records, so a setting that
-disagrees with a stored session is reported, never used to sign the person out.
+client: a session refreshes with the client id its profile records, so when the profile
+records one it is used for the refresh and the environment value applies only to a
+profile that records none (a sign-in made with code or the environment records its own
+in the profile). The Rust SDK reads `INORBIT_LOGIN_CLIENT_ID` today; a setting that
+disagrees with a stored session is never used to sign the person out.
 
 **The store.** One entry per profile and account.
 
@@ -1094,6 +1145,12 @@ disagrees with a stored session is reported, never used to sign the person out.
   refresh (`invalid_grant`), it re-reads the entry once more and, if the refresh token
   there is not the one it sent, retries once with it. Only then is it an `AuthError`
   saying to sign in again. The SDK never signs the person out for a refresh it lost.
+- **A rotated credential found in the store.** When the re-read entry holds a newer
+  access token that is still fresh (more than 60 s left), the SDK takes it as it is and
+  makes no refresh at all: another process already did it, and a second refresh would
+  rotate the refresh token again for nothing. The case does not depend on the order
+  reads happen in; it is a property of the entry's content (conformance case
+  `a-refresh-refused-after-another-process-rotated`).
 - A 401 from the API invalidates the cached access token (section 5.3).
 
 **Signing in and out.**

@@ -3,9 +3,9 @@
 //! When a session host runs for the folder, an ask is put in its durable queue once per Role
 //! before Io starts answering, so every Role works while Io does. Io answers as it always
 //! did, in the one card [`super::ask`] draws; after it, each Role's answer is drawn as its
-//! own card the moment it lands, with the same renderer ([`crate::card`]) and the same
-//! `◆ Io` header, the Role named in the meta. With no host, or a host that does not know the
-//! request, nothing here runs and the ask is exactly what it was.
+//! own card the moment it lands, with the same renderer ([`crate::card`]), titled
+//! `◆ Role <name>` with its model in the meta (Io's own card stays `◆ Io`). With no host, or a
+//! host that does not know the request, nothing here runs and the ask is exactly what it was.
 //!
 //! What a Role answers is read-only: the turn runs in `manual` mode (or `plan` when asked
 //! for), never `auto`, so Roles that answer side by side never edit the folder at once.
@@ -272,7 +272,7 @@ mod imp {
         }
     }
 
-    /// One Role's card: the Io card, the Role and its model in the meta.
+    /// One Role's card: Io's card, titled `Role <name>`, its model in the meta.
     fn card_of(row: &Landed) -> OwnedCard {
         let agent = format!("Role {}", row.role);
         let label = format!("{agent}:");

@@ -3,7 +3,7 @@
 //! or that group or world can write, could be changed by them, so it is refused rather
 //! than read.
 //!
-//! The directory is made 0700 by [`iohr_auth::create_private_dir`] (the one helper the
+//! The directory is made 0700 by [`inorbithr::login::create_private_dir`] (the one helper the
 //! config and the token files use); the file is opened once and its owner and mode are
 //! read from that handle, so what is checked is what is read.
 
@@ -25,7 +25,7 @@ pub(crate) fn open_trusted(path: &Path, append: bool) -> Result<Option<File>, St
     let fail = |e: &std::io::Error| format!("cannot open {}: {}", path.display(), e.kind());
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty());
     if append && let Some(dir) = dir {
-        iohr_auth::create_private_dir(dir).map_err(|e| fail(&e))?;
+        inorbithr::login::create_private_dir(dir).map_err(|e| fail(&e))?;
     }
     // The directory first: nothing is made in one another user could change.
     if let Some(dir) = dir {

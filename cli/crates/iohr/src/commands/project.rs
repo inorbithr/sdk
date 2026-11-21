@@ -1339,6 +1339,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     }
     let created_at = now();
     let lang = answers.get(LANGUAGE).map(Answer::text);
+    // The roles go by the template's language, then by what the folder already has, as
+    // `iohr atlas init` picks them.
+    let roles_stack = crate::roles::stack(&dir, lang.as_deref());
     let tpl_lang = match &lang {
         Some(l) => tpl.with_variant(l).map_err(Error::Usage)?,
         None => tpl.clone(),
@@ -1405,7 +1408,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         &atlas::Meta {
             name,
             template: &tpl.meta.id,
-            lang: lang.as_deref(),
+            stack: &roles_stack,
             describe: describe.as_deref(),
             created_at: &created_at,
             bin: &me,
@@ -1655,7 +1658,11 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     );
     let sp = (!dry).then(|| ui.step(&format!("Setting up {name} from `{}`", tpl.meta.id)));
     match flow.act("scaffold", &setup, || {
-        project::scaffold(&dir, &files, &programs, &tpl.meta.id)
+        // An older `atlas/personalities/` (a folder made by an earlier iohr) moves first, so
+        // the person's packs are kept over the template's, as `iohr atlas init` keeps them.
+        super::atlas::move_legacy_roles(&dir, out)
+            .map_err(|e| e.to_string())
+            .and_then(|_| project::scaffold(&dir, &files, &programs, &tpl.meta.id))
     }) {
         Some(Ok((written, st))) => {
             if let Some(sp) = sp {
@@ -1718,9 +1725,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         None
     };
     let roles = if let Some(why) = roles_skip {
-        let said = format!(
-            "the built-in roles stay in atlas/roles/, nothing was sent to your account ({why}); `iohr sync` imports them"
-        );
+        let said = crate::roles::kept_local(why);
         ui.info(&format!("Roles: {said}"));
         report
             .steps

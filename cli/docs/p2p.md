@@ -3,7 +3,7 @@
 `iohr p2p` puts this machine in touch with other people's machines through a bootstrap node,
 so they can share signed scam reports: one domain or one handle and a reason from a fixed
 list, nothing else. The first user is the eye app. The decision is
-[ADR 0018](../../docs/adr/0018-p2p-transport.md); the security requirement is
+[ADR 0023](../../docs/adr/0023-p2p-transport.md); the security requirement is
 [SR-37](../../docs/security/requirements.md). Back to the [iohr overview](../README.md).
 
 **Postponed, 2026-11-13.** The platform's owner postponed peer to peer the same day and

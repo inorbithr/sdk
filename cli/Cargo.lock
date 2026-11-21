@@ -846,35 +846,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cookie"
-version = "0.18.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a373e3602691c3cdea496d2f0ee5935151e6168fe87739483c463db1b2f2f87"
-dependencies = [
- "percent-encoding",
- "time",
- "version_check",
-]
-
-[[package]]
-name = "cookie_store"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15b2c103cf610ec6cae3da84a766285b42fd16aad564758459e6ecf128c75206"
-dependencies = [
- "cookie",
- "document-features",
- "idna",
- "log",
- "publicsuffix",
- "serde",
- "serde_derive",
- "serde_json",
- "time",
- "url",
-]
-
-[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1069,15 +1040,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
-]
-
-[[package]]
-name = "document-features"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
-dependencies = [
- "litrs",
 ]
 
 [[package]]
@@ -1822,26 +1784,33 @@ dependencies = [
 
 [[package]]
 name = "inorbithr"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
+ "apple-native-keyring-store",
  "base64 0.23.1",
  "futures-core",
  "futures-util",
  "getrandom 0.4.3",
+ "keyring-core",
  "reqwest",
  "rustls",
  "rustls-platform-verifier",
  "rustls-webpki",
+ "security-framework",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "time",
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
  "toml",
+ "toml_edit",
  "tracing",
  "url",
+ "windows-native-keyring-store",
+ "zbus-secret-service-keyring-store",
  "zeroize",
 ]
 
@@ -1857,7 +1826,7 @@ dependencies = [
 
 [[package]]
 name = "iohr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -1875,7 +1844,6 @@ dependencies = [
  "indicatif",
  "inorbithr",
  "iohr-atlas-core",
- "iohr-auth",
  "iohr-codegen",
  "iohr-lab",
  "iohr-openapi",
@@ -1906,7 +1874,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-atlas-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "proptest",
@@ -1918,35 +1886,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "iohr-auth"
-version = "0.1.0"
-dependencies = [
- "apple-native-keyring-store",
- "base64 0.23.1",
- "etcetera",
- "getrandom 0.4.3",
- "keyring-core",
- "reqwest",
- "security-framework",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "time",
- "tokio",
- "toml",
- "toml_edit",
- "url",
- "windows-native-keyring-store",
- "wiremock",
- "zbus-secret-service-keyring-store",
- "zeroize",
-]
-
-[[package]]
 name = "iohr-codegen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "heck",
@@ -1965,7 +1906,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-lab"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "regex",
  "serde",
@@ -1975,7 +1916,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-openapi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "heck",
  "serde",
@@ -2235,12 +2176,6 @@ name = "litemap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
-
-[[package]]
-name = "litrs"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
 [[package]]
 name = "lock_api"
@@ -2681,22 +2616,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "psl-types"
-version = "2.0.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac"
-
-[[package]]
-name = "publicsuffix"
-version = "2.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f42ea446cab60335f76979ec15e12619a2165b5ae2c12166bef27d283a9fadf"
-dependencies = [
- "idna",
- "psl-types",
-]
-
-[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2870,8 +2789,6 @@ checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
 dependencies = [
  "base64 0.23.1",
  "bytes",
- "cookie",
- "cookie_store",
  "futures-core",
  "h2",
  "http",

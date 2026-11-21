@@ -29,7 +29,9 @@ refuses a scope the client may not ask for.
 
 A signed-in session holds a 15-minute access token and a 30-day refresh token that is
 replaced on every use; `iohr` refreshes on its own. `iohr logout` revokes the session at
-the sign-in service before it removes it from this machine. The console's list of sign-in
+the sign-in service, then removes it from this machine. If the revoke fails it still
+removes the local session and says it was not revoked (the session may stay valid until it
+expires); `--json` carries `revoke_failed`. The console's list of sign-in
 devices shows the session and can end it from anywhere.
 
 ## Which account a sign-in acts for

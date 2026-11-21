@@ -3,10 +3,14 @@ name: ci
 # Where each check runs (ADR 0014):
 # - pull requests and pushes to main: Linux, the oldest and newest supported version of
 #   each language, only the languages a change touches;
-#   The command line also runs on Windows and macOS when it is touched;
+#   The command line also runs on macOS when it is touched (Windows only nightly and on its
+#   release pull request);
 # - nightly (and by hand): every language, every supported version, Linux, Windows and
 #   macOS; a failure opens or updates an issue;
-# - release-please pull requests: the same as nightly, so no release ships untested.
+# - release-please pull requests: their own component's whole matrix, as nightly runs it, so
+#   no release ships untested; the other languages follow the path filters;
+# - the merge queue: as a pull request, without the macOS cells the pull request already
+#   passed (the push to main runs them again).
 on:
   push:
     branches: [main]
@@ -39,20 +43,22 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      # Everything runs on the full runs; otherwise the path filters decide.
-      full: ${{ steps.full.outputs.full }}
-      go: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.go == 'true' }}
-      rust: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.rust == 'true' }}
-      ts: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.ts == 'true' }}
-      py: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.py == 'true' }}
-      java: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.java == 'true' }}
-      csharp: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.csharp == 'true' }}
-      swift: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.swift == 'true' }}
-      dart: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.dart == 'true' }}
-      cli: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.cli == 'true' }}
-      ui: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.ui == 'true' }}
+      # The full runs (nightly, by hand) run every language's whole matrix. A release-please pull
+      # request runs the whole matrix of its own component only (ADR 0014, 2026-11-19). Otherwise
+      # the path filters decide.
+      wide: ${{ steps.full.outputs.wide }}
+      go: ${{ contains(fromJSON(steps.full.outputs.wide), 'go') || steps.filter.outputs.go == 'true' }}
+      rust: ${{ contains(fromJSON(steps.full.outputs.wide), 'rust') || steps.filter.outputs.rust == 'true' }}
+      ts: ${{ contains(fromJSON(steps.full.outputs.wide), 'ts') || steps.filter.outputs.ts == 'true' }}
+      py: ${{ contains(fromJSON(steps.full.outputs.wide), 'py') || steps.filter.outputs.py == 'true' }}
+      java: ${{ contains(fromJSON(steps.full.outputs.wide), 'java') || steps.filter.outputs.java == 'true' }}
+      csharp: ${{ contains(fromJSON(steps.full.outputs.wide), 'csharp') || steps.filter.outputs.csharp == 'true' }}
+      swift: ${{ contains(fromJSON(steps.full.outputs.wide), 'swift') || steps.filter.outputs.swift == 'true' }}
+      dart: ${{ contains(fromJSON(steps.full.outputs.wide), 'dart') || steps.filter.outputs.dart == 'true' }}
+      cli: ${{ contains(fromJSON(steps.full.outputs.wide), 'cli') || steps.filter.outputs.cli == 'true' }}
+      ui: ${{ contains(fromJSON(steps.full.outputs.wide), 'ui') || steps.filter.outputs.ui == 'true' }}
       any: >-
-        ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.go == 'true' ||
+        ${{ steps.full.outputs.wide != '[]' || steps.filter.outputs.go == 'true' ||
         steps.filter.outputs.rust == 'true' || steps.filter.outputs.ts == 'true' ||
         steps.filter.outputs.py == 'true' || steps.filter.outputs.java == 'true' ||
         steps.filter.outputs.csharp == 'true' || steps.filter.outputs.swift == 'true' ||
@@ -63,10 +69,30 @@ jobs:
           EVENT: ${{ github.event_name }}
           HEAD_REF: ${{ github.head_ref }}
         run: |
+          full=false wide='[]'
           case "$EVENT:$HEAD_REF" in
-            schedule:*|workflow_dispatch:*|pull_request:release-please--*) echo "full=true" >> "$GITHUB_OUTPUT" ;;
-            *) echo "full=false" >> "$GITHUB_OUTPUT" ;;
+            schedule:*|workflow_dispatch:*)
+              full=true
+              wide='["go","rust","ts","py","java","csharp","swift","dart","cli","ui"]' ;;
+            # release-please--branches--main--components--<component>, one per package in
+            # release-please-config.json.
+            pull_request:release-please--*)
+              case "${HEAD_REF##*--components--}" in
+                go|go/otel) wide='["go"]' ;;
+                rust) wide='["rust"]' ;;
+                typescript) wide='["ts"]' ;;
+                python) wide='["py"]' ;;
+                java) wide='["java"]' ;;
+                csharp) wide='["csharp"]' ;;
+                swift) wide='["swift"]' ;;
+                dart) wide='["dart"]' ;;
+                iohr) wide='["cli"]' ;;
+                # A component this list does not know yet runs everything, as before.
+                *) full=true wide='["go","rust","ts","py","java","csharp","swift","dart","cli","ui"]' ;;
+              esac ;;
           esac
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "wide=$wide" >> "$GITHUB_OUTPUT"
       - if: steps.full.outputs.full != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -139,8 +165,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "go golangci-lint python uv typos actionlint zizmor osv-scanner shellcheck go:github.com/oasdiff/oasdiff"
       - run: mise run repo:check
       - run: mise run spec:lint
@@ -161,8 +188,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "rust go"
       - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
@@ -191,7 +219,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         go: ["1.26.11", "1.27.4"]
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","go":"1.27.4"},{"os":"macos-latest","go":"1.27.4"}]' || '[]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'go') && '[{"os":"windows-latest","go":"1.27.4"},{"os":"macos-latest","go":"1.27.4"}]' || '[]') }}
     env:
       MISE_GO_VERSION: ${{ matrix.go }}
       # Linux cells use the tools job's binaries; Windows and macOS build their own.
@@ -204,8 +232,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: >-
             go golangci-lint go:golang.org/x/exp/cmd/gorelease go:golang.org/x/vuln/cmd/govulncheck
             ${{ (matrix.os != 'ubuntu-latest' || (matrix.go == '1.27.4')) && 'rust cargo-binstall cargo:cargo-nextest' || '' }}
@@ -244,7 +273,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         rust: ["1.94", "1.99.0"]
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || '[]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'rust') && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || '[]') }}
     env:
       MISE_RUST_VERSION: ${{ matrix.rust }}
       IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
@@ -254,8 +283,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: >-
             rust cargo-binstall cargo:cargo-nextest cargo:cargo-semver-checks cargo:cargo-hack cargo-deny
             ${{ matrix.os != 'ubuntu-latest' && 'go' || '' }}
@@ -294,8 +324,8 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         # The oldest and newest supported versions; the full runs add the ones between.
-        node: ${{ fromJSON(needs.changes.outputs.full == 'true' && '["22","24","26"]' || '["22","26"]') }}
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","node":"26"}]' || '[]') }}
+        node: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'ts') && '["22","24","26"]' || '["22","26"]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'ts') && '[{"os":"windows-latest","node":"26"}]' || '[]') }}
     env:
       MISE_NODE_VERSION: ${{ matrix.node }}
       IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
@@ -305,8 +335,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: >-
             node pnpm biome
             ${{ matrix.os != 'ubuntu-latest' && 'go rust cargo-binstall cargo:cargo-nextest' || (matrix.node == '26' && 'rust cargo-binstall cargo:cargo-nextest' || '') }}
@@ -343,8 +374,8 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         # The oldest and newest supported versions; the full runs add the ones between.
-        python: ${{ fromJSON(needs.changes.outputs.full == 'true' && '["3.11","3.12","3.13","3.14"]' || '["3.11","3.14"]') }}
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","python":"3.14"}]' || '[]') }}
+        python: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'py') && '["3.11","3.12","3.13","3.14"]' || '["3.11","3.14"]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'py') && '[{"os":"windows-latest","python":"3.14"}]' || '[]') }}
     env:
       MISE_PYTHON_VERSION: ${{ matrix.python }}
       UV_PYTHON: ${{ matrix.python }}
@@ -356,8 +387,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: >-
             python uv
             ${{ matrix.os != 'ubuntu-latest' && 'go rust cargo-binstall cargo:cargo-nextest' || (matrix.python == '3.14' && 'rust cargo-binstall cargo:cargo-nextest' || '') }}
@@ -397,7 +429,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         java: ["temurin-17.0.20+8", "temurin-21.0.12+8.0.LTS"]
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","java":"temurin-17.0.20+8"}]' || '[]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'java') && '[{"os":"windows-latest","java":"temurin-17.0.20+8"}]' || '[]') }}
     env:
       MISE_JAVA_VERSION: ${{ matrix.java }}
       IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
@@ -407,8 +439,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: >-
             java maven
             ${{ matrix.os != 'ubuntu-latest' && 'go rust cargo-binstall cargo:cargo-nextest' || (matrix.java == 'temurin-21.0.12+8.0.LTS' && 'rust cargo-binstall cargo:cargo-nextest' || '') }}
@@ -421,6 +454,9 @@ jobs:
         run: |
           chmod +x ci-tools/iohr ci-tools/replay
           mkdir -p conformance/server/bin && cp ci-tools/replay conformance/server/bin/replay
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: restore
       - run: mise run java:gen && git diff --exit-code -- java
       - run: mise run java:check
       - run: mise run conformance:java
@@ -431,6 +467,9 @@ jobs:
       # A generated two-profile surface compiles and the wrong profile does not.
       - if: env.COMPILE_CELL == 'true'
         run: IOHR_TEST_COMPILE=java mise run cli:compile-test
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: save
 
   csharp:
     name: csharp (${{ matrix.os }})
@@ -443,7 +482,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest"}]' || '[]') }}
+        include: ${{ fromJSON(contains(fromJSON(needs.changes.outputs.wide), 'csharp') && '[{"os":"windows-latest"}]' || '[]') }}
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
@@ -454,8 +493,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           # Rust on every cell: Linux for the compile test, the others to build iohr.
           install_args: >-
             dotnet rust cargo-binstall cargo:cargo-nextest
@@ -483,9 +523,10 @@ jobs:
   swift:
     name: swift (macos-latest)
     needs: [changes, tools]
-    if: needs.changes.outputs.swift == 'true'
+    if: needs.changes.outputs.swift == 'true' && github.event_name != 'merge_group'
     # Xcode's toolchain builds the package for Apple platforms; the Linux cell below proves
-    # FoundationNetworking. One macOS cell, as Swift's first platform is Apple's.
+    # FoundationNetworking. One macOS cell, as Swift's first platform is Apple's. The merge
+    # queue skips it, as it skips the command line's macOS cell (ADR 0014, 2026-11-19).
     runs-on: macos-latest
     permissions:
       contents: read
@@ -493,8 +534,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "rust go cargo-binstall cargo:cargo-nextest"
       - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
@@ -546,30 +588,35 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         rust: ["1.94", "1.99.0"]
-        # Windows and macOS run wherever the job runs (cli/**, rust/**, spec/**, mise.toml or this
-        # workflow changed, or a full run), so a platform break fails the pull request, not the
-        # merge queue. The init smoke test of every template (tests/templates.rs) is in cli:check.
-        include:
-          - { os: windows-latest, rust: "1.99.0" }
-          - { os: macos-latest, rust: "1.99.0" }
+        # macOS runs on the pull request and the push to main wherever the job runs (cli/**,
+        # rust/**, spec/**, mise.toml or this workflow changed), so a macOS break fails the pull
+        # request. The merge queue skips both platforms: the pull request already ran them on the
+        # same change, and the push to main runs macOS again on the merged tree. Windows runs only
+        # in a full run (nightly, by hand) and on the iohr release pull request (ADR 0014,
+        # amendments of 2026-11-19). The init smoke test of every template (tests/templates.rs)
+        # is in cli:test.
+        include: ${{ fromJSON(github.event_name == 'merge_group' && '[]' || contains(fromJSON(needs.changes.outputs.wide), 'cli') && '[{"os":"windows-latest","rust":"1.99.0"},{"os":"macos-latest","rust":"1.99.0"}]' || '[{"os":"macos-latest","rust":"1.99.0"}]') }}
     env:
       MISE_RUST_VERSION: ${{ matrix.rust }}
       # macOS and Windows runners have a credential store: its test must run, not skip
       # (SR-24). Linux gets one in the cli:keyring step.
       IOHR_TEST_REQUIRE_STORE: ${{ matrix.os != 'ubuntu-latest' && '1' || '' }}
+      # Line tables keep file:line in panics and backtraces; full debuginfo only cost link and
+      # build time. Local profiles are unchanged.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          install_args: "rust cargo-binstall cargo:cargo-nextest cargo-deny shellcheck dotnet"
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: "rust cargo-binstall cargo:cargo-nextest shellcheck dotnet"
       - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
           workspaces: cli
           key: ${{ matrix.rust }}
-      # MISE_RUST_VERSION overrides the version and drops the components mise.toml asks for.
-      - run: rustup component add rustfmt clippy
       # The panel's pty tests (tests/panel_live.rs) run a real zsh: the panel is a zsh feature,
       # and the runner image has none. macOS ships one.
       - if: runner.os == 'Linux'
@@ -577,8 +624,13 @@ jobs:
         timeout-minutes: 10
         with:
           packages: zsh
-      - run: mise run cli:check
-      - run: mise run cli:audit
+      # cli:test's template smoke test builds the Java project template with mvn; read the
+      # Maven repository from main's cache so it does not download from Maven Central (Study 0094.91).
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: restore
+      # fmt, clippy and cargo-deny (advisories included) run once, in cli-lint.
+      - run: mise run cli:test
       # A generated surface builds against rust/ and the wrong profile is refused.
       - if: runner.os == 'Linux' && matrix.rust != '1.94'
         run: mise run cli:compile-test
@@ -595,6 +647,37 @@ jobs:
       # Browser and device sign-in against the identity provider the platform runs.
       - if: runner.os == 'Linux' && matrix.rust != '1.94'
         run: mise run cli:hydra
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: save
+
+  # fmt, clippy and cargo-deny once, on one toolchain: they check the source, not the platform.
+  # The `cli` legs run the tests. Together they are `mise run cli:check`.
+  cli-lint:
+    name: cli lint
+    needs: changes
+    if: needs.changes.outputs.cli == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      MISE_RUST_VERSION: "1.99.0"
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: "rust cargo-deny"
+      - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
+        with:
+          workspaces: cli
+          key: lint-1.99.0
+      # MISE_RUST_VERSION overrides the version and drops the components mise.toml asks for.
+      - run: rustup component add rustfmt clippy
+      - run: mise run cli:lint
 
   # The web UI package's checks, run through the `iohr ui check` verb a developer runs.
   ui:
@@ -608,8 +691,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: node pnpm biome
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -631,10 +715,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: "go rust node pnpm python uv dotnet java maven"
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: restore
       - run: mise run examples:check
+      - uses: ./.github/actions/maven-cache # zizmor: ignore[self-repository]
+        with:
+          mode: save
 
   # The only required status check. Skipped jobs count as passing; failed or
   # cancelled ones do not.
@@ -651,8 +742,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: dart
       - run: mise run dart:gen && git diff --exit-code -- dart
       - run: mise run dart:check
@@ -660,7 +752,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [repo, tools, go, rust, ts, py, java, csharp, swift, swift-linux, dart, cli, ui, examples]
+    needs: [repo, tools, go, rust, ts, py, java, csharp, swift, swift-linux, dart, cli, cli-lint, ui, examples]
     runs-on: ubuntu-latest
     permissions: {}
     steps:

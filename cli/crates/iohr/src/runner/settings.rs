@@ -14,7 +14,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use iohr_auth::RunnerConfig;
+use crate::auth::RunnerConfig;
 
 use super::provider::AuthPolicy;
 
@@ -618,6 +618,7 @@ fn df_line(text: &str) -> Option<(String, DiskSpace)> {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)] // the test builds a RunnerConfig key by key (the type now lives in this crate)
 mod tests {
     use super::*;
 
