@@ -1,8 +1,8 @@
-# The manifest of inorbit/ask (PRD 0084). Every field is here, so you can see what an
+# The manifest of inorbit/ask-prototype (PRD 0084). Every field is here, so you can see what an
 # extension may declare. `iohr ext lint --preview` reads it back in plain words, the
 # way an installer will show it to the person who installs it. Unknown keys are errors.
 
-id = "inorbit/ask"                    # publisher/name, as the catalogue lists it
+id = "inorbit/ask-prototype"      # publisher/name, as the catalogue lists it
 version = "0.1.0"                # semver; `iohr ext version` bumps it (a later slice)
 kind = "program"                 # RFC 0073 kind; a program runs as its own process
 delivery = "program"             # RFC 0073.1: how it arrives on a target
