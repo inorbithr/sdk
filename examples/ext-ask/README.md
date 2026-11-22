@@ -1,4 +1,4 @@
-# inorbit/ask (prototype of `iohr ask`)
+# inorbit/ask-prototype (prototype of `iohr ask`)
 
 Prints an AI answer to one question in the terminal. A dev extension: it runs with
 `iohr ext dev`, needs no rebuild of iohr, and gets its token from the extension token

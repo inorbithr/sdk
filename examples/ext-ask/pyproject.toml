@@ -1,7 +1,7 @@
 [project]
 name = "ask"
 version = "0.1.0"
-description = "inorbit/ask: an InOrbit extension."
+description = "inorbit/ask-prototype: an InOrbit extension."
 requires-python = ">=3.10"
 dependencies = []
 

@@ -1,4 +1,4 @@
-"""inorbit/ask: an InOrbit extension (PRD 0084)."""
+"""inorbit/ask-prototype: an InOrbit extension (PRD 0084)."""
 
-ID = "inorbit/ask"
+ID = "inorbit/ask-prototype"
 VERSION = "0.1.0"
