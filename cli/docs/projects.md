@@ -35,7 +35,7 @@ half:
 Run it again in the folder it made and it succeeds. A file that is already there is left
 alone (reported as unchanged, or as left alone when you changed it), nothing is written
 twice and nothing of yours is committed for you. A folder that is not that project is
-still refused. The template's `rust-version` is the toolchain you have installed, and an
+still refused unless you say `--existing` (next section). The template's `rust-version` is the toolchain you have installed, and an
 agent started with `--describe` is told to keep it as the minimum.
 
 At a terminal, `init` is guided. It asks for the name when it is missing (the folder's name
@@ -46,6 +46,22 @@ next commands. `--template` and `--yes` skip the menu and the confirmation. With
 terminal, or with `--json`, `NO_COLOR` or `TERM=dumb`, nothing is drawn or asked: the plain
 `done:` and `not yet:` lines go to stderr, and stdout stays data only. The editor's own
 question, Code asking before it opens the folder, is said once in the ending.
+
+### An existing folder, such as a cloned repository
+
+`init` can use a folder that already has files. At a terminal the menu offers it with the
+hint "has files: adds what is missing, keeps yours", a typed path with files is accepted the
+same way, and the review says "existing folder: N files kept as they are" before Create.
+Picking it is the opt-in. In a script (`--yes`, no terminal, or `--dir` without the menu) a
+folder that is not empty is refused until you pass `--existing`; the error names the flag.
+
+Nothing in the folder is overwritten or deleted: a template file that is missing is
+written, one that is already there is kept and listed. When the folder is the top of a git
+repository (it has its own `.git`), init runs no `git init` and makes no commit, says the
+new files are yours to commit, and does not warn about nesting. A folder with files that is
+not a repository gets no repository and no commit either. A folder nested inside another
+repository still gets the nesting warning. `iohr ext init --dir` is not part of this: it
+still needs an empty folder, and `iohr sdk` keeps its own `--force`, which replaces.
 
 ### The Planner plan
 

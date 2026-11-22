@@ -17,7 +17,7 @@ use std::fmt::Write as _;
 
 use super::project_space::{self, Outcome};
 use super::project_template;
-use crate::project::folder::{self, Kind as Place, Proposal, Where};
+use crate::project::folder::{self, BUSY_HINT, Kind as Place, Proposal, Where};
 use crate::project::wizard::{self, Draft, Stage, Walk, Went};
 use crate::project::{self, Report, Smoke, check_name, choose_template, lines};
 use crate::roles::runtime;
@@ -224,10 +224,10 @@ fn language_choices(
     (out, initial)
 }
 
-/// The folder menu: every proposal that is free, the recommended first, each with its reason.
+/// The folder menu: every proposal, the recommended first, each with its reason; one with
+/// files says so ([`BUSY_HINT`]) and picking it is the opt-in to use it (RFC 0224 slice 2).
 fn folder_choices(list: &[Proposal]) -> Vec<Choice> {
     list.iter()
-        .filter(|p| !p.busy)
         .enumerate()
         .map(|(i, p)| Choice {
             value: i.to_string(),
@@ -235,7 +235,11 @@ fn folder_choices(list: &[Proposal]) -> Vec<Choice> {
                 Place::ThisFolder => "this folder (.)".to_owned(),
                 _ => p.shown.clone(),
             },
-            hint: p.reason.clone(),
+            hint: if p.busy {
+                format!("{BUSY_HINT}; {}", p.reason)
+            } else {
+                p.reason.clone()
+            },
             available: true,
             key: None,
         })
@@ -251,10 +255,7 @@ fn pick_folder(
     prev: Option<&Proposal>,
     back: bool,
 ) -> Result<Nav<Proposal>, Error> {
-    let free: Vec<&Proposal> = list.iter().filter(|p| !p.busy).collect();
-    for p in list.iter().filter(|p| p.busy) {
-        ui.info(&format!("{} is not empty, so it is not offered", p.shown));
-    }
+    let free: Vec<&Proposal> = list.iter().collect();
     let choices = folder_choices(list);
     // A typed path is not a row of the menu: it was the "Somewhere else" row.
     let typed_before = prev.filter(|p| p.kind == Place::Given);
@@ -1430,8 +1431,17 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             &me,
         );
     }
+    // A folder with files is used only when the person chose it: the menu's pick (no `--dir`,
+    // a terminal), or `--existing` (RFC 0224 slice 2).
+    let existing = a.existing || (interactive && a.dir.is_none());
     // Reads only, so a dry run finds the same problems a real one would.
-    project::check_target(&dir, &files).map_err(Error::Failed)?;
+    project::check_target(&dir, &files, existing).map_err(Error::Failed)?;
+    if dry && existing && place.busy {
+        ui.info(&format!(
+            "existing folder: {} files kept as they are",
+            folder::count_files(&dir)
+        ));
+    }
     // Init run again in the folder it made: files already there are left alone, nothing is
     // committed over them.
     let rerun = project::is_rerun(&dir, &files);
@@ -1662,7 +1672,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         // the person's packs are kept over the template's, as `iohr atlas init` keeps them.
         super::atlas::move_legacy_roles(&dir, out)
             .map_err(|e| e.to_string())
-            .and_then(|_| project::scaffold(&dir, &files, &programs, &tpl.meta.id))
+            .and_then(|_| project::scaffold(&dir, &files, &programs, &tpl.meta.id, existing))
     }) {
         Some(Ok((written, st))) => {
             if let Some(sp) = sp {
@@ -1854,7 +1864,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             StepName::Git => {
                 let sp = (!dry).then(|| ui.step("Making a git repository"));
                 let r = flow.act("git", "make a git repository with one commit", || {
-                    project::git_step(&dir, name, &tpl.meta.id, rerun)
+                    project::git_step(&dir, name, &tpl.meta.id, rerun, existing)
                 });
                 if let Some(st) = r {
                     if let Some(sp) = sp {
@@ -2368,9 +2378,29 @@ fn not_built_yet(lines: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Lang, lang_of_variant, language_choices, not_built_yet, publisher_of};
+    use super::{
+        Lang, folder_choices, lang_of_variant, language_choices, not_built_yet, publisher_of,
+    };
+    use crate::project::folder::{BUSY_HINT, Kind, Proposal};
     use crate::template::{self, Spec};
     use std::path::Path;
+
+    #[test]
+    fn a_busy_folder_is_offered_with_the_hint_not_hidden() {
+        let p = |busy: bool, shown: &str| Proposal {
+            kind: Kind::Here,
+            dir: std::path::PathBuf::from(shown),
+            shown: shown.to_owned(),
+            reason: "in the folder you are in".to_owned(),
+            busy,
+        };
+        let list = [p(true, "./ahto"), p(false, "./other")];
+        let choices = folder_choices(&list);
+        assert_eq!(choices.len(), 2, "a folder with files is in the menu");
+        assert_eq!(choices[0].label, "./ahto");
+        assert!(choices[0].hint.contains(BUSY_HINT), "{}", choices[0].hint);
+        assert!(!choices[1].hint.contains(BUSY_HINT));
+    }
 
     #[test]
     fn the_picker_hint_says_where_the_installed_toolchain_stands() {

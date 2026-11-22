@@ -39,7 +39,8 @@ pub struct Proposal {
     pub shown: String,
     /// Why this one, in a line.
     pub reason: String,
-    /// The folder exists and holds something, so nothing may be written there.
+    /// The folder exists and holds files. A script must say `--existing` to use it; the menu
+    /// offers it with [`BUSY_HINT`], and picking it is the opt-in (RFC 0224, slice 2).
     pub busy: bool,
 }
 
@@ -123,6 +124,44 @@ pub fn show(cwd: &Path, p: &Path, home: Option<&Path>) -> String {
     }
 }
 
+/// The hint the menu gives a folder that already has files.
+pub const BUSY_HINT: &str = "has files: adds what is missing, keeps yours";
+
+/// The folder is the top of a git repository: it has its own `.git` (a folder, or the file a
+/// linked work tree has). A read.
+#[must_use]
+pub fn is_repo_top(dir: &Path) -> bool {
+    dir.join(".git").exists()
+}
+
+/// How many files `dir` holds, however deep, not counting what is inside `.git` and not
+/// following links; stops counting at `LIMIT` so a huge folder cannot stall the review. A read.
+#[must_use]
+pub fn count_files(dir: &Path) -> usize {
+    const LIMIT: usize = 100_000;
+    let mut n = 0;
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let Ok(t) = e.file_type() else { continue };
+            if t.is_dir() {
+                if e.file_name() != ".git" {
+                    todo.push(e.path());
+                }
+            } else {
+                n += 1;
+            }
+            if n >= LIMIT {
+                return n;
+            }
+        }
+    }
+    n
+}
+
 /// The folder holds something: a folder with only dotfiles is not busy for [`Kind::ThisFolder`]
 /// but is for the others; use [`only_dotfiles`] for that case.
 fn has_entries(dir: &Path) -> bool {
@@ -173,15 +212,18 @@ pub fn proposals(w: &Where, name: &str) -> Vec<Proposal> {
     let nests = |target: &Path| {
         w.git_top
             .as_ref()
-            .filter(|top| within(target, top) && !same(target, top))
+            .filter(|top| within(target, top) && !same(target, top) && !is_repo_top(target))
     };
     let cwd_name = w
         .cwd
         .file_name()
         .map(|f| f.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let can_use_cwd = only_dotfiles(&w.cwd);
-    let this_first = can_use_cwd && cwd_name == name;
+    // A folder with files is offered when it is the top of a git repository (a clone you are
+    // standing in); marked busy, so the menu says it has files.
+    let cwd_free = only_dotfiles(&w.cwd);
+    let can_use_cwd = cwd_free || is_repo_top(&w.cwd);
+    let this_first = cwd_free && cwd_name == name;
 
     if this_first {
         out.push(proposal(
@@ -221,12 +263,20 @@ pub fn proposals(w: &Where, name: &str) -> Vec<Proposal> {
     }
     out.push(here_p);
     if can_use_cwd && !this_first {
-        let reason = if nests(&w.cwd).is_some() {
+        let reason = if !cwd_free {
+            "this folder: a git repository with files"
+        } else if nests(&w.cwd).is_some() {
             "this folder: it is empty, but inside a git repository, so it would nest"
         } else {
             "this folder: it is empty"
         };
-        out.push(proposal(w, Kind::ThisFolder, w.cwd.clone(), reason, false));
+        out.push(proposal(
+            w,
+            Kind::ThisFolder,
+            w.cwd.clone(),
+            reason,
+            !cwd_free,
+        ));
     }
     if let Some(root) = w.root.as_deref().and_then(|r| expand(r, w.home.as_deref())) {
         let dir = root.join(name);
@@ -294,7 +344,7 @@ fn normalize(p: &Path) -> PathBuf {
 #[must_use]
 pub fn nest_warning(w: &Where, target: &Path) -> Option<String> {
     let top = w.git_top.as_ref()?;
-    if !within(target, top) || same(target, top) {
+    if !within(target, top) || same(target, top) || is_repo_top(target) {
         return None;
     }
     let name = target.file_name()?.to_string_lossy().into_owned();
@@ -470,6 +520,26 @@ mod tests {
             list.iter().find(|p| p.kind == Kind::Root).unwrap().dir,
             PathBuf::from("/h/code/my-shop")
         );
+    }
+
+    #[test]
+    fn a_folder_with_files_is_offered_and_a_repository_top_is_not_nest_warned() {
+        let d = tempfile::tempdir().unwrap();
+        let mut w = at(d.path());
+        let clone = w.cwd.join("ahto");
+        std::fs::create_dir_all(clone.join(".git")).unwrap();
+        std::fs::write(clone.join("README.md"), "").unwrap();
+        std::fs::create_dir_all(clone.join("src")).unwrap();
+        std::fs::write(clone.join("src/a.rs"), "").unwrap();
+        w.git_top = Some(w.cwd.clone());
+        let list = proposals(&w, "ahto");
+        let here = list.iter().find(|p| p.kind == Kind::Here).unwrap();
+        assert!(here.busy);
+        assert!(!here.reason.contains("nest"), "{}", here.reason);
+        assert!(nest_warning(&w, &clone).is_none());
+        assert_eq!(count_files(&clone), 2, ".git is not counted");
+        let g = given(&w, &clone, "x");
+        assert!(g.busy);
     }
 
     #[test]
