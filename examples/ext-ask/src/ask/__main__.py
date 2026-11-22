@@ -1,4 +1,4 @@
-"""inorbit/ask: a prototype of `iohr ask "<question>"`.
+"""inorbit/ask-prototype: a prototype of `iohr ask "<question>"`.
 
 Default backend: the MCP tool `llm_generate` (POST /mcp, JSON-RPC), an interim route until ADR 0213
 is decided and the only route to the model a
