@@ -155,6 +155,27 @@ jobs:
               - 'mise.toml'
               - '.github/workflows/ci.yml'
 
+  # Superseded Rust caches go at the start of each run on main (ADR 0014, 2026-11-23). The
+  # cache is saved in rust-cache's post step, after every step a job can add, so the
+  # previous run's entries are the ones pruned. Only this job holds actions: write.
+  cache-prune:
+    name: cache-prune
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/prune-rust-caches.py
+      - run: python3 tools/prune-rust-caches.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
   repo:
     name: repo
     runs-on: ubuntu-latest
