@@ -84,7 +84,7 @@ use super::exec::GroupGuard;
 mod disk_prune;
 mod edge_site;
 pub(crate) mod extension;
-mod install_checks;
+pub(crate) mod install_checks;
 mod labs_reattribute;
 mod runner_scale;
 pub(crate) mod v1;

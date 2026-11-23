@@ -80,6 +80,24 @@ pub(crate) fn put_block(
     commit: &str,
     source: &str,
 ) -> Result<String, String> {
+    put_block_noted(
+        current,
+        block,
+        &format!("from core {path} at {commit}"),
+        path,
+        source,
+    )
+}
+
+/// [`put_block`] with the BEGIN line's note given whole (`iohr monitors install` says
+/// `from project <name> .inorbit/monitors`); `path` is only named in the refusal.
+pub(crate) fn put_block_noted(
+    current: &str,
+    block: &str,
+    note: &str,
+    path: &str,
+    source: &str,
+) -> Result<String, String> {
     if source
         .lines()
         .any(|l| l.starts_with("# BEGIN ") || l.starts_with("# END "))
@@ -88,7 +106,7 @@ pub(crate) fn put_block(
             "refused: {path} has BEGIN or END marker lines of its own"
         ));
     }
-    let mut fresh = format!("# BEGIN {block} (from core {path} at {commit})\n");
+    let mut fresh = format!("# BEGIN {block} ({note})\n");
     fresh.push_str(source.trim_end());
     fresh.push_str("\n# END ");
     fresh.push_str(block);
@@ -273,6 +291,35 @@ async fn settled(tools: &impl ArgvRunner, want: usize) -> Result<(), String> {
     Err(last)
 }
 
+/// Where the candidate checks file is built: beside `file`, so the last step is one rename.
+pub(crate) fn candidate_path(file: &Path) -> PathBuf {
+    file.with_file_name(format!(".checks.toml.lint-{}", std::process::id()))
+}
+
+/// The arguments of `iohr` that lint a candidate checks file.
+pub(crate) fn lint_argv(candidate: &Path) -> Vec<String> {
+    ["agent", "checks", "lint", "--file"]
+        .into_iter()
+        .map(str::to_owned)
+        .chain([candidate.to_string_lossy().into_owned()])
+        .collect()
+}
+
+/// Backs `file` up to `.bak-<UTC time>`, swaps `candidate` in with one rename and removes the
+/// candidate; the backup's path.
+///
+/// # Errors
+/// The failure, in words; `file` is unchanged unless the rename itself failed.
+pub(crate) fn swap_in(file: &Path, candidate: &Path) -> Result<PathBuf, String> {
+    let backup = backup_path(file, OffsetDateTime::now_utc())?;
+    std::fs::copy(file, &backup)
+        .map_err(|e| format!("could not back up the checks file: {}", e.kind()))?;
+    let moved = replace(candidate, file);
+    let _ = std::fs::remove_file(candidate);
+    moved?;
+    Ok(backup)
+}
+
 /// Carries out `agent.install-checks`; the answer says what was done.
 ///
 /// # Errors
@@ -299,21 +346,10 @@ pub(crate) async fn install(action: &Action, tools: &impl ArgvRunner) -> Result<
         ));
     }
     // Built beside the file and linted there: only a file that lints replaces the agent's.
-    let candidate = file.with_file_name(format!(".checks.toml.lint-{}", std::process::id()));
+    let candidate = candidate_path(&file);
     std::fs::write(&candidate, &next)
         .map_err(|e| format!("could not write the checks file: {}", e.kind()))?;
-    let lint = tools
-        .run(
-            Tool::Iohr,
-            &[
-                "agent".to_owned(),
-                "checks".to_owned(),
-                "lint".to_owned(),
-                "--file".to_owned(),
-                candidate.to_string_lossy().into_owned(),
-            ],
-        )
-        .await;
+    let lint = tools.run(Tool::Iohr, &lint_argv(&candidate)).await;
     let lint = match lint {
         Ok(out) if out.success => Ok(()),
         Ok(out) => Err(format!(
@@ -328,12 +364,7 @@ pub(crate) async fn install(action: &Action, tools: &impl ArgvRunner) -> Result<
         let _ = std::fs::remove_file(&candidate);
         return Err(why);
     }
-    let backup = backup_path(&file, OffsetDateTime::now_utc())?;
-    std::fs::copy(&file, &backup)
-        .map_err(|e| format!("could not back up the checks file: {}", e.kind()))?;
-    let moved = replace(&candidate, &file);
-    let _ = std::fs::remove_file(&candidate);
-    moved?;
+    let backup = swap_in(&file, &candidate)?;
     let unit = format!("{service}.service");
     let outcome = async {
         for (tool, argv) in user_restart_calls(&unit) {

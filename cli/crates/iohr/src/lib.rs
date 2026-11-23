@@ -14,6 +14,7 @@ pub mod ext;
 pub mod front;
 pub mod kb;
 pub mod memory;
+pub mod monitors;
 pub mod project;
 pub mod roles;
 pub mod schema;
