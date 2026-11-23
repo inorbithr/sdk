@@ -30,7 +30,7 @@ Build:
   api          Make one authenticated call and print the answer
   openapi      The OpenAPI document for this credential
   lab          Check lab documents kept in your repository
-  schema       Check a project's own JSON Schemas, with their examples
+  schemas      Manage a project's own JSON Schemas: check, make, version, retire
   monitors     Check, run and manage the monitors kept in your project's `.inorbit/monitors/`
   decisions    Read and write RFCs, PRDs and ADRs in Decisions
 

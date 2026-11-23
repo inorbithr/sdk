@@ -240,7 +240,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "api",
             "openapi",
             "lab",
-            "schema",
+            "schemas",
             "monitors",
             "decisions",
         ],
@@ -495,11 +495,13 @@ pub enum Command {
     /// Lab documents: RFCs and studies kept in your repository.
     #[command(subcommand)]
     Lab(LabCommand),
-    /// Check a project's own JSON Schemas, with their examples.
+    /// Manage a project's own JSON Schemas: check, make, version, retire.
     ///
-    /// JSON Schemas kept in your repository: the layout, the examples and the invalid cases.
+    /// JSON Schemas kept in your repository, in `schemas/`: list and read them, check the
+    /// layout, the examples and the invalid cases, validate a document against one, and make,
+    /// version and retire them. Everything is a file in your folder; nothing leaves it.
     #[command(subcommand)]
-    Schema(SchemaCommand),
+    Schemas(SchemaCommand),
     /// Check, run and manage the monitors kept in your project's `.inorbit/monitors/`.
     ///
     /// Monitors as files in your repository: each `*.toml` there is a block of the InOrbit
@@ -713,9 +715,41 @@ pub enum SchemaCommand {
     /// Check a schemas tree: every schema has its `$id`, every example passes, every invalid case fails.
     ///
     /// Check a project's schemas folder, laid out as `<area>/<name>/v<major>.json` with
-    /// `examples/` and `invalid/` beside each schema (RFC 0147). Reads only the files in the
-    /// folder, makes no network call, needs no sign-in. Exits 1 with one line per problem.
+    /// `examples/` and `invalid/` beside each schema (RFC 0147). When the folder has a
+    /// `manifest.json`, it and the tree must agree. Reads only the files in the folder, makes
+    /// no network call, needs no sign-in. Exits 1 with one line per problem.
     Check(SchemaCheck),
+    /// List the types of a schemas tree: newest major, status, examples and invalid cases.
+    ///
+    /// The status and visibility come from the folder's `manifest.json`; a tree with none
+    /// lists them as unlisted.
+    List(SchemaList),
+    /// Show one type: its address, versions, status and the examples it has.
+    ///
+    /// Reads the project's folder first, then the schemas the CLI ships. `<area>/<name>@v1`
+    /// names a major; with none, the newest.
+    Show(SchemaShow),
+    /// Validate one JSON document against a type, offline.
+    ///
+    /// Against the project's folder or the schemas the CLI ships. Names the field and the
+    /// rule that failed, never the value. Exits 1 when the document is not valid.
+    Validate(SchemaValidate),
+    /// Make a new schema as a draft v0, with an example, an invalid case and a manifest line.
+    ///
+    /// The `$id` starts with the manifest's `base`, else
+    /// `https://schemas.inorbit.hr/<project>/`. Refuses a type that exists. Ends by checking
+    /// the folder.
+    New(SchemaNew),
+    /// Make the next major of a type from its newest one.
+    ///
+    /// Copies the newest major with its `$id` corrected. A draft becomes stable: a stable
+    /// major is never edited, the next change is the next major. Ends by checking the folder.
+    Bump(SchemaBump),
+    /// Mark a type deprecated, with the type that replaces it. Its files stay.
+    ///
+    /// The files stay at their addresses so documents written against them keep validating.
+    /// Ends by checking the folder.
+    Deprecate(SchemaDeprecate),
 }
 
 #[derive(Debug, Args)]
@@ -848,6 +882,85 @@ pub struct SchemaCheck {
     /// The schemas folder. Default: `./schemas`.
     #[arg(default_value = "schemas")]
     pub dir: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct SchemaList {
+    /// The schemas folder. Default: `./schemas`.
+    #[arg(default_value = "schemas")]
+    pub dir: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct SchemaShow {
+    /// The type: `<area>/<name>`, or `<area>/<name>@v1` for one major.
+    pub spec: String,
+    /// The schemas folder. Default: `./schemas`.
+    #[arg(long, default_value = "schemas")]
+    pub dir: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct SchemaValidate {
+    /// The JSON document to check.
+    pub file: PathBuf,
+    /// The type to check it against: `<area>/<name>`, or `<area>/<name>@v1`.
+    #[arg(long = "type", value_name = "TYPE")]
+    pub spec: String,
+    /// The schemas folder. Default: `./schemas`.
+    #[arg(long, default_value = "schemas")]
+    pub dir: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct SchemaNew {
+    /// The new type: `<area>/<name>`, lowercase.
+    pub path: String,
+    /// Its title. Default: the name, capitalised.
+    #[arg(long)]
+    pub title: Option<String>,
+    /// Its description. Default: the title and the draft line.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Who answers for it, a team or a role.
+    #[arg(long)]
+    pub owner: Option<String>,
+    /// Who sees it once published: public, account or shared.
+    #[arg(long, default_value = "account", value_parser = ["public", "account", "shared"])]
+    pub visibility: String,
+    /// The schemas folder. Default: `./schemas`.
+    #[arg(long, default_value = "schemas")]
+    pub dir: PathBuf,
+    /// Say what would be written; write nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct SchemaBump {
+    /// The type: `<area>/<name>`.
+    pub path: String,
+    /// The schemas folder. Default: `./schemas`.
+    #[arg(long, default_value = "schemas")]
+    pub dir: PathBuf,
+    /// Say what would be written; write nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct SchemaDeprecate {
+    /// The type: `<area>/<name>`.
+    pub path: String,
+    /// The listed type that replaces it.
+    #[arg(long)]
+    pub replaced_by: Option<String>,
+    /// The schemas folder. Default: `./schemas`.
+    #[arg(long, default_value = "schemas")]
+    pub dir: PathBuf,
+    /// Say what would be changed; change nothing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 /// The flags of `iohr upgrade`.

@@ -18,6 +18,7 @@ pub mod monitors;
 pub mod project;
 pub mod roles;
 pub mod schema;
+pub mod schema_manage;
 pub mod template;
 
 mod access;

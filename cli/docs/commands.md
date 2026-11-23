@@ -48,7 +48,7 @@ ends its `--help` with real examples.
 | `iohr api <METHOD> <PATH>` | One API call | [`iohr api`](sdk.md#iohr-api) |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` | [SDKs and the API](sdk.md#iohr-openapi-pull) |
 | `iohr lab check` | Check RFC and study files offline | [below](#iohr-lab-check) |
-| `iohr schema check` | Check a project's JSON Schemas, their examples and invalid cases | [below](#iohr-schema-check) |
+| `iohr schemas` | List, show, validate, check and scaffold a project's JSON Schemas (`new`, `bump`, `deprecate`) | [below](#iohr-schemas) |
 | `iohr monitors …` | Monitors kept as files in `.inorbit/monitors/`: check, run, list, show, history, enable, disable, delete, export, install | [below](#iohr-monitors) |
 | `iohr decisions ...` | RFCs, PRDs, ADRs and studies in Decisions | [below](#iohr-decisions) |
 
@@ -119,7 +119,7 @@ names stays, and `--json` or a pipe gives every cell whole. `iohr context` draws
 the same way. Plain output keeps the
 table alone, and an empty list keeps its header line, so scripts read the same bytes.
 
-The other checks are drawn the same way on a terminal: `iohr lab check`, `iohr schema check`, `iohr memory check`,
+The other checks are drawn the same way on a terminal: `iohr lab check`, `iohr schemas check`, `iohr memory check`,
 `iohr memory drift` (its code part), `iohr sdk check` and `iohr ext verify`. Each problem is a
 row with its mark, where it is, what is wrong, and labelled lines under it (the `rule` that
 found it, the operations a moved profile gained `+` and lost `-`, the `fix`). A memory finding
@@ -249,10 +249,10 @@ redaction on public documents as a reader without clearance sees them. Text insi
 
 It works offline and exits 1 with every finding.
 
-## `iohr schema check`
+## `iohr schemas`
 
 ```sh
-iohr schema check [DIR] [--json]
+iohr schemas check [DIR] [--json]
 ```
 
 Checks a project's own JSON Schemas (RFC 0234) against
@@ -270,13 +270,47 @@ and the cases that must fail in `invalid/`. The validator is JSON Schema draft 2
   `https://schemas.inorbit.hr/iohr/`). A `$ref` to anything else is refused, never fetched.
 - Symbolic links and hidden folders are skipped, a file over 1 MiB is a problem, and a
   tree deeper than 6 levels is not read past that.
-- A folder with no schema in it is a problem, so a mistyped `DIR` never passes.
+- A folder with no schema in it is a problem, so a mistyped `DIR` never passes. A folder with a `manifest.json` is the project's schemas tree, so the empty one `iohr project init` writes passes until its first type; a type the manifest lists without a file still fails.
 - A problem names the file and the field (a JSON pointer such as `/checklist/0/done`) and
   the schema rule that failed, never the value.
 
 It works offline. It prints one `where: what` line per problem (a table on a terminal)
 and exits 1; a missing folder is a usage error, exit 2. `--json` prints
 `{dir, types, examples, invalid, problems:[{target, message}]}`.
+
+If `DIR/manifest.json` exists (the same file core's `manage.py` keeps) the check also holds
+the manifest and the tree to each other: a type on disk that the manifest does not list, a
+manifest line with no files, a status or visibility outside the lists, or a `replaced_by`
+that is unknown or the type itself, is a problem. A tree with no manifest still passes.
+
+```sh
+iohr schemas list [DIR] [--json]
+iohr schemas show <area>/<name>[@vN] [--dir DIR] [--json]
+iohr schemas validate <file.json> --type <area>/<name>[@vN] [--dir DIR] [--json]
+iohr schemas new <area>/<name> [--title T] [--description D] [--owner O]
+                 [--visibility public|account|shared] [--dir DIR] [--dry-run] [--json]
+iohr schemas bump <area>/<name> [--dir DIR] [--dry-run] [--json]
+iohr schemas deprecate <area>/<name> [--replaced-by <area>/<name>] [--dir DIR] [--dry-run] [--json]
+```
+
+- `list` prints each type with its newest major, status (`unlisted` when the tree has no
+  manifest) and its example and invalid counts. `show` prints one version's `$id`, title,
+  description and files; a type the project lacks falls back to the three that ship in `iohr`.
+- `validate` checks one JSON file against a type (the project's, else the embedded set) and
+  prints the field and the rule that failed, never the value; exit 1 when it does not pass.
+- `new` writes `v0.json` (draft, `$schema` 2020-12, an `$id`, a title and a draft-line
+  description), `examples/minimal.json` (`{}`) and `invalid/unknown-field.json`, and adds the
+  manifest line (`draft`). The `$id` base is `"base"` in `manifest.json`, else
+  `https://schemas.inorbit.hr/<project>/` with the project name from `inorbit.toml`, else the
+  folder name. It refuses a type that is there already and never overwrites a file. In a tree
+  with no manifest it creates one listing the types already there, and says so.
+- `bump` copies the newest major to the next one (the `$id` fixed, the author's key order
+  kept), turns `draft` into `stable` and drops the draft line at v0. A stable major is never
+  edited, and a deprecated type is refused.
+- `deprecate` sets the status; `--replaced-by` must be another listed type. Files stay.
+- Every write command takes `--dry-run` (prints `would write ...`, writes nothing) and ends by
+  running the check; a problem there is exit 1. A refusal is a usage error, exit 2.
+  The old name `iohr schema` is gone (it was never released).
 
 ## `iohr monitors`
 

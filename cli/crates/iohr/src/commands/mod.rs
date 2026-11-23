@@ -57,7 +57,7 @@ use clap::CommandFactory as _;
 use crate::Env;
 use crate::cli::{
     AccountsCommand, AuthCommand, BrowserCommand, Cli, Command, ExtCommand, LabCommand,
-    OpenapiCommand, ProjectCommand, SchemaCommand, SdkCommand,
+    OpenapiCommand, ProjectCommand, SdkCommand,
 };
 use crate::error::Error;
 use crate::output::Out;
@@ -168,7 +168,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Sync(args) => atlas::sync(g, &env, &args, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
-        Command::Schema(SchemaCommand::Check(args)) => schema::check(&args, out),
+        Command::Schemas(cmd) => schema::run(cmd, out),
         Command::Monitors(args) => monitors::run(&args, out),
         Command::Decisions(cmd) => decisions::run(g, &env, cmd, out).await,
         Command::Runner(cmd) => Box::pin(runner::run(g, &env, cmd, out)).await,
