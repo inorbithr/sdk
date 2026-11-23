@@ -2033,6 +2033,11 @@ pub enum AtlasCommand {
     /// The built-in roles of this project.
     #[command(subcommand, alias = crate::roles::LEGACY_CLI_ALIAS)]
     Roles(RolesCommand),
+    /// The project's scrum board in `atlas/scrum/board.json` (RFC 0234).
+    ///
+    /// Cards on six lists, checked against the `scrum/board` and `scrum/card` schemas before
+    /// every write. With no verb it shows the board. `sync` sends it to the Planner.
+    Scrum(Box<ScrumArgs>),
     /// Search the text of the sites this project crawled (PRD 0192).
     ///
     /// The best matching chunks of page text, each with its page, heading path and offsets.
@@ -2109,6 +2114,165 @@ pub enum AtlasCommand {
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
     },
+}
+
+/// `iohr atlas scrum`: where the board is, and what to do with it.
+#[derive(Debug, clap::Args)]
+pub struct ScrumArgs {
+    /// The board file. Default: the nearest atlas/scrum/board.json up from here.
+    #[arg(long, global = true, value_name = "FILE")]
+    pub board: Option<PathBuf>,
+    /// Keep board, list, next or plan on screen and redraw it when board.json changes (and at
+    /// midnight, when cards turn late). With --json, one JSON line per change. Ctrl-C stops.
+    #[arg(long, global = true)]
+    pub watch: bool,
+    #[command(subcommand)]
+    pub cmd: Option<ScrumCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ScrumCommand {
+    /// The board by list, Trello style (the default).
+    Board,
+    /// Cards as rows, filtered.
+    List {
+        /// Only this list.
+        #[arg(long)]
+        list: Option<String>,
+        /// Only this section (`x.section`).
+        #[arg(long)]
+        section: Option<String>,
+        /// Only cards with this label.
+        #[arg(long)]
+        label: Option<String>,
+        /// Only open cards past their due date.
+        #[arg(long)]
+        late: bool,
+        /// Only cards with `blocked_by` set.
+        #[arg(long)]
+        blocked: bool,
+    },
+    /// One card: dates, docs, checklist, acceptance, tests, notes.
+    Show { card: String },
+    /// Ready cards whose `depends_on` are done and that nothing blocks, by due date.
+    Next {
+        /// How many cards.
+        #[arg(short, default_value_t = 3)]
+        n: usize,
+    },
+    /// Hours per day, late cards, blocked cards, the longest dependency chain.
+    Plan,
+    /// Build hours one day holds across every agent (the board's `day_hours`); no value shows it.
+    Capacity { hours: Option<f64> },
+    /// Add a card to backlog.
+    Add {
+        id: String,
+        #[arg(long)]
+        title: String,
+        /// Stored as `x.section`.
+        #[arg(long)]
+        section: Option<String>,
+        #[arg(long)]
+        size: String,
+        #[arg(long)]
+        hours: f64,
+        #[arg(long)]
+        due: String,
+        #[arg(long)]
+        start: Option<String>,
+        /// A path under atlas/ such as rfc/0003-the-scrum-board.md; repeatable.
+        #[arg(long = "doc")]
+        docs: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        depends_on: Vec<String>,
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        /// A checklist item; repeatable, at least one.
+        #[arg(long = "item")]
+        checklist: Vec<String>,
+        /// An acceptance line; repeatable, at least one.
+        #[arg(long = "accept")]
+        acceptance: Vec<String>,
+        /// A test that proves it; repeatable, at least one.
+        #[arg(long = "test")]
+        tests: Vec<String>,
+    },
+    /// Change a card's fields. A moved due date keeps the old one in notes.
+    Edit {
+        card: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        due: Option<String>,
+        #[arg(long)]
+        start: Option<String>,
+        #[arg(long)]
+        hours: Option<f64>,
+        #[arg(long)]
+        size: Option<String>,
+        /// +x or x adds a label, -x removes it; repeatable.
+        #[arg(long = "label", allow_hyphen_values = true)]
+        labels: Vec<String>,
+        #[arg(long)]
+        blocked_by: Option<String>,
+        #[arg(long)]
+        unblock: bool,
+    },
+    /// Move a card to backlog, ready, doing, review, done or dropped.
+    Move {
+        card: String,
+        list: String,
+        /// Skip a guard; the reason goes to notes.
+        #[arg(long)]
+        force: Option<String>,
+        /// What proves a card done when it has no PR; goes to notes.
+        #[arg(long)]
+        evidence: Option<String>,
+    },
+    /// Move a card to doing.
+    Start {
+        card: String,
+        #[arg(long)]
+        force: Option<String>,
+    },
+    /// Move a card to done: every checklist item ticked, and --pr or --evidence.
+    Done {
+        card: String,
+        #[arg(long)]
+        pr: Option<String>,
+        #[arg(long)]
+        evidence: Option<String>,
+        #[arg(long)]
+        force: Option<String>,
+    },
+    /// Tick checklist item n (1-based).
+    Tick {
+        card: String,
+        n: usize,
+        #[arg(long)]
+        undo: bool,
+    },
+    /// Add a dated line to a card's notes.
+    Note { card: String, text: Vec<String> },
+    /// Schema, unique ids, dependencies and cycles, dates, docs paths; exit 1 on a finding.
+    Check,
+    /// Rewrite the README's board region from board.json; --check fails when it is stale.
+    Render {
+        #[arg(long)]
+        check: bool,
+    },
+    /// Send the board to the Planner: only what the plan lacks, then the plan and item ids go
+    /// back into each card. --dry-run sends nothing.
+    Sync {
+        #[arg(long)]
+        dry_run: bool,
+        /// owner/repo for the plan's external id. Default: the git remote `origin`.
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Move a board written before the schemas to them: `section` becomes `x.section`,
+    /// `ideas` becomes `x.ideas`. One time; the board is checked after.
+    Migrate,
 }
 
 #[derive(Debug, Subcommand)]

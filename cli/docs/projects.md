@@ -535,6 +535,8 @@ and edit:
 - `canvas/` with a starter canvas (`iohr.canvas` version 3, the format InOrbit Desktop
   reads);
 - `models/` for 3D files (glTF 2.0; a README, no fake model);
+- `scrum/` with an empty board (`board.json`) and its README, worked with `iohr atlas scrum`
+  ([commands](commands.md#iohr-atlas-scrum));
 - `atlas/README.md`.
 
 A second run never overwrites a file you have. `iohr atlas init` adds the folder to a

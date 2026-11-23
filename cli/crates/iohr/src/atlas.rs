@@ -573,6 +573,10 @@ pub fn files(m: &Meta<'_>) -> Vec<(String, String)> {
     out.extend(Kind::ALL.into_iter().map(|k| starter(k, m)));
     out.push(canvas_starter(m));
     out.push(models_readme());
+    out.extend(crate::scrum::board::starter(
+        &slug(m.name),
+        m.created_at.get(..10).unwrap_or(m.created_at),
+    ));
     out.extend(crate::roles::pack_files(m.stack));
     // Memory is not an atlas folder: it is `.inorbit/memory/`, local first, committed.
     out.extend(crate::memory::seed::files(m.stack, &slug(m.name)));
@@ -731,7 +735,7 @@ mod tests {
         let files = files(&meta());
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(
-            paths[..11],
+            paths[..13],
             [
                 "atlas/README.md",
                 "atlas/prd/0001-what-my-shop-is-for.md",
@@ -740,6 +744,8 @@ mod tests {
                 "atlas/studies/0001-the-first-measurement-for-my-shop.md",
                 "atlas/canvas/start.canvas.json",
                 "atlas/models/README.md",
+                "atlas/scrum/board.json",
+                "atlas/scrum/README.md",
                 "atlas/roles/base-engineer.md",
                 "atlas/roles/security.md",
                 "atlas/roles/rust-engineer.md",
@@ -747,9 +753,9 @@ mod tests {
             ]
         );
         // The rest are the seed memories, local files under `.inorbit/memory/`.
-        assert!(paths.len() > 11);
+        assert!(paths.len() > 13);
         assert!(
-            paths[11..]
+            paths[13..]
                 .iter()
                 .all(|p| p.starts_with(".inorbit/memory/"))
         );
@@ -843,10 +849,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let written = ensure(root, &meta()).unwrap();
-        // The ten folders' files, then the local memory's seeds under `.inorbit/memory/`.
-        assert!(written.len() >= 10, "{written:?}");
+        // The folders' files, then the local memory's seeds under `.inorbit/memory/`.
+        assert!(written.len() >= 12, "{written:?}");
         assert!(
-            written[10..]
+            written[12..]
                 .iter()
                 .all(|p| p.starts_with(crate::memory::store::PROJECT_DIR))
         );

@@ -106,7 +106,6 @@ impl Paint {
     }
 
     /// No colour, not a terminal: what a pipe gets.
-    #[cfg(test)]
     #[must_use]
     pub(crate) const fn plain() -> Self {
         Self {
@@ -134,6 +133,18 @@ impl Paint {
     ) -> String {
         if self.color {
             f(console::style(text.to_owned()).force_styling(true)).to_string()
+        } else {
+            text.to_owned()
+        }
+    }
+
+    /// `text` in a raw SGR style such as `1` (bold), `2` (dim), `36` (cyan) or `1;33`, when
+    /// colour is on; the text alone otherwise. For views that colour by state (the scrum
+    /// board's lists), where the named styles above do not say enough.
+    #[must_use]
+    pub(crate) fn sgr(self, code: &str, text: &str) -> String {
+        if self.color && !text.is_empty() {
+            format!("\u{1b}[{code}m{text}\u{1b}[0m")
         } else {
             text.to_owned()
         }
