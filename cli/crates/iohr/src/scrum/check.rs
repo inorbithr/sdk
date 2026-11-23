@@ -43,7 +43,10 @@ pub(crate) fn check_board(b: &Board, atlas: Option<&Path>) -> Vec<String> {
         let start = parse_date(&c.start);
         let due = parse_date(&c.due);
         if start.is_none() {
-            out.push(format!("{id}: start {} is not a date (YYYY-MM-DD)", c.start));
+            out.push(format!(
+                "{id}: start {} is not a date (YYYY-MM-DD)",
+                c.start
+            ));
         }
         if due.is_none() {
             out.push(format!("{id}: due {} is not a date (YYYY-MM-DD)", c.due));

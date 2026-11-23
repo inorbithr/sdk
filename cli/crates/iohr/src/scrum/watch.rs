@@ -30,11 +30,14 @@ pub(crate) enum Form {
     Line,
 }
 
+/// How a view is drawn: the board, today, the form and the look.
+pub(crate) type Draw<'a> = &'a dyn Fn(&Board, &str, Form, &Look) -> Result<String, Error>;
+
 /// The view `--watch` redraws: what it draws for a board, and which kind it is (the screen
 /// marks changed cards on a board and a list, and folds a board to fit).
 pub(crate) struct View<'a> {
     pub(crate) kind: Kind,
-    pub(crate) draw: &'a dyn Fn(&Board, &str, Form, &Look) -> Result<String, Error>,
+    pub(crate) draw: Draw<'a>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -52,7 +55,7 @@ const FEED: usize = 6;
 /// How many changed files the strip shows.
 const FILES: usize = 5;
 /// How old a changed file may be and still show.
-const RECENT: Duration = Duration::from_secs(15 * 60);
+const RECENT: Duration = Duration::from_mins(15);
 /// How often git is asked which files changed.
 const FILES_EVERY: Duration = Duration::from_secs(2);
 /// The lists folded first when the board is taller than the terminal.
@@ -71,11 +74,16 @@ struct File {
     card: Option<String>,
 }
 
+#[allow(clippy::too_many_lines, reason = "the poll loop read top to bottom")]
 pub(crate) fn watch(path: &Path, view: &View, json: bool) -> Result<(), Error> {
     use std::io::{IsTerminal, Write};
     let tty = std::io::stdout().is_terminal() && !json;
     let form = if json { Form::Line } else { Form::Text };
-    let stamp = || std::fs::metadata(path).ok().map(|m| (m.modified().ok(), m.len()));
+    let stamp = || {
+        std::fs::metadata(path)
+            .ok()
+            .map(|m| (m.modified().ok(), m.len()))
+    };
     let root = if tty { git_root(path) } else { None };
     let (mut seen, mut size, mut day) = (None, (0, 0), String::new());
     let mut printed = None::<String>;
@@ -86,7 +94,15 @@ pub(crate) fn watch(path: &Path, view: &View, json: bool) -> Result<(), Error> {
     let (mut files, mut asked) = (Vec::<File>::new(), None::<Instant>);
     let mut stdout = std::io::stdout();
     loop {
-        let (now, today, look) = (stamp(), today(), if tty { Look::stdout(false) } else { Look::plain() });
+        let (now, today, look) = (
+            stamp(),
+            today(),
+            if tty {
+                Look::stdout(false)
+            } else {
+                Look::plain()
+            },
+        );
         let rows = if tty { term_rows() } else { 0 };
         let mut redraw = printed.is_none() || (look.width, rows) != size || today != day;
         if now != seen {
@@ -98,7 +114,11 @@ pub(crate) fn watch(path: &Path, view: &View, json: bool) -> Result<(), Error> {
                         let at = clock();
                         for c in diff::changes(&old.board, &l.board) {
                             hot.insert(c.card.clone(), Instant::now());
-                            feed.push_front(Event { at: at.clone(), card: c.card, what: c.what });
+                            feed.push_front(Event {
+                                at: at.clone(),
+                                card: c.card,
+                                what: c.what,
+                            });
                         }
                         feed.truncate(FEED);
                     }
@@ -111,7 +131,11 @@ pub(crate) fn watch(path: &Path, view: &View, json: bool) -> Result<(), Error> {
         let before = hot.len();
         hot.retain(|_, t| t.elapsed() < HOT);
         redraw |= hot.len() != before;
-        if let (Some(root), Some(b), true) = (&root, &board, asked.is_none_or(|t| t.elapsed() >= FILES_EVERY)) {
+        if let (Some(root), Some(b), true) = (
+            &root,
+            &board,
+            asked.is_none_or(|t| t.elapsed() >= FILES_EVERY),
+        ) {
             asked = Some(Instant::now());
             let got = changed_files(root, path, b);
             redraw |= got != files;
@@ -122,21 +146,51 @@ pub(crate) fn watch(path: &Path, view: &View, json: bool) -> Result<(), Error> {
             // In a terminal a load error keeps the last good board on screen and goes in the footer.
             let frame = match &board {
                 Some(b) if tty || error.is_none() => (view.draw)(&b.board, &today, form, &look),
-                _ => Err(Error::Io(error.clone().unwrap_or_else(|| format!("cannot read {}", path.display())))),
+                _ => {
+                    Err(Error::Io(error.clone().unwrap_or_else(|| {
+                        format!("cannot read {}", path.display())
+                    })))
+                }
             };
             let text = match frame {
-                Ok(f) if tty => screen(Screen { view: &f, kind: view.kind, feed: &feed, hot: &hot, files: &files, error: error.as_deref(), path, rows, look: &look }),
+                Ok(f) if tty => screen(&Screen {
+                    view: &f,
+                    kind: view.kind,
+                    feed: &feed,
+                    hot: &hot,
+                    files: &files,
+                    error: error.as_deref(),
+                    path,
+                    rows,
+                    look: &look,
+                }),
                 Ok(f) => f,
-                Err(e) if tty => screen(Screen { view: "", kind: Kind::Rows, feed: &feed, hot: &hot, files: &files, error: Some(&e.to_string()), path, rows, look: &look }),
+                Err(e) if tty => screen(&Screen {
+                    view: "",
+                    kind: Kind::Rows,
+                    feed: &feed,
+                    hot: &hot,
+                    files: &files,
+                    error: Some(&e.to_string()),
+                    path,
+                    rows,
+                    look: &look,
+                }),
                 Err(e) => {
-                    eprintln!("{e}");
+                    let _ = writeln!(std::io::stderr(), "{e}");
                     printed.clone().unwrap_or_default()
                 }
             };
             // A terminal is redrawn on every change; a pipe gets the view again only when it differs.
             if tty || printed.as_ref() != Some(&text) {
-                let gap = if !tty && !json && printed.is_some() { "\n" } else { "" };
-                let _ = stdout.write_all(format!("{gap}{text}").as_bytes()).and_then(|()| stdout.flush());
+                let gap = if !tty && !json && printed.is_some() {
+                    "\n"
+                } else {
+                    ""
+                };
+                let _ = stdout
+                    .write_all(format!("{gap}{text}").as_bytes())
+                    .and_then(|()| stdout.flush());
                 printed = Some(text);
             }
         }
@@ -168,28 +222,45 @@ struct Screen<'a> {
 /// One terminal frame: the view (marked and fitted), the changes, the files, a footer. Drawn
 /// from the top left, each line cleared to its end and the rest of the screen cleared after, so
 /// nothing flickers.
-fn screen(s: Screen) -> String {
+fn screen(s: &Screen) -> String {
     let look = s.look;
-    let cut = |t: &str| t.chars().take(look.width.saturating_sub(1)).collect::<String>();
+    let cut = |t: &str| {
+        t.chars()
+            .take(look.width.saturating_sub(1))
+            .collect::<String>()
+    };
     let mut tail = Vec::new();
     if !s.feed.is_empty() {
         tail.push(String::new());
         tail.push(look.dim("changes"));
         for e in s.feed {
-            tail.push(format!("  {}  {}  {}", look.dim(&e.at), look.hot(&e.card), cut(&e.what)));
+            tail.push(format!(
+                "  {}  {}  {}",
+                look.dim(&e.at),
+                look.hot(&e.card),
+                cut(&e.what)
+            ));
         }
     }
     if !s.files.is_empty() {
         tail.push(String::new());
         tail.push(look.dim("files changed"));
         for f in s.files {
-            let card = f.card.as_deref().map(|c| format!("  {}", look.hot(c))).unwrap_or_default();
+            let card = f
+                .card
+                .as_deref()
+                .map(|c| format!("  {}", look.hot(c)))
+                .unwrap_or_default();
             tail.push(format!("  {}  {}{card}", look.dim(&f.at), cut(&f.path)));
         }
     }
     let foot = match s.error {
         Some(e) => look.dim(&format!("{e}; showing the last good board · {}", clock())),
-        None => look.dim(&format!("watching {} · drawn {} · Ctrl-C stops", s.path.display(), clock())),
+        None => look.dim(&format!(
+            "watching {} · drawn {} · Ctrl-C stops",
+            s.path.display(),
+            clock()
+        )),
     };
     tail.push(String::new());
     tail.push(foot);
@@ -197,7 +268,11 @@ fn screen(s: Screen) -> String {
     let board = s.kind == Kind::Board;
     let marked = mark(s.view, &hot, board, look, s.kind != Kind::Plan);
     let room = s.rows.saturating_sub(tail.len()).max(4);
-    let body = if board { fit_board(&marked, &hot, room, look) } else { fit(&marked, room, look) };
+    let body = if board {
+        fit_board(&marked, &hot, room, look)
+    } else {
+        fit(&marked, room, look)
+    };
     let mut out = String::from("\x1b[H");
     for l in body.lines().map(str::to_owned).chain(tail) {
         out.push_str(&l);
@@ -217,7 +292,11 @@ fn plain(s: &str) -> String {
 /// first three on a list row (list, section, id), after any `▸` already put there.
 fn is_hot(line: &str, hot: &[&str], board: bool) -> bool {
     let p = plain(line);
-    let words = p.trim_start().trim_start_matches('▸').split_whitespace().take(if board { 1 } else { 3 });
+    let words = p
+        .trim_start()
+        .trim_start_matches('▸')
+        .split_whitespace()
+        .take(if board { 1 } else { 3 });
     words.into_iter().any(|w| hot.contains(&w))
 }
 
@@ -229,10 +308,9 @@ fn mark(text: &str, hot: &[&str], board: bool, look: &Look, cards: bool) -> Stri
         let on = cards && is_hot(l, hot, board);
         let line = match (board, on) {
             (true, true) if l.starts_with("  ") => format!("{}{}", look.hot("▸ "), &l[2..]),
-            (true, _) => l.to_owned(),
             (false, true) => format!("{}{l}", look.hot("▸ ")),
             (false, false) if cards => format!("  {l}"),
-            (false, false) => l.to_owned(),
+            (true, _) | (false, false) => l.to_owned(),
         };
         out.push_str(&line);
         out.push('\n');
@@ -247,7 +325,11 @@ fn fit(text: &str, room: usize, look: &Look) -> String {
         return text.to_owned();
     }
     let keep = room.saturating_sub(1);
-    let mut out: String = lines[..keep].iter().map(|l| format!("{l}\n")).collect();
+    let mut out: String = lines[..keep].iter().fold(String::new(), |mut s, l| {
+        s.push_str(l);
+        s.push('\n');
+        s
+    });
     out.push_str(&look.dim(&format!("  … {} more lines", lines.len() - keep)));
     out.push('\n');
     out
@@ -256,15 +338,24 @@ fn fit(text: &str, room: usize, look: &Look) -> String {
 /// Fits the board to `room` lines by folding lists in [`FOLD`] order. A folded list keeps its
 /// heading, its changed cards and a line saying how many cards it hides.
 fn fit_board(text: &str, hot: &[&str], room: usize, look: &Look) -> String {
-    let mut blocks: Vec<Vec<String>> = text.split("\n\n").map(|b| b.lines().map(str::to_owned).collect()).collect();
-    let height = |bs: &[Vec<String>]| bs.iter().map(Vec::len).sum::<usize>() + bs.len().saturating_sub(1);
+    let mut blocks: Vec<Vec<String>> = text
+        .split("\n\n")
+        .map(|b| b.lines().map(str::to_owned).collect())
+        .collect();
+    let height =
+        |bs: &[Vec<String>]| bs.iter().map(Vec::len).sum::<usize>() + bs.len().saturating_sub(1);
     for list in FOLD {
         if height(&blocks) <= room {
             break;
         }
-        let Some(b) = blocks.iter_mut().skip(1).find(|b| list_of(b) == list) else { continue };
+        let Some(b) = blocks.iter_mut().skip(1).find(|b| list_of(b) == list) else {
+            continue;
+        };
         let head = b.iter().take_while(|l| !l.starts_with("  ")).count();
-        let (keep, hide): (Vec<String>, Vec<String>) = b[head..].iter().cloned().partition(|l| is_hot(l, hot, true));
+        let (keep, hide): (Vec<String>, Vec<String>) = b[head..]
+            .iter()
+            .cloned()
+            .partition(|l| is_hot(l, hot, true));
         let mut folded = b[..head].to_vec();
         folded.extend(keep);
         if !hide.is_empty() {
@@ -272,20 +363,37 @@ fn fit_board(text: &str, hot: &[&str], room: usize, look: &Look) -> String {
         }
         *b = folded;
     }
-    let joined = blocks.iter().map(|b| b.join("\n")).collect::<Vec<_>>().join("\n\n") + "\n";
+    let joined = blocks
+        .iter()
+        .map(|b| b.join("\n"))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+        + "\n";
     fit(&joined, room, look)
 }
 
 /// The list a board block is about, from its heading ("● ready  3 cards" or "ready (3 cards, …)").
 fn list_of(block: &[String]) -> String {
     let head = block.first().map(|l| plain(l)).unwrap_or_default();
-    head.trim_start_matches('●').split_whitespace().next().unwrap_or_default().to_owned()
+    head.trim_start_matches('●')
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// The repository holding the board, when git knows one.
 fn git_root(board: &Path) -> Option<PathBuf> {
-    let dir = board.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let o = std::process::Command::new("git").arg("-C").arg(dir).args(["rev-parse", "--show-toplevel"]).output().ok()?;
+    let dir = board
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let o = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
     let s = String::from_utf8(o.stdout).ok()?;
     (o.status.success() && !s.trim().is_empty()).then(|| PathBuf::from(s.trim()))
 }
@@ -323,24 +431,46 @@ fn changed_files(root: &Path, board_path: &Path, b: &Loaded) -> Vec<File> {
     let atlas = b.atlas.as_deref().map(canon);
     let docs: HashMap<PathBuf, &str> = atlas
         .iter()
-        .flat_map(|a| b.board.cards.iter().flat_map(move |c| c.docs.all().map(move |p| (a.join(p), c.id.as_str()))))
+        .flat_map(|a| {
+            b.board
+                .cards
+                .iter()
+                .flat_map(move |c| c.docs.all().map(move |p| (a.join(p), c.id.as_str())))
+        })
         .collect();
     recent(root, porcelain(&o.stdout), &board, &docs, SystemTime::now())
 }
 
-fn recent(root: &Path, paths: Vec<String>, skip: &Path, docs: &HashMap<PathBuf, &str>, now: SystemTime) -> Vec<File> {
+fn recent(
+    root: &Path,
+    paths: Vec<String>,
+    skip: &Path,
+    docs: &HashMap<PathBuf, &str>,
+    now: SystemTime,
+) -> Vec<File> {
     let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_owned());
     let mut got: Vec<(SystemTime, File)> = paths
         .into_iter()
         .filter_map(|p| {
             let full = root.join(&p);
-            let m = std::fs::metadata(&full).ok().filter(std::fs::Metadata::is_file)?;
+            let m = std::fs::metadata(&full)
+                .ok()
+                .filter(std::fs::Metadata::is_file)?;
             let at = m.modified().ok()?;
             let fresh = now.duration_since(at).unwrap_or_default() <= RECENT;
             (fresh && full != skip).then(|| {
                 let card = docs.get(&full).map(|c| (*c).to_owned());
-                let shown = chrono::DateTime::<chrono::Local>::from(at).format("%H:%M:%S").to_string();
-                (at, File { at: shown, path: p, card })
+                let shown = chrono::DateTime::<chrono::Local>::from(at)
+                    .format("%H:%M:%S")
+                    .to_string();
+                (
+                    at,
+                    File {
+                        at: shown,
+                        path: p,
+                        card,
+                    },
+                )
             })
         })
         .collect();
@@ -354,26 +484,47 @@ mod tests {
     use super::*;
 
     fn color() -> Look {
-        Look::new(crate::ui::Paint::from_parts(true, false, None, Some("xterm-256color")), 100)
+        Look::new(
+            crate::ui::Paint::from_parts(true, false, None, Some("xterm-256color")),
+            100,
+        )
     }
 
     #[test]
     fn porcelain_reads_changed_new_and_renamed_paths() {
-        let raw = b" M crates/iohr/src/scrum.rs\0?? atlas/rfc/new.md\0R  new.rs\0old.rs\0 D gone.rs\0";
-        assert_eq!(porcelain(raw), ["crates/iohr/src/scrum.rs", "atlas/rfc/new.md", "new.rs", "gone.rs"]);
+        let raw =
+            b" M crates/iohr/src/scrum.rs\0?? atlas/rfc/new.md\0R  new.rs\0old.rs\0 D gone.rs\0";
+        assert_eq!(
+            porcelain(raw),
+            [
+                "crates/iohr/src/scrum.rs",
+                "atlas/rfc/new.md",
+                "new.rs",
+                "gone.rs"
+            ]
+        );
     }
 
     #[test]
     fn a_changed_card_is_marked_and_kept_when_its_list_folds() {
         let board = "Board (updated 2026-11-14)\n\nready (2 cards, 3 h)\n  aa S 1 h\n  bb S 2 h\n\ndoing (1 card, 1 h)\n  cc M 1 h\n\ndone (3 cards, 3 h)\n  dd S 1 h\n  ee S 1 h\n  ff S 1 h\n";
-        let marked = mark(board, &["ee"], true, &Look::PLAIN, true);
+        let marked = mark(board, &["ee"], true, &Look::plain(), true);
         assert!(marked.contains("▸ ee S 1 h"), "{marked}");
-        assert!(marked.contains("\n  dd S 1 h"), "others keep their indent: {marked}");
+        assert!(
+            marked.contains("\n  dd S 1 h"),
+            "others keep their indent: {marked}"
+        );
 
         // 14 lines; room for 12 folds done (keeping ee) and leaves ready alone.
-        let fitted = fit_board(&marked, &["ee"], 12, &Look::PLAIN);
-        assert!(fitted.contains("done (3 cards, 3 h)\n▸ ee S 1 h\n  … 2 more"), "{fitted}");
-        assert!(fitted.contains("  aa S 1 h\n  bb S 2 h"), "ready is not folded while it fits: {fitted}");
+        let fitted = fit_board(&marked, &["ee"], 12, &Look::plain());
+        assert!(
+            fitted.contains("done (3 cards, 3 h)\n▸ ee S 1 h\n  … 2 more"),
+            "{fitted}"
+        );
+        assert!(
+            fitted.contains("  aa S 1 h\n  bb S 2 h"),
+            "ready is not folded while it fits: {fitted}"
+        );
         assert!(fitted.lines().count() <= 12, "{fitted}");
     }
 
@@ -381,29 +532,74 @@ mod tests {
     fn painted_lines_are_read_through_their_colours() {
         let line = format!("  {} {}", color().hot("aa"), color().dim("S"));
         assert!(is_hot(&line, &["aa"], true));
-        assert_eq!(list_of(&[format!("{} {}  3 cards", color().dim("●"), color().hot("review"))]), "review");
-        let row = mark("doing   core  aa S 1 h\nready   core  bb S\n", &["aa"], false, &color(), true);
+        assert_eq!(
+            list_of(&[format!(
+                "{} {}  3 cards",
+                color().dim("●"),
+                color().hot("review")
+            )]),
+            "review"
+        );
+        let row = mark(
+            "doing   core  aa S 1 h\nready   core  bb S\n",
+            &["aa"],
+            false,
+            &color(),
+            true,
+        );
         assert!(plain(&row).starts_with("▸ doing"), "{row}");
         assert!(plain(&row).contains("\n  ready"), "{row}");
     }
 
     #[test]
     fn recent_files_are_newest_first_with_their_card_and_without_the_board() {
-        let tmp = tempfile::Builder::new().prefix("iohr-watch-files-").tempdir().expect("dir");
+        let tmp = tempfile::Builder::new()
+            .prefix("iohr-watch-files-")
+            .tempdir()
+            .expect("dir");
         let dir = tmp.path().to_path_buf();
         std::fs::create_dir_all(dir.join("atlas/rfc")).expect("dir");
         let root = std::fs::canonicalize(&dir).expect("canon");
         let old = SystemTime::now() - Duration::from_secs(3600);
-        for (p, age) in [("a.rs", 30), ("atlas/rfc/0003.md", 10), ("board.json", 5), ("stale.rs", 0)] {
+        for (p, age) in [
+            ("a.rs", 30),
+            ("atlas/rfc/0003.md", 10),
+            ("board.json", 5),
+            ("stale.rs", 0),
+        ] {
             let f = std::fs::File::create(root.join(p)).expect("file");
-            let t = if p == "stale.rs" { old } else { SystemTime::now() - Duration::from_secs(age) };
+            let t = if p == "stale.rs" {
+                old
+            } else {
+                SystemTime::now() - Duration::from_secs(age)
+            };
             f.set_modified(t).expect("mtime");
         }
         let docs = HashMap::from([(root.join("atlas/rfc/0003.md"), "scrum")]);
-        let paths = ["a.rs", "atlas/rfc/0003.md", "board.json", "stale.rs", "deleted.rs"].map(String::from).to_vec();
-        let got = recent(&root, paths, &root.join("board.json"), &docs, SystemTime::now());
-        let names: Vec<(&str, Option<&str>)> = got.iter().map(|f| (f.path.as_str(), f.card.as_deref())).collect();
-        assert_eq!(names, [("atlas/rfc/0003.md", Some("scrum")), ("a.rs", None)]);
+        let paths = [
+            "a.rs",
+            "atlas/rfc/0003.md",
+            "board.json",
+            "stale.rs",
+            "deleted.rs",
+        ]
+        .map(String::from)
+        .to_vec();
+        let got = recent(
+            &root,
+            paths,
+            &root.join("board.json"),
+            &docs,
+            SystemTime::now(),
+        );
+        let names: Vec<(&str, Option<&str>)> = got
+            .iter()
+            .map(|f| (f.path.as_str(), f.card.as_deref()))
+            .collect();
+        assert_eq!(
+            names,
+            [("atlas/rfc/0003.md", Some("scrum")), ("a.rs", None)]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

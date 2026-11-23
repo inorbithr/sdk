@@ -27,7 +27,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: AtlasCommand, out: Out) -> R
         AtlasCommand::New { kind, title, dir } => new(kind, &title, dir, out),
         AtlasCommand::Sync(args) => sync(g, env, &args, out).await,
         AtlasCommand::Roles(cmd) => roles_cmd(g, env, cmd, out).await,
-        AtlasCommand::Scrum(args) => super::scrum::run(g, env, args, out).await,
+        AtlasCommand::Scrum(args) => super::scrum::run(g, env, *args, out).await,
         AtlasCommand::Search {
             query,
             site,

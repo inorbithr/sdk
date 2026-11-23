@@ -1924,7 +1924,7 @@ pub enum AtlasCommand {
     ///
     /// Cards on six lists, checked against the `scrum/board` and `scrum/card` schemas before
     /// every write. With no verb it shows the board. `sync` sends it to the Planner.
-    Scrum(ScrumArgs),
+    Scrum(Box<ScrumArgs>),
     /// Search the text of the sites this project crawled (PRD 0192).
     ///
     /// The best matching chunks of page text, each with its page, heading path and offsets.
@@ -2035,13 +2035,13 @@ pub enum ScrumCommand {
         /// Only open cards past their due date.
         #[arg(long)]
         late: bool,
-        /// Only cards with blocked_by set.
+        /// Only cards with `blocked_by` set.
         #[arg(long)]
         blocked: bool,
     },
     /// One card: dates, docs, checklist, acceptance, tests, notes.
     Show { card: String },
-    /// Ready cards whose depends_on are done and that nothing blocks, by due date.
+    /// Ready cards whose `depends_on` are done and that nothing blocks, by due date.
     Next {
         /// How many cards.
         #[arg(short, default_value_t = 3)]

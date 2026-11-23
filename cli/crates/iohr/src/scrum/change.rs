@@ -19,6 +19,10 @@ fn note_line(c: &mut Card, line: String) {
 /// Hours as a JSON number: `6` stays an integer, `1.5` a float.
 pub(crate) fn number(h: f64) -> Result<Number, Error> {
     if h.fract() == 0.0 && h.abs() < 1e9 {
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "whole and under 1e9, checked above"
+        )]
         return Ok(Number::from(h as i64));
     }
     Number::from_f64(h).ok_or_else(|| Error::Usage(format!("hours {h} is not a number")))
@@ -48,16 +52,26 @@ pub(crate) struct NewCard {
 /// Adds a card to backlog.
 pub(crate) fn add(b: &mut Board, n: NewCard, today: &str) -> Result<(), Error> {
     if b.list_of(&n.id).is_some() {
-        return Err(Error::Usage(format!("card {} is already on the board", n.id)));
+        return Err(Error::Usage(format!(
+            "card {} is already on the board",
+            n.id
+        )));
     }
     let mut missing = Vec::new();
-    for (name, v) in [("--item", &n.checklist), ("--acceptance", &n.acceptance), ("--test", &n.tests)] {
+    for (name, v) in [
+        ("--item", &n.checklist),
+        ("--acceptance", &n.acceptance),
+        ("--test", &n.tests),
+    ] {
         if v.is_empty() {
             missing.push(name);
         }
     }
     if !missing.is_empty() {
-        return Err(Error::Usage(format!("a card needs at least one {}", missing.join(", one "))));
+        return Err(Error::Usage(format!(
+            "a card needs at least one {}",
+            missing.join(", one ")
+        )));
     }
     let mut docs = Docs::default();
     for p in n.docs {
@@ -66,7 +80,11 @@ pub(crate) fn add(b: &mut Board, n: NewCard, today: &str) -> Result<(), Error> {
             Some("rfc") => &mut docs.rfc,
             Some("adr") => &mut docs.adr,
             Some("studies") => &mut docs.study,
-            _ => return Err(Error::Usage(format!("docs path {p} must start with prd/, rfc/, adr/ or studies/"))),
+            _ => {
+                return Err(Error::Usage(format!(
+                    "docs path {p} must start with prd/, rfc/, adr/ or studies/"
+                )));
+            }
         };
         into.push(p);
     }
@@ -83,7 +101,11 @@ pub(crate) fn add(b: &mut Board, n: NewCard, today: &str) -> Result<(), Error> {
         blocked_by: Vec::new(),
         docs,
         builds_on: Vec::new(),
-        checklist: n.checklist.into_iter().map(|text| Check { text, done: false }).collect(),
+        checklist: n
+            .checklist
+            .into_iter()
+            .map(|text| Check { text, done: false })
+            .collect(),
         acceptance: n.acceptance,
         tests: n.tests,
         planner: None,
@@ -110,7 +132,9 @@ pub(crate) struct Edit {
 /// Changes a card's fields. A moved due date keeps the old one in notes.
 pub(crate) fn edit(b: &mut Board, id: &str, e: Edit, today: &str) -> Result<(), Error> {
     if e.blocked_by.is_some() && e.unblock {
-        return Err(Error::Usage("--blocked-by and --unblock cannot be used together".into()));
+        return Err(Error::Usage(
+            "--blocked-by and --unblock cannot be used together".into(),
+        ));
     }
     let c = b.card_mut(id)?;
     if let Some(t) = e.title {
@@ -169,7 +193,10 @@ pub(crate) fn move_to(
     today: &str,
 ) -> Result<(), Error> {
     if !LISTS.contains(&list) {
-        return Err(Error::Usage(format!("no list {list}; the lists are {}", LISTS.join(", "))));
+        return Err(Error::Usage(format!(
+            "no list {list}; the lists are {}",
+            LISTS.join(", ")
+        )));
     }
     if force.is_some_and(|r| r.trim().is_empty()) {
         return Err(Error::Usage("--force needs a reason".into()));
@@ -197,7 +224,11 @@ pub(crate) fn move_to(
     if list == "done" {
         for (i, k) in c.checklist.iter().enumerate() {
             if !k.done {
-                why.push(format!("checklist item {} is not ticked: {}", i + 1, k.text));
+                why.push(format!(
+                    "checklist item {} is not ticked: {}",
+                    i + 1,
+                    k.text
+                ));
             }
         }
         if c.pr.is_none() && evidence.is_none() {
@@ -214,7 +245,10 @@ pub(crate) fn move_to(
         let line = if why.is_empty() {
             format!("{today}: forced to {list}: {r}")
         } else {
-            format!("{today}: forced to {list}: {r} (skipped: {})", why.join("; "))
+            format!(
+                "{today}: forced to {list}: {r} (skipped: {})",
+                why.join("; ")
+            )
         };
         note_line(c, line);
     }
@@ -225,7 +259,12 @@ pub(crate) fn move_to(
 }
 
 /// Moves a card to `doing`.
-pub(crate) fn start(b: &mut Board, id: &str, force: Option<&str>, today: &str) -> Result<(), Error> {
+pub(crate) fn start(
+    b: &mut Board,
+    id: &str,
+    force: Option<&str>,
+    today: &str,
+) -> Result<(), Error> {
     move_to(b, id, "doing", force, None, today)
 }
 
@@ -283,28 +322,64 @@ mod tests {
             "bb depends on aa, which is in ready\nbb is blocked by: apr_x answer\nuse --force REASON to move it anyway"
         );
         assert_eq!(err.code(), 1);
-        assert_eq!(move_to(&mut b, "bb", "someday", None, None, T).expect_err("list").code(), 2);
-        assert_eq!(start(&mut b, "bb", Some(" "), T).expect_err("empty reason").code(), 2);
+        assert_eq!(
+            move_to(&mut b, "bb", "someday", None, None, T)
+                .expect_err("list")
+                .code(),
+            2
+        );
+        assert_eq!(
+            start(&mut b, "bb", Some(" "), T)
+                .expect_err("empty reason")
+                .code(),
+            2
+        );
 
         start(&mut b, "bb", Some("the owner said go"), T).expect("forced");
         assert_eq!(b.cards[1].list, "doing");
         let n = b.cards[1].notes.as_deref().unwrap_or_default();
-        assert!(n.starts_with("2026-11-14: forced to doing: the owner said go (skipped: bb depends on aa"), "{n}");
+        assert!(
+            n.starts_with(
+                "2026-11-14: forced to doing: the owner said go (skipped: bb depends on aa"
+            ),
+            "{n}"
+        );
 
         start(&mut b, "aa", None, T).expect("no guard");
         let err = done(&mut b, "aa", None, None, None, T).expect_err("not ticked, no evidence");
-        assert!(err.to_string().starts_with("checklist item 1 is not ticked: one\nchecklist item 2"), "{err}");
-        assert!(err.to_string().contains("done needs --pr owner/repo#N or --evidence TEXT"));
+        assert!(
+            err.to_string()
+                .starts_with("checklist item 1 is not ticked: one\nchecklist item 2"),
+            "{err}"
+        );
+        assert!(
+            err.to_string()
+                .contains("done needs --pr owner/repo#N or --evidence TEXT")
+        );
 
         tick(&mut b, "aa", 1, false).expect("tick");
         tick(&mut b, "aa", 2, false).expect("tick");
         assert_eq!(tick(&mut b, "aa", 3, false).expect_err("range").code(), 2);
         assert_eq!(tick(&mut b, "aa", 0, false).expect_err("1-based").code(), 2);
         let err = done(&mut b, "aa", None, None, None, T).expect_err("no evidence");
-        assert_eq!(err.to_string(), "done needs --pr owner/repo#N or --evidence TEXT\nuse --force REASON to move it anyway");
+        assert_eq!(
+            err.to_string(),
+            "done needs --pr owner/repo#N or --evidence TEXT\nuse --force REASON to move it anyway"
+        );
 
-        done(&mut b, "aa", None, Some("cargo test -p iohr: 9 passed"), None, T).expect("evidence");
-        assert_eq!(b.cards[0].notes.as_deref(), Some("2026-11-14: evidence: cargo test -p iohr: 9 passed"));
+        done(
+            &mut b,
+            "aa",
+            None,
+            Some("cargo test -p iohr: 9 passed"),
+            None,
+            T,
+        )
+        .expect("evidence");
+        assert_eq!(
+            b.cards[0].notes.as_deref(),
+            Some("2026-11-14: evidence: cargo test -p iohr: 9 passed")
+        );
 
         let mut b = board(vec![card("cc", "review", &[])]);
         tick(&mut b, "cc", 1, false).expect("tick");
@@ -318,6 +393,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines, reason = "one scenario read top to bottom")]
     fn add_and_edit_keep_history() {
         let mut b = board(vec![card("aa", "ready", &[])]);
         let n = NewCard {
@@ -327,22 +403,49 @@ mod tests {
             size: "M".into(),
             hours: 4.0,
             due: "2026-11-16".into(),
-            docs: vec!["rfc/0003-the-scrum-board-in-atlas.md".into(), "studies/0002-x.md".into()],
+            docs: vec![
+                "rfc/0003-the-scrum-board-in-atlas.md".into(),
+                "studies/0002-x.md".into(),
+            ],
             depends_on: vec!["aa".into()],
             checklist: vec!["one".into()],
             acceptance: vec!["works".into()],
             tests: vec!["cargo test".into()],
             ..NewCard::default()
         };
-        assert_eq!(add(&mut b, NewCard { tests: vec![], ..n.clone() }, T).expect_err("tests").code(), 2);
         assert_eq!(
-            add(&mut b, NewCard { docs: vec!["notes/x.md".into()], ..n.clone() }, T).expect_err("docs").code(),
+            add(
+                &mut b,
+                NewCard {
+                    tests: vec![],
+                    ..n.clone()
+                },
+                T
+            )
+            .expect_err("tests")
+            .code(),
+            2
+        );
+        assert_eq!(
+            add(
+                &mut b,
+                NewCard {
+                    docs: vec!["notes/x.md".into()],
+                    ..n.clone()
+                },
+                T
+            )
+            .expect_err("docs")
+            .code(),
             2
         );
         add(&mut b, n.clone(), T).expect("add");
         assert_eq!(add(&mut b, n, T).expect_err("twice").code(), 2);
         let c = &b.cards[1];
-        assert_eq!((c.list.as_str(), c.start.as_str(), c.hours.to_string()), ("backlog", T, "4".to_string()));
+        assert_eq!(
+            (c.list.as_str(), c.start.as_str(), c.hours.to_string()),
+            ("backlog", T, "4".to_string())
+        );
         assert_eq!(c.docs.study, vec!["studies/0002-x.md"]);
 
         let e = Edit {
@@ -353,17 +456,51 @@ mod tests {
             ..Edit::default()
         };
         edit(&mut b, "bb", e, T).expect("edit");
-        edit(&mut b, "bb", Edit { labels: vec!["-ui".into()], ..Edit::default() }, T).expect("edit");
+        edit(
+            &mut b,
+            "bb",
+            Edit {
+                labels: vec!["-ui".into()],
+                ..Edit::default()
+            },
+            T,
+        )
+        .expect("edit");
         let c = &b.cards[1];
-        assert_eq!(c.notes.as_deref(), Some("2026-11-14: due moved from 2026-11-16 to 2026-11-17"));
-        assert_eq!((c.hours.to_string(), c.labels.clone()), ("4.5".to_string(), vec!["api".to_string()]));
+        assert_eq!(
+            c.notes.as_deref(),
+            Some("2026-11-14: due moved from 2026-11-16 to 2026-11-17")
+        );
+        assert_eq!(
+            (c.hours.to_string(), c.labels.clone()),
+            ("4.5".to_string(), vec!["api".to_string()])
+        );
         assert_eq!(c.blocked_by, vec!["apr_1 answer"]);
-        let both = Edit { blocked_by: Some("x y z".into()), unblock: true, ..Edit::default() };
+        let both = Edit {
+            blocked_by: Some("x y z".into()),
+            unblock: true,
+            ..Edit::default()
+        };
         assert_eq!(edit(&mut b, "bb", both, T).expect_err("both").code(), 2);
-        edit(&mut b, "bb", Edit { unblock: true, ..Edit::default() }, T).expect("unblock");
-        assert!(b.cards[1].blocked_by.is_empty());
+        edit(
+            &mut b,
+            "bb",
+            Edit {
+                unblock: true,
+                ..Edit::default()
+            },
+            T,
+        )
+        .expect("unblock");
+        assert_eq!(b.cards[1].blocked_by, Vec::<String>::new());
         note(&mut b, "bb", "asked the Supervisor", "2026-11-15").expect("note");
-        assert!(b.cards[1].notes.as_deref().unwrap_or_default().ends_with("\n2026-11-15: asked the Supervisor"));
+        assert!(
+            b.cards[1]
+                .notes
+                .as_deref()
+                .unwrap_or_default()
+                .ends_with("\n2026-11-15: asked the Supervisor")
+        );
         assert_eq!(note(&mut b, "zz", "x", T).expect_err("no card").code(), 2);
     }
 }

@@ -14,6 +14,10 @@ use crate::schema::Schemas;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Board {
+    #[allow(
+        clippy::struct_field_names,
+        reason = "`board` is the schema's field name"
+    )]
     pub(crate) board: String,
     pub(crate) updated: String,
     /// Build hours one day holds across every agent working in parallel; the plan flags a day
@@ -144,7 +148,10 @@ impl Board {
 
     /// The list a card is in, or `None` when the id is not on the board.
     pub(crate) fn list_of(&self, id: &str) -> Option<&str> {
-        self.cards.iter().find(|c| c.id == id).map(|c| c.list.as_str())
+        self.cards
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| c.list.as_str())
     }
 }
 
@@ -175,13 +182,15 @@ fn atlas_of(path: &Path) -> Option<PathBuf> {
 
 fn schemas() -> Result<&'static Schemas, String> {
     static S: OnceLock<Result<Schemas, String>> = OnceLock::new();
-    S.get_or_init(Schemas::embedded).as_ref().map_err(Clone::clone)
+    S.get_or_init(Schemas::embedded)
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
 /// Reads and checks a board. An invalid board is refused with every problem found.
 pub(crate) fn load(path: &Path) -> Result<Loaded, Error> {
-    let raw = fs::read(path)
-        .map_err(|e| Error::Io(format!("cannot read {}: {e}", path.display())))?;
+    let raw =
+        fs::read(path).map_err(|e| Error::Io(format!("cannot read {}: {e}", path.display())))?;
     let value: Value = serde_json::from_slice(&raw)
         .map_err(|e| Error::Refused(vec![format!("{} is not JSON: {e}", path.display())]))?;
     let atlas = atlas_of(path);
@@ -189,8 +198,8 @@ pub(crate) fn load(path: &Path) -> Result<Loaded, Error> {
     if !problems.is_empty() {
         return Err(Error::Refused(problems));
     }
-    let board = serde_json::from_value(value)
-        .map_err(|e| Error::Refused(vec![format!("board: {e}")]))?;
+    let board =
+        serde_json::from_value(value).map_err(|e| Error::Refused(vec![format!("board: {e}")]))?;
     Ok(Loaded {
         path: path.to_path_buf(),
         raw,
@@ -254,11 +263,57 @@ pub(crate) fn pretty(board: &Board) -> Result<String, Error> {
     Ok(text)
 }
 
+/// The starter set `iohr project init` writes: an empty board named for the project and the
+/// README its `scrum:board` region is rendered into. Returned as relative path and text.
+pub(crate) fn starter(name: &str, date: &str) -> Vec<(String, String)> {
+    let board = Board {
+        board: name.to_string(),
+        updated: date.to_string(),
+        day_hours: None,
+        lists: super::LISTS.iter().map(|l| (*l).to_string()).collect(),
+        cards: Vec::new(),
+    };
+    let head = format!(
+        "# {name}'s scrum board\n\n`board.json` is the board: one card per task, sized for AI pace. \
+Views and changes go through `iohr atlas scrum` (`board`, `list`, `next`, `plan`, `add`, `start`, `done`).\n\n\
+- **One source.** `board.json` is the only copy. The part of this README between the `scrum:board` markers is made from it by `iohr atlas scrum render`; do not edit it by hand. `iohr atlas scrum render --check` fails when it is stale.\n\
+- **Machine checked.** Cards and the board follow the `scrum/card/v0` and `scrum/board/v0` schemas; `iohr atlas scrum check` also checks ids, dependencies, dates and that every `docs` link exists under `atlas/`.\n\
+- **The board and the Planner.** The board holds the spec and the priorities; the InOrbit Planner holds execution state. `iohr atlas scrum sync --dry-run` prints what a sync would send.\n\n\
+{}\n\n{}\n",
+        super::view::START,
+        super::view::END
+    );
+    let readme = super::view::render_readme(&head, &board).unwrap_or(head);
+    let json = pretty(&board).unwrap_or_default();
+    vec![
+        (super::BOARD_PATH.to_string(), json),
+        ("atlas/scrum/README.md".to_string(), readme),
+    ]
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::scrum::LISTS;
     use serde_json::json;
+
+    #[test]
+    fn the_starter_board_is_valid_and_its_readme_is_current() {
+        let files = starter("my-shop", "2026-11-23");
+        let board: Value = serde_json::from_str(&files[0].1).unwrap();
+        assert!(
+            schema_problems(&board).is_empty(),
+            "{:?}",
+            schema_problems(&board)
+        );
+        assert_eq!(
+            crate::scrum::check::check(&board, None),
+            Vec::<String>::new()
+        );
+        let b: Board = serde_json::from_value(board).unwrap();
+        let again = crate::scrum::view::render_readme(&files[1].1, &b).unwrap();
+        assert_eq!(again, files[1].1);
+    }
 
     /// A valid card with this id, list and dependencies.
     pub(crate) fn card(id: &str, list: &str, deps: &[&str]) -> Card {
@@ -301,7 +356,10 @@ pub(crate) mod tests {
         let p = problems(&board(vec![card("aa", "ready", &["zz"])]));
         assert_eq!(p, vec!["aa depends on zz, which is not on the board"]);
 
-        let p = problems(&board(vec![card("aa", "ready", &[]), card("aa", "done", &[])]));
+        let p = problems(&board(vec![
+            card("aa", "ready", &[]),
+            card("aa", "done", &[]),
+        ]));
         assert_eq!(p, vec!["card id aa is used twice"]);
 
         let mut late = card("bb", "ready", &[]);
@@ -314,11 +372,21 @@ pub(crate) mod tests {
 
         let mut odd = card("aa", "ready", &[]);
         odd.due = "2026-02-30".into();
-        assert!(problems(&board(vec![odd]))[0].contains("not a date"), "impossible day");
+        let p = problems(&board(vec![odd]));
+        // The schema's date format refuses the impossible day first (Eye's schema did not);
+        // the typed check says the same in words when the schema is not in front of it.
+        assert!(p[0].starts_with("/cards/0/due"), "impossible day: {p:?}");
+        let mut odd = card("aa", "ready", &[]);
+        odd.due = "2026-02-30".into();
+        let typed = check::check_board(&board(vec![odd]), None);
+        assert!(typed.iter().any(|l| l.contains("not a date")), "{typed:?}");
 
         let mut bad = card("aa", "ready", &[]);
         bad.list = "someday".into();
-        assert!(problems(&board(vec![bad]))[0].starts_with("/cards/0/list"), "schema first");
+        assert!(
+            problems(&board(vec![bad]))[0].starts_with("/cards/0/list"),
+            "schema first"
+        );
     }
 
     #[test]
@@ -333,7 +401,10 @@ pub(crate) mod tests {
         fs::write(&path, serde_json::to_string_pretty(&b).expect("json")).expect("write");
 
         let first = load(&path).expect("load");
-        assert!(first.atlas.is_none(), "a board outside atlas/ skips the docs check");
+        assert!(
+            first.atlas.is_none(),
+            "a board outside atlas/ skips the docs check"
+        );
         let second = load(&path).expect("load");
         save(&first, first.board.clone(), "2026-11-15").expect("first save");
         let err = save(&second, second.board.clone(), "2026-11-16").expect_err("stale");
@@ -342,12 +413,18 @@ pub(crate) mod tests {
             "board.json changed since it was read; run the command again"
         );
         assert_eq!(load(&path).expect("load").board.updated, "2026-11-15");
-        assert!(!dir.join(".board.json.tmp").exists(), "the temporary file is renamed away");
+        assert!(
+            !dir.join(".board.json.tmp").exists(),
+            "the temporary file is renamed away"
+        );
 
         let mut broken = load(&path).expect("load");
         broken.board.cards[0].depends_on = vec!["aa".into()];
         let b2 = broken.board.clone();
-        assert_eq!(save(&broken, b2, "2026-11-16").expect_err("invalid").code(), 1);
+        assert_eq!(
+            save(&broken, b2, "2026-11-16").expect_err("invalid").code(),
+            1
+        );
     }
 
     #[test]
@@ -359,6 +436,11 @@ pub(crate) mod tests {
         assert_eq!(v["x"]["section"], "fit");
         let back: Card = serde_json::from_value(v).expect("card");
         assert_eq!(back.x["ideas"], json!([1, 2]));
-        assert!(serde_json::to_value(card("bb", "ready", &[])).expect("v").get("x").is_none());
+        assert!(
+            serde_json::to_value(card("bb", "ready", &[]))
+                .expect("v")
+                .get("x")
+                .is_none()
+        );
     }
 }

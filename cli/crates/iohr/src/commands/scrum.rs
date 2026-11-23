@@ -2,6 +2,7 @@
 //! `atlas/scrum/board.json`; every change is checked against the schemas first and written
 //! atomically. Only `sync` calls the API, as the session's own caller.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -22,8 +23,8 @@ fn board_path(given: Option<PathBuf>) -> Result<PathBuf, Error> {
     if let Some(p) = given {
         return Ok(p);
     }
-    let here = std::env::current_dir()
-        .map_err(|e| Error::Failed(format!("no current folder: {e}")))?;
+    let here =
+        std::env::current_dir().map_err(|e| Error::Failed(format!("no current folder: {e}")))?;
     board::find(&here).ok_or_else(|| {
         Error::Usage(format!(
             "no {} above this folder; pass --board (`iohr atlas init` writes an empty one)",
@@ -81,19 +82,14 @@ fn put(json: bool, v: &impl Serialize, text: impl FnOnce() -> String) {
     }
 }
 
-/// The read-only views `--watch` can redraw, as a draw function and the kind of screen.
-fn view_of(cmd: &ScrumCommand) -> Option<watch::View<'_>> {
-    type Draw<'a> = &'a dyn Fn(&Board, &str, Form, &Look) -> Result<String, scrum::Error>;
-    let kind = match cmd {
-        ScrumCommand::Board => Kind::Board,
-        ScrumCommand::Plan => Kind::Plan,
-        ScrumCommand::List { .. } | ScrumCommand::Next { .. } => Kind::Rows,
-        _ => return None,
-    };
-    let draw: Draw<'_> = Box::leak(Box::new(move |b: &Board, today: &str, form: Form, look: &Look| {
-        view_text(cmd, b, today, form, look)
-    }));
-    Some(watch::View { kind, draw })
+/// The kind of screen `--watch` draws for a command; none for a command that is not a view.
+const fn kind_of(cmd: &ScrumCommand) -> Option<Kind> {
+    match cmd {
+        ScrumCommand::Board => Some(Kind::Board),
+        ScrumCommand::Plan => Some(Kind::Plan),
+        ScrumCommand::List { .. } | ScrumCommand::Next { .. } => Some(Kind::Rows),
+        _ => None,
+    }
 }
 
 fn view_text(
@@ -140,20 +136,18 @@ fn view_text(
     }
 }
 
-pub(crate) async fn run(
-    g: &Global,
-    env: &Env,
-    a: ScrumArgs,
-    out: Out,
-) -> Result<(), Error> {
+pub(crate) async fn run(g: &Global, env: &Env, a: ScrumArgs, out: Out) -> Result<(), Error> {
     let path = board_path(a.board)?;
     let cmd = a.cmd.unwrap_or(ScrumCommand::Board);
     if a.watch {
-        let Some(v) = view_of(&cmd) else {
+        let Some(kind) = kind_of(&cmd) else {
             return Err(Error::Usage(
                 "--watch works with board, list, next and plan".into(),
             ));
         };
+        let draw =
+            |b: &Board, today: &str, form: Form, look: &Look| view_text(&cmd, b, today, form, look);
+        let v = watch::View { kind, draw: &draw };
         return Ok(watch::watch(&path, &v, out.json)?);
     }
     if let ScrumCommand::Sync { dry_run, repo } = &cmd {
@@ -162,6 +156,10 @@ pub(crate) async fn run(
     Ok(go(&path, cmd, out)?)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm per command, each a few lines"
+)]
 fn go(path: &Path, cmd: ScrumCommand, out: Out) -> Result<(), scrum::Error> {
     use scrum::Error as E;
     let today = today();
@@ -344,9 +342,11 @@ fn go(path: &Path, cmd: ScrumCommand, out: Out) -> Result<(), scrum::Error> {
                 .map_err(|e| E::Io(format!("cannot read {}: {e}", readme.display())))?;
             let new = view::render_readme(&old, b)?;
             if old == new {
-                put(json, &json!({"readme": readme.display().to_string(), "state": "current"}), || {
-                    format!("{}: current\n", readme.display())
-                });
+                put(
+                    json,
+                    &json!({"readme": readme.display().to_string(), "state": "current"}),
+                    || format!("{}: current\n", readme.display()),
+                );
                 Ok(())
             } else if check {
                 Err(E::Refused(vec![format!(
@@ -356,9 +356,11 @@ fn go(path: &Path, cmd: ScrumCommand, out: Out) -> Result<(), scrum::Error> {
             } else {
                 std::fs::write(&readme, new)
                     .map_err(|e| E::Io(format!("{}: {e}", readme.display())))?;
-                put(json, &json!({"readme": readme.display().to_string(), "state": "rendered"}), || {
-                    format!("{}: rendered\n", readme.display())
-                });
+                put(
+                    json,
+                    &json!({"readme": readme.display().to_string(), "state": "rendered"}),
+                    || format!("{}: rendered\n", readme.display()),
+                );
                 Ok(())
             }
         }
@@ -372,8 +374,8 @@ fn go(path: &Path, cmd: ScrumCommand, out: Out) -> Result<(), scrum::Error> {
 /// migrated is left as it is.
 fn migrate(path: &Path, out: Out) -> Result<(), scrum::Error> {
     use scrum::Error as E;
-    let raw = std::fs::read(path)
-        .map_err(|e| E::Io(format!("cannot read {}: {e}", path.display())))?;
+    let raw =
+        std::fs::read(path).map_err(|e| E::Io(format!("cannot read {}: {e}", path.display())))?;
     let mut value: Value = serde_json::from_slice(&raw)
         .map_err(|e| E::Refused(vec![format!("{} is not JSON: {e}", path.display())]))?;
     let mut moved = 0usize;
@@ -381,9 +383,7 @@ fn migrate(path: &Path, out: Out) -> Result<(), scrum::Error> {
         for c in cards.iter_mut().filter_map(Value::as_object_mut) {
             for key in ["section", "ideas"] {
                 if let Some(v) = c.remove(key) {
-                    let x = c
-                        .entry("x")
-                        .or_insert_with(|| Value::Object(Map::new()));
+                    let x = c.entry("x").or_insert_with(|| Value::Object(Map::new()));
                     if let Some(x) = x.as_object_mut() {
                         x.insert(key.into(), v);
                     }
@@ -393,8 +393,8 @@ fn migrate(path: &Path, out: Out) -> Result<(), scrum::Error> {
         }
     }
     if moved > 0 {
-        let mut text = serde_json::to_string_pretty(&value)
-            .map_err(|e| E::Io(format!("board: {e}")))?;
+        let mut text =
+            serde_json::to_string_pretty(&value).map_err(|e| E::Io(format!("board: {e}")))?;
         text.push('\n');
         let tmp = path.with_file_name(".board.json.tmp");
         let io = |e: std::io::Error| E::Io(format!("{}: {e}", path.display()));
@@ -432,7 +432,9 @@ async fn sync_cmd(
     let repo = repo.unwrap_or_else(|| repo_of(path));
     if dry_run {
         let cmds = sync::sync_dry(&loaded.board, &repo);
-        put(json, &json!({ "commands": cmds }), || cmds.join("\n") + "\n");
+        put(json, &json!({ "commands": cmds }), || {
+            cmds.join("\n") + "\n"
+        });
         return Ok(());
     }
     let s = session(g, env).await?;
@@ -442,22 +444,24 @@ async fn sync_cmd(
         board::save(&loaded, nb, &today)?;
     }
     put(json, &r, || {
-        let mut t = format!(
-            "plan {}{}\n",
+        let mut t = String::new();
+        let _ = writeln!(
+            t,
+            "plan {}{}",
             r.plan,
             if r.created { " (created)" } else { "" }
         );
-        t += &r.sent.iter().map(|s| format!("sent: {s}\n")).collect::<String>();
-        t += &r
-            .failed
-            .iter()
-            .map(|s| format!("refused: {s}\n"))
-            .collect::<String>();
+        for s in &r.sent {
+            let _ = writeln!(t, "sent: {s}");
+        }
+        for s in &r.failed {
+            let _ = writeln!(t, "refused: {s}");
+        }
         if r.sent.is_empty() && r.failed.is_empty() {
-            t += "nothing to send\n";
+            t.push_str("nothing to send\n");
         }
         if !r.written.is_empty() {
-            t += &format!("planner ids written to {}\n", r.written.join(", "));
+            let _ = writeln!(t, "planner ids written to {}", r.written.join(", "));
         }
         t
     });

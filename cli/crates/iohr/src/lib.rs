@@ -49,9 +49,9 @@ mod planner;
 mod privacy;
 mod prompt;
 mod runner;
-mod scrum;
 #[cfg(unix)]
 mod safe_open;
+mod scrum;
 #[cfg(unix)]
 mod session;
 mod steps;

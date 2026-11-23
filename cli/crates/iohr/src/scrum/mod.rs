@@ -74,7 +74,11 @@ pub(crate) fn parse_date(s: &str) -> Option<NaiveDate> {
     if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
         return None;
     }
-    if !s.bytes().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit()) {
+    if !s
+        .bytes()
+        .enumerate()
+        .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
+    {
         return None;
     }
     NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
@@ -102,7 +106,14 @@ mod tests {
         let a = parse_date("2026-11-15").expect("a");
         let b = parse_date("2026-11-14").expect("b");
         assert_eq!((a - b).num_days(), 1);
-        for s in ["2026-02-30", "2026-13-01", "2026-1-01", "26-11-14", "2026-11-1x", "2100-02-29"] {
+        for s in [
+            "2026-02-30",
+            "2026-13-01",
+            "2026-1-01",
+            "26-11-14",
+            "2026-11-1x",
+            "2100-02-29",
+        ] {
             assert_eq!(parse_date(s), None, "{s}");
         }
     }

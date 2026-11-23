@@ -17,9 +17,9 @@ use std::collections::{HashMap, HashSet};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
+use super::Error;
 use super::board::{Board, Card, Planner};
 use super::view::{fmt_h, planner_status};
-use super::Error;
 use crate::planner::{Plans, default_holder, find_item, item_fields, note_text};
 
 /// The plan's external id, so `plan create` returns the same plan every run.
@@ -33,12 +33,11 @@ fn q(s: &str) -> String {
 }
 
 fn body(c: &Card) -> String {
-    let section = c
-        .x
-        .get("section")
-        .and_then(Value::as_str)
-        .map(|s| format!("section {s}, "))
-        .unwrap_or_default();
+    let section =
+        c.x.get("section")
+            .and_then(Value::as_str)
+            .map(|s| format!("section {s}, "))
+            .unwrap_or_default();
     format!(
         "{section}size {}, {} h, {} to {}",
         c.size,
@@ -52,10 +51,8 @@ fn body(c: &Card) -> String {
 pub(crate) const IN_REVIEW: &str = "in review";
 
 fn done_note(c: &Card) -> String {
-    c.pr.as_deref().map_or_else(
-        || "done on the board".to_owned(),
-        |p| format!("done: {p}"),
-    )
+    c.pr.as_deref()
+        .map_or_else(|| "done on the board".to_owned(), |p| format!("done: {p}"))
 }
 
 /// One write to the Planner, for one card.
@@ -109,7 +106,10 @@ impl Step {
                 format!("iohr coordinator item note {plan} {} {}", q(card), q(text))
             }
             Step::Status { card, status } => {
-                format!("# set {plan} {} to {status} through the Planner API", q(card))
+                format!(
+                    "# set {plan} {} to {status} through the Planner API",
+                    q(card)
+                )
             }
             Step::Done { card, note } => format!(
                 "iohr coordinator item done {plan} {} --note {}",
@@ -201,9 +201,8 @@ pub(crate) fn steps(b: &Board, remote: Option<&Remote>) -> Vec<Step> {
             });
         }
         let status = have.map_or_else(|| "proposed".to_owned(), |i| i.status);
-        let noted = |t: &str| {
-            remote.is_some_and(|r| r.notes.contains(&(c.id.clone(), t.to_owned())))
-        };
+        let noted =
+            |t: &str| remote.is_some_and(|r| r.notes.contains(&(c.id.clone(), t.to_owned())));
         match c.list.as_str() {
             "doing" | "review" => {
                 if status != "building" {
@@ -254,7 +253,10 @@ pub(crate) fn sync_dry(b: &Board, repo: &str) -> Vec<String> {
     let all = steps(b, None);
     for c in &b.cards {
         if let Some(p) = &c.planner {
-            out.push(format!("# {}: already synced as {}/{}", c.id, p.plan, p.item));
+            out.push(format!(
+                "# {}: already synced as {}/{}",
+                c.id, p.plan, p.item
+            ));
         }
         out.extend(
             all.iter()
@@ -294,17 +296,16 @@ fn add_fields(step: &Step, got: &Value) -> (Map<String, Value>, i64) {
     let Step::Add { card, title, body } = step else {
         return (Map::new(), 0);
     };
-    let (mut fields, version) = match find_item(got, card) {
-        Some(i) => (
+    let (mut fields, version) = if let Some(i) = find_item(got, card) {
+        (
             item_fields(i),
             i.get("version").and_then(Value::as_i64).unwrap_or(0),
-        ),
-        None => {
-            let mut m = Map::new();
-            m.insert("status".into(), json!("proposed"));
-            m.insert("kind".into(), json!("task"));
-            (m, 0)
-        }
+        )
+    } else {
+        let mut m = Map::new();
+        m.insert("status".into(), json!("proposed"));
+        m.insert("kind".into(), json!("task"));
+        (m, 0)
     };
     fields.insert("title".into(), json!(title));
     fields.insert("body".into(), json!(body));
@@ -349,9 +350,7 @@ pub(crate) async fn sync(
         let done = match &s {
             Step::Add { .. } => {
                 let (fields, version) = add_fields(&s, &got);
-                plans
-                    .upsert(&r.plan, &item, fields, version, &holder)
-                    .await
+                plans.upsert(&r.plan, &item, fields, version, &holder).await
             }
             Step::Claim { .. } => plans.claim(&r.plan, &item, &holder, None, false).await,
             Step::Note { text, .. } => plans.note(&r.plan, &item, &note_text("", text)).await,
@@ -404,9 +403,9 @@ mod tests {
 
     use super::super::board::tests::{board, card};
     use super::*;
-    use crate::context::Api;
     use crate::auth::StaticToken;
     use crate::context::AnyCredential;
+    use crate::context::Api;
 
     const PLAN: &str = "plan_01TEST";
 
@@ -442,14 +441,28 @@ mod tests {
         d.pr = Some("inorbithr/eye#7".into());
         let b = board(vec![r, d, card("aa", "ready", &[])]);
         let out = sync_dry(&b, "inorbithr/eye").join("\n");
-        assert!(out.contains("--external-id 'scrum:inorbithr/eye/test' --json | jq -r .plan.id"), "{out}");
+        assert!(
+            out.contains("--external-id 'scrum:inorbithr/eye/test' --json | jq -r .plan.id"),
+            "{out}"
+        );
         assert!(out.contains(r"--title 'it'\''s here'"), "{out}");
-        assert!(out.contains("item claim \"$PLAN\" 'rr'\niohr coordinator item note \"$PLAN\" 'rr' 'in review'"), "{out}");
-        assert!(out.contains("item done \"$PLAN\" 'dd' --note 'done: inorbithr/eye#7'"), "{out}");
+        assert!(
+            out.contains(
+                "item claim \"$PLAN\" 'rr'\niohr coordinator item note \"$PLAN\" 'rr' 'in review'"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains("item done \"$PLAN\" 'dd' --note 'done: inorbithr/eye#7'"),
+            "{out}"
+        );
         assert!(out.contains("# set \"$PLAN\" 'aa' to ready"), "{out}");
 
         let mut b2 = b.clone();
-        b2.cards[1].planner = Some(Planner { plan: "plan_1".into(), item: "dd".into() });
+        b2.cards[1].planner = Some(Planner {
+            plan: "plan_1".into(),
+            item: "dd".into(),
+        });
         let out = sync_dry(&b2, "inorbithr/eye").join("\n");
         assert!(out.contains("PLAN='plan_1'  # from the board"), "{out}");
         assert!(out.contains("# dd: already synced as plan_1/dd"), "{out}");
@@ -473,7 +486,10 @@ mod tests {
         moved.cards[2].list = "review".into();
         assert_eq!(
             steps(&moved, Some(&r)),
-            [Step::Note { card: "go".into(), text: IN_REVIEW.into() }]
+            [Step::Note {
+                card: "go".into(),
+                text: IN_REVIEW.into()
+            }]
         );
     }
 
@@ -481,9 +497,10 @@ mod tests {
         let base = format!("/v1/coordinator/plans/{PLAN}");
         Mock::given(method("POST"))
             .and(path("/v1/coordinator/plans"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                json!({"plan": {"id": PLAN, "title": "test"}, "created": true}),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"plan": {"id": PLAN, "title": "test"}, "created": true})),
+            )
             .mount(server)
             .await;
         Mock::given(method("GET"))
@@ -533,20 +550,35 @@ mod tests {
         // The plan holds the done card and the ready card as the Planner would after the
         // adds, so the status writes find them.
         let items: Vec<Value> = b0.cards.iter().map(|c| item_of(c, "proposed")).collect();
-        mount(&server, &json!({"plan": {"id": PLAN}, "items": items, "notes": []}), false).await;
+        mount(
+            &server,
+            &json!({"plan": {"id": PLAN}, "items": items, "notes": []}),
+            false,
+        )
+        .await;
         let a = api(&server);
         let mut b = five();
-        let r = sync(&mut b, "inorbithr/eye", &Plans::new(&a, None), "test").await.unwrap();
+        let r = sync(&mut b, "inorbithr/eye", &Plans::new(&a, None), "test")
+            .await
+            .unwrap();
         assert!(r.created);
         assert_eq!(r.plan, PLAN);
         assert!(r.failed.is_empty(), "{:?}", r.failed);
         assert_eq!(r.written, ["bb", "rr", "go", "rv", "dd"]);
-        assert!(b.cards.iter().all(|c| c.planner.as_ref().is_some_and(|p| p.plan == PLAN && p.item == c.id)));
+        assert!(b.cards.iter().all(|c| {
+            c.planner
+                .as_ref()
+                .is_some_and(|p| p.plan == PLAN && p.item == c.id)
+        }));
         let seen = requests(&server).await;
         assert_eq!(seen[0], "POST /v1/coordinator/plans");
         assert!(seen.contains(&format!("POST /v1/coordinator/plans/{PLAN}/items/go/claim")));
         assert!(seen.contains(&format!("POST /v1/coordinator/plans/{PLAN}/items/rv/notes")));
-        assert!(r.sent.iter().any(|s| s.contains("item done 'plan_01TEST' 'dd' --note 'done: inorbithr/eye#7'")));
+        assert!(
+            r.sent
+                .iter()
+                .any(|s| s.contains("item done 'plan_01TEST' 'dd' --note 'done: inorbithr/eye#7'"))
+        );
         assert!(r.sent.iter().any(|s| s.contains("'rr' to ready")));
     }
 
@@ -555,16 +587,32 @@ mod tests {
         let server = MockServer::start().await;
         let mut b = five();
         for c in &mut b.cards {
-            c.planner = Some(Planner { plan: PLAN.into(), item: c.id.clone() });
+            c.planner = Some(Planner {
+                plan: PLAN.into(),
+                item: c.id.clone(),
+            });
         }
-        let items: Vec<Value> = b.cards.iter().map(|c| item_of(c, planner_status(&c.list))).collect();
+        let items: Vec<Value> = b
+            .cards
+            .iter()
+            .map(|c| item_of(c, planner_status(&c.list)))
+            .collect();
         let got = json!({"plan": {"id": PLAN}, "items": items,
             "notes": [{"item_id": "rv", "body": IN_REVIEW}]});
         mount(&server, &got, false).await;
         let a = api(&server);
-        let r = sync(&mut b, "inorbithr/eye", &Plans::new(&a, None), "test").await.unwrap();
-        assert_eq!((r.created, r.sent.len(), r.failed.len(), r.written.len()), (false, 0, 0, 0), "{r:?}");
-        assert_eq!(requests(&server).await, [format!("GET /v1/coordinator/plans/{PLAN}")]);
+        let r = sync(&mut b, "inorbithr/eye", &Plans::new(&a, None), "test")
+            .await
+            .unwrap();
+        assert_eq!(
+            (r.created, r.sent.len(), r.failed.len(), r.written.len()),
+            (false, 0, 0, 0),
+            "{r:?}"
+        );
+        assert_eq!(
+            requests(&server).await,
+            [format!("GET /v1/coordinator/plans/{PLAN}")]
+        );
     }
 
     #[tokio::test]
@@ -572,13 +620,31 @@ mod tests {
         let server = MockServer::start().await;
         let b0 = five();
         let items: Vec<Value> = b0.cards.iter().map(|c| item_of(c, "proposed")).collect();
-        mount(&server, &json!({"plan": {"id": PLAN}, "items": items, "notes": []}), true).await;
+        mount(
+            &server,
+            &json!({"plan": {"id": PLAN}, "items": items, "notes": []}),
+            true,
+        )
+        .await;
         let a = api(&server);
         let mut b = five();
-        let r = sync(&mut b, "inorbithr/eye", &Plans::new(&a, None), "test").await.unwrap();
+        let r = sync(&mut b, "inorbithr/eye", &Plans::new(&a, None), "test")
+            .await
+            .unwrap();
         assert_eq!(r.failed.len(), 1, "{:?}", r.failed);
-        assert!(r.failed[0].starts_with("iohr coordinator item claim 'plan_01TEST' 'go':"), "{:?}", r.failed);
-        assert!(r.written.contains(&"go".to_owned()), "the item exists, so its id is still written back");
-        assert!(r.sent.iter().any(|s| s.contains("item done 'plan_01TEST' 'dd'")));
+        assert!(
+            r.failed[0].starts_with("iohr coordinator item claim 'plan_01TEST' 'go':"),
+            "{:?}",
+            r.failed
+        );
+        assert!(
+            r.written.contains(&"go".to_owned()),
+            "the item exists, so its id is still written back"
+        );
+        assert!(
+            r.sent
+                .iter()
+                .any(|s| s.contains("item done 'plan_01TEST' 'dd'"))
+        );
     }
 }

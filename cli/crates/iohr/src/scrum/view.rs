@@ -33,7 +33,11 @@ fn hours(cards: &[&Card]) -> f64 {
 /// `11-14`, or `11-14 to 11-15` when the card spans days.
 pub(crate) fn span(c: &Card) -> String {
     let short = |d: &str| d.get(5..).unwrap_or(d).to_string();
-    if c.start == c.due { short(&c.start) } else { format!("{} to {}", short(&c.start), short(&c.due)) }
+    if c.start == c.due {
+        short(&c.start)
+    } else {
+        format!("{} to {}", short(&c.start), short(&c.due))
+    }
 }
 
 /// Idea numbers, with runs of three or more as `1 to 5`.
@@ -114,10 +118,11 @@ impl Look {
     }
 }
 
-
 /// A card's `x.section`, empty when it has none.
 pub(crate) fn section(c: &Card) -> &str {
-    c.x.get("section").and_then(Value::as_str).unwrap_or_default()
+    c.x.get("section")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
 }
 
 /// A card's `x.ideas`: the idea numbers it carries, empty when it has none.
@@ -163,13 +168,23 @@ fn cut(s: &str, n: usize) -> String {
 
 /// The longest card id, so ids line up.
 fn id_width(cards: &[&Card]) -> usize {
-    cards.iter().map(|c| c.id.chars().count()).max().unwrap_or(0)
+    cards
+        .iter()
+        .map(|c| c.id.chars().count())
+        .max()
+        .unwrap_or(0)
 }
 
 /// The board by list, Trello style.
 pub(crate) fn board_view(b: &Board, today: &str, look: &Look) -> String {
     let open: Vec<&Card> = b.cards.iter().filter(|c| c.list != "dropped").collect();
-    let w = id_width(&open.iter().chain(in_list(b, "dropped").iter()).copied().collect::<Vec<_>>());
+    let w = id_width(
+        &open
+            .iter()
+            .chain(in_list(b, "dropped").iter())
+            .copied()
+            .collect::<Vec<_>>(),
+    );
     let mut out = if look.color {
         let done: Vec<&Card> = open.iter().copied().filter(|c| c.list == "done").collect();
         format!(
@@ -177,7 +192,16 @@ pub(crate) fn board_view(b: &Board, today: &str, look: &Look) -> String {
             look.paint("1", &b.board),
             look.paint("2", &format!("updated {}", b.updated)),
             bar(done.len(), open.len(), 24, look),
-            look.paint("2", &format!("{} of {} cards done, {} of {} h", done.len(), open.len(), fmt_h(hours(&done)), fmt_h(hours(&open))))
+            look.paint(
+                "2",
+                &format!(
+                    "{} of {} cards done, {} of {} h",
+                    done.len(),
+                    open.len(),
+                    fmt_h(hours(&done)),
+                    fmt_h(hours(&open))
+                )
+            )
         )
     } else {
         format!("{} (updated {})\n", b.board, b.updated)
@@ -185,15 +209,28 @@ pub(crate) fn board_view(b: &Board, today: &str, look: &Look) -> String {
     for list in LISTS {
         let cards = in_list(b, list);
         if look.color {
-            let head = format!("{} {}", look.paint(list_sgr(list), "●"), look.paint(&format!("1;{}", list_sgr(list)), list));
+            let head = format!(
+                "{} {}",
+                look.paint(list_sgr(list), "●"),
+                look.paint(&format!("1;{}", list_sgr(list)), list)
+            );
             let count = format!("{}, {} h", n_cards(cards.len()), fmt_h(hours(&cards)));
             let _ = writeln!(out, "\n{head}  {}", look.paint("2", &count));
             let _ = writeln!(out, "{}", look.paint("2", &"─".repeat(look.width.min(100))));
         } else {
-            let _ = writeln!(out, "\n{list} ({}, {} h)", n_cards(cards.len()), fmt_h(hours(&cards)));
+            let _ = writeln!(
+                out,
+                "\n{list} ({}, {} h)",
+                n_cards(cards.len()),
+                fmt_h(hours(&cards))
+            );
         }
         for c in cards {
-            let _ = writeln!(out, "  {}", line(c, today, w, look.width.saturating_sub(2), look));
+            let _ = writeln!(
+                out,
+                "  {}",
+                line(c, today, w, look.width.saturating_sub(2), look)
+            );
         }
     }
     out
@@ -202,8 +239,16 @@ pub(crate) fn board_view(b: &Board, today: &str, look: &Look) -> String {
 /// A progress bar `n` of `total`, `cells` wide.
 fn bar(n: usize, total: usize, cells: usize, look: &Look) -> String {
     let full = (n * cells).checked_div(total).unwrap_or(0);
-    let (on, off) = if look.color { ("█", "░") } else { ("#", "-") };
-    format!("{}{}", look.paint("32", &on.repeat(full)), look.paint("90", &off.repeat(cells - full)))
+    let (on, off) = if look.color {
+        ("█", "░")
+    } else {
+        ("#", "-")
+    };
+    format!(
+        "{}{}",
+        look.paint("32", &on.repeat(full)),
+        look.paint("90", &off.repeat(cells - full))
+    )
 }
 
 fn flags(c: &Card, today: &str) -> Vec<&'static str> {
@@ -224,17 +269,53 @@ fn line(c: &Card, today: &str, id_w: usize, width: usize, look: &Look) -> String
     let ticks = format!("{done}/{}", c.checklist.len());
     let f = flags(c, today);
     if !look.color {
-        let tail = if f.is_empty() { String::new() } else { format!("  [{}]", f.join(", ")) };
-        return format!("{:<id_w$} {} {:>4} h  {:<14} {ticks:<4} {}{tail}", c.id, c.size, fmt_h(c.h()), span(c), c.title);
+        let tail = if f.is_empty() {
+            String::new()
+        } else {
+            format!("  [{}]", f.join(", "))
+        };
+        return format!(
+            "{:<id_w$} {} {:>4} h  {:<14} {ticks:<4} {}{tail}",
+            c.id,
+            c.size,
+            fmt_h(c.h()),
+            span(c),
+            c.title
+        );
     }
     // The same text as the painted line below, to count what is left for the title.
-    let head = format!("{:<id_w$} {} {:>4} h  {:<14}  {ticks:<4} ", c.id, c.size, fmt_h(c.h()), span(c));
-    let marks: String = f.iter().map(|m| format!("{m} ")).collect();
-    let room = width.saturating_sub(head.chars().count() + marks.chars().count()).max(12);
-    let ticks_sgr = if c.checklist.is_empty() || done == 0 { "2" } else if done == c.checklist.len() { "32" } else { "33" };
-    let painted_marks: String = f.iter().map(|m| look.paint(if *m == "late" { "1;31" } else { "1;33" }, m) + " ").collect();
+    let head = format!(
+        "{:<id_w$} {} {:>4} h  {:<14}  {ticks:<4} ",
+        c.id,
+        c.size,
+        fmt_h(c.h()),
+        span(c)
+    );
+    let marks: String = f.iter().fold(String::new(), |mut s, m| {
+        s.push_str(m);
+        s.push(' ');
+        s
+    });
+    let room = width
+        .saturating_sub(head.chars().count() + marks.chars().count())
+        .max(12);
+    let ticks_sgr = if c.checklist.is_empty() || done == 0 {
+        "2"
+    } else if done == c.checklist.len() {
+        "32"
+    } else {
+        "33"
+    };
+    let painted_marks: String = f
+        .iter()
+        .map(|m| look.paint(if *m == "late" { "1;31" } else { "1;33" }, m) + " ")
+        .collect();
     let title = cut(&c.title, room);
-    let title = if c.list == "done" || c.list == "dropped" { look.paint("2", &title) } else { title };
+    let title = if c.list == "done" || c.list == "dropped" {
+        look.paint("2", &title)
+    } else {
+        title
+    };
     format!(
         "{} {} {}  {}  {} {painted_marks}{title}",
         look.paint("1", &format!("{:<id_w$}", c.id)),
@@ -271,21 +352,56 @@ pub(crate) fn list<'a>(b: &'a Board, f: &Filter, today: &str) -> Vec<&'a Card> {
 pub(crate) fn rows(cards: &[&Card], today: &str, look: &Look) -> String {
     let mut out = String::new();
     let w = id_width(cards);
-    let sw = cards.iter().map(|c| section(c).chars().count()).max().unwrap_or(0).max(7);
+    let sw = cards
+        .iter()
+        .map(|c| section(c).chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(7);
     for c in cards {
         let lead = format!("{:<7} {:<sw$} ", c.list, section(c));
-        let rest = line(c, today, w, look.width.saturating_sub(lead.chars().count()), look);
-        let lead = if look.color { format!("{} {} ", look.paint(list_sgr(&c.list), &format!("{:<7}", c.list)), look.paint("2", &format!("{:<sw$}", section(c)))) } else { lead };
+        let rest = line(
+            c,
+            today,
+            w,
+            look.width.saturating_sub(lead.chars().count()),
+            look,
+        );
+        let lead = if look.color {
+            format!(
+                "{} {} ",
+                look.paint(list_sgr(&c.list), &format!("{:<7}", c.list)),
+                look.paint("2", &format!("{:<sw$}", section(c)))
+            )
+        } else {
+            lead
+        };
         let _ = writeln!(out, "{lead}{rest}");
     }
-    let _ = writeln!(out, "{}", look.paint("2", &format!("{}, {} h", n_cards(cards.len()), fmt_h(hours(cards)))));
+    let _ = writeln!(
+        out,
+        "{}",
+        look.paint(
+            "2",
+            &format!("{}, {} h", n_cards(cards.len()), fmt_h(hours(cards)))
+        )
+    );
     out
 }
 
 /// One card, every field, for people.
 pub(crate) fn show(c: &Card) -> String {
     let mut out = format!("{}: {}\n", c.id, c.title);
-    let _ = writeln!(out, "  list {}, section {}, size {}, {} h, {} to {}", c.list, section(c), c.size, fmt_h(c.h()), c.start, c.due);
+    let _ = writeln!(
+        out,
+        "  list {}, section {}, size {}, {} h, {} to {}",
+        c.list,
+        section(c),
+        c.size,
+        fmt_h(c.h()),
+        c.start,
+        c.due
+    );
     let mut field = |name: &str, v: &[String]| {
         if !v.is_empty() {
             let _ = writeln!(out, "  {name}: {}", v.join(", "));
@@ -311,7 +427,13 @@ pub(crate) fn show(c: &Card) -> String {
     }
     let _ = writeln!(out, "checklist");
     for (i, x) in c.checklist.iter().enumerate() {
-        let _ = writeln!(out, "  {}. [{}] {}", i + 1, if x.done { "x" } else { " " }, x.text);
+        let _ = writeln!(
+            out,
+            "  {}. [{}] {}",
+            i + 1,
+            if x.done { "x" } else { " " },
+            x.text
+        );
     }
     for (name, v) in [("acceptance", &c.acceptance), ("tests", &c.tests)] {
         let _ = writeln!(out, "{name}");
@@ -359,7 +481,11 @@ pub(crate) struct Blocked {
 
 /// "1 card" or "n cards".
 pub(crate) fn n_cards(n: usize) -> String {
-    if n == 1 { "1 card".into() } else { format!("{n} cards") }
+    if n == 1 {
+        "1 card".into()
+    } else {
+        format!("{n} cards")
+    }
 }
 
 /// The plan of the cards still to build (backlog, ready, doing): hours by day, late and blocked
@@ -399,7 +525,11 @@ pub(crate) fn plan(b: &Board, today: &str) -> Plan {
     let cap = b.day_hours.unwrap_or(DAY_HOURS);
     let days = by_day
         .into_iter()
-        .map(|(d, h)| Day { date: fmt_date(d), hours: (h * 10.0).round() / 10.0, over: h > cap })
+        .map(|(d, h)| Day {
+            date: fmt_date(d),
+            hours: (h * 10.0).round() / 10.0,
+            over: h > cap,
+        })
         .collect();
     let (chain, chain_hours) = longest_chain(b);
     Plan {
@@ -409,11 +539,18 @@ pub(crate) fn plan(b: &Board, today: &str) -> Plan {
         review_cards: review.len(),
         review_hours: hours(&review),
         days,
-        late: open.iter().filter(|c| c.late(today)).map(|c| c.id.clone()).collect(),
+        late: open
+            .iter()
+            .filter(|c| c.late(today))
+            .map(|c| c.id.clone())
+            .collect(),
         blocked: open
             .iter()
             .filter(|c| !c.blocked_by.is_empty())
-            .map(|c| Blocked { id: c.id.clone(), by: c.blocked_by.clone() })
+            .map(|c| Blocked {
+                id: c.id.clone(),
+                by: c.blocked_by.clone(),
+            })
             .collect(),
         chain,
         chain_hours,
@@ -422,8 +559,17 @@ pub(crate) fn plan(b: &Board, today: &str) -> Plan {
 
 /// The chain still to build with the most hours. A cycle (which `check` refuses) counts as no dependency.
 fn longest_chain(b: &Board) -> (Vec<String>, f64) {
-    let by_id: HashMap<&str, &Card> = b.cards.iter().filter(|c| c.to_build()).map(|c| (c.id.as_str(), c)).collect();
+    let by_id: HashMap<&str, &Card> = b
+        .cards
+        .iter()
+        .filter(|c| c.to_build())
+        .map(|c| (c.id.as_str(), c))
+        .collect();
     let mut memo: HashMap<&str, (f64, Option<&str>)> = HashMap::new();
+    #[allow(
+        clippy::items_after_statements,
+        reason = "the helper sits beside its only caller"
+    )]
     fn walk<'a>(
         id: &'a str,
         by_id: &HashMap<&'a str, &'a Card>,
@@ -484,14 +630,41 @@ pub(crate) fn plan_text(p: &Plan) -> String {
         fmt_h(p.day_hours)
     );
     for d in &p.days {
-        let _ = writeln!(out, "  {}  {:>5} h{}", d.date, fmt_h(d.hours), if d.over { format!("  over {} h", fmt_h(p.day_hours)) } else { String::new() });
+        let _ = writeln!(
+            out,
+            "  {}  {:>5} h{}",
+            d.date,
+            fmt_h(d.hours),
+            if d.over {
+                format!("  over {} h", fmt_h(p.day_hours))
+            } else {
+                String::new()
+            }
+        );
     }
-    let _ = writeln!(out, "\nlate: {}", if p.late.is_empty() { "none".into() } else { p.late.join(", ") });
-    let _ = writeln!(out, "blocked:{}", if p.blocked.is_empty() { " none" } else { "" });
+    let _ = writeln!(
+        out,
+        "\nlate: {}",
+        if p.late.is_empty() {
+            "none".into()
+        } else {
+            p.late.join(", ")
+        }
+    );
+    let _ = writeln!(
+        out,
+        "blocked:{}",
+        if p.blocked.is_empty() { " none" } else { "" }
+    );
     for x in &p.blocked {
         let _ = writeln!(out, "  {}: {}", x.id, x.by.join("; "));
     }
-    let _ = writeln!(out, "longest chain ({} h): {}", fmt_h(p.chain_hours), p.chain.join(" -> "));
+    let _ = writeln!(
+        out,
+        "longest chain ({} h): {}",
+        fmt_h(p.chain_hours),
+        p.chain.join(" -> ")
+    );
     out
 }
 
@@ -505,7 +678,11 @@ fn table(out: &mut String, head: &[&str], rows: Vec<Vec<String>>) {
     for r in rows {
         out.push('|');
         for c in r {
-            out.push_str(&if c.is_empty() { " |".to_string() } else { format!(" {} |", cell(&c)) });
+            if c.is_empty() {
+                out.push_str(" |");
+            } else {
+                let _ = write!(out, " {} |", cell(&c));
+            }
         }
         out.push('\n');
     }
@@ -523,20 +700,33 @@ pub(crate) fn planner_status(list: &str) -> &'static str {
 }
 
 /// The README region: the lists, then the board by list.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the README region read top to bottom"
+)]
 pub(crate) fn render(b: &Board) -> String {
     let mut out = String::from("## Lists (Trello columns)\n\n");
     let meaning = [
         ("backlog", "Not ready: blocked, or waiting on the owner"),
         ("ready", "Everything needed is known; can start"),
         ("doing", "Being built now"),
-        ("review", "Built, being checked (tests, screenshots); on sync its Planner item gets the note \"in review\""),
-        ("done", "Every checklist item ticked, with a PR or written evidence"),
+        (
+            "review",
+            "Built, being checked (tests, screenshots); on sync its Planner item gets the note \"in review\"",
+        ),
+        (
+            "done",
+            "Every checklist item ticked, with a PR or written evidence",
+        ),
         ("dropped", "Abandoned, with the reason in `notes`"),
     ];
     table(
         &mut out,
         &["List", "Planner status", "Meaning"],
-        meaning.iter().map(|(l, m)| vec![l.to_string(), planner_status(l).into(), m.to_string()]).collect(),
+        meaning
+            .iter()
+            .map(|(l, m)| vec![l.to_string(), planner_status(l).into(), m.to_string()])
+            .collect(),
     );
     let all: Vec<&Card> = b.cards.iter().collect();
     let (first, last) = (
@@ -561,7 +751,15 @@ pub(crate) fn render(b: &Board) -> String {
         match list {
             "ready" => table(
                 &mut out,
-                &["Card", "Section", "Size", "Hours", "Start to due", "Depends on", "Ideas"],
+                &[
+                    "Card",
+                    "Section",
+                    "Size",
+                    "Hours",
+                    "Start to due",
+                    "Depends on",
+                    "Ideas",
+                ],
                 cards
                     .iter()
                     .map(|c| {
@@ -582,7 +780,15 @@ pub(crate) fn render(b: &Board) -> String {
                 &["Card", "Section", "Hours", "Dates", "Blocked by"],
                 cards
                     .iter()
-                    .map(|c| vec![c.id.clone(), section(c).to_string(), fmt_h(c.h()), span(c), c.blocked_by.join("; ")])
+                    .map(|c| {
+                        vec![
+                            c.id.clone(),
+                            section(c).to_string(),
+                            fmt_h(c.h()),
+                            span(c),
+                            c.blocked_by.join("; "),
+                        ]
+                    })
                     .collect(),
             ),
             _ => table(
@@ -613,12 +819,21 @@ pub(crate) fn render(b: &Board) -> String {
 /// The README with its region replaced by [`render`]. Refused when a marker is missing.
 pub(crate) fn render_readme(old: &str, b: &Board) -> Result<String, Error> {
     let (Some(s), Some(e)) = (old.find(START), old.find(END)) else {
-        return Err(Error::Refused(vec![format!("the README has no {START} ... {END} region to render into")]));
+        return Err(Error::Refused(vec![format!(
+            "the README has no {START} ... {END} region to render into"
+        )]));
     };
     if e < s {
-        return Err(Error::Refused(vec![format!("{END} comes before {START} in the README")]));
+        return Err(Error::Refused(vec![format!(
+            "{END} comes before {START} in the README"
+        )]));
     }
-    Ok(format!("{}{START}\n\n{}\n{}", &old[..s], render(b), &old[e..]))
+    Ok(format!(
+        "{}{START}\n\n{}\n{}",
+        &old[..s],
+        render(b),
+        &old[e..]
+    ))
 }
 
 #[cfg(test)]
@@ -626,6 +841,10 @@ mod tests {
     use super::*;
     use crate::scrum::board::tests::{board, card};
 
+    #[allow(
+        clippy::many_single_char_names,
+        reason = "short names for a few fixture cards"
+    )]
     #[test]
     fn next_plan_and_ideas() {
         let mut a = card("aa", "done", &[]);
@@ -641,22 +860,52 @@ mod tests {
         assert_eq!(ids(next(&b, 3)), vec!["bb"], "deps done and nothing blocks");
 
         let p = plan(&b, "2026-11-16");
-        assert_eq!((p.open_cards, p.open_hours), (3, 8.0), "the review card is built, not to build");
+        assert_eq!(
+            (p.open_cards, p.open_hours),
+            (3, 8.0),
+            "the review card is built, not to build"
+        );
         assert_eq!((p.review_cards, p.review_hours), (1, 9.0));
-        assert_eq!(p.chain, vec!["bb", "cc"], "the done card is not on the open chain");
+        assert_eq!(
+            p.chain,
+            vec!["bb", "cc"],
+            "the done card is not on the open chain"
+        );
         assert_eq!(p.chain_hours, 6.0);
-        assert_eq!(p.late, vec!["bb", "cc", "dd"], "a review card waits for the owner, it is not late");
-        assert_eq!(p.days, vec![
-            Day { date: "2026-11-14".into(), hours: 4.0, over: false },
-            Day { date: "2026-11-15".into(), hours: 4.0, over: false },
-        ]);
-        assert_eq!(p.day_hours, DAY_HOURS, "no day_hours on the board: one person's day");
+        assert_eq!(
+            p.late,
+            vec!["bb", "cc", "dd"],
+            "a review card waits for the owner, it is not late"
+        );
+        assert_eq!(
+            p.days,
+            vec![
+                Day {
+                    date: "2026-11-14".into(),
+                    hours: 4.0,
+                    over: false
+                },
+                Day {
+                    date: "2026-11-15".into(),
+                    hours: 4.0,
+                    over: false
+                },
+            ]
+        );
+        assert_eq!(
+            p.day_hours, DAY_HOURS,
+            "no day_hours on the board: one person's day"
+        );
 
         let mut tight = b.clone();
         tight.day_hours = Some(3.0);
         let p = plan(&tight, "2026-11-16");
         assert_eq!(p.day_hours, 3.0);
-        assert!(p.days.iter().all(|d| d.over), "4 h on a 3 h day is over: {:?}", p.days);
+        assert!(
+            p.days.iter().all(|d| d.over),
+            "4 h on a 3 h day is over: {:?}",
+            p.days
+        );
         assert!(plan_text(&p).contains("a day holds 3 h") && plan_text(&p).contains("over 3 h"));
 
         assert_eq!(ideas(&[1, 2, 3, 4, 5, 8, 9, 10]), "1 to 5, 8 to 10");
@@ -672,9 +921,16 @@ mod tests {
         let new = render_readme(&old, &b).expect("render");
         assert!(new.starts_with("# Board\n\nby hand\n\n"));
         assert!(new.ends_with(&format!("{END}\n\n## Kept\n")));
-        assert!(new.contains("| aa |  | S | 2 | 11-14 to 11-15 | | |"), "{new}");
+        assert!(
+            new.contains("| aa | | S | 2 | 11-14 to 11-15 | | |"),
+            "{new}"
+        );
         assert!(new.contains("Empty: backlog, doing, review, done, dropped."));
-        assert_eq!(render_readme(&new, &b).expect("again"), new, "rendering twice changes nothing");
+        assert_eq!(
+            render_readme(&new, &b).expect("again"),
+            new,
+            "rendering twice changes nothing"
+        );
         assert!(render_readme("no markers", &b).is_err());
     }
 
@@ -683,7 +939,8 @@ mod tests {
         let mut cards = Vec::new();
         for (i, list) in LISTS.iter().enumerate() {
             let mut c = card(&format!("card-{i}"), list, &[]);
-            c.title = format!("A card in {list} with a title long enough to be cut by a narrow screen");
+            c.title =
+                format!("A card in {list} with a title long enough to be cut by a narrow screen");
             c.x.insert("section".into(), serde_json::json!("board"));
             cards.push(c);
         }
@@ -706,7 +963,11 @@ mod tests {
             let bare = console::strip_ansi_codes(l);
             assert!(bare.chars().count() <= 80, "cut to the width: {bare}");
         }
-        assert_eq!(fmt_h(hours(&[])), "0", "an empty sum is -0.0; it must print 0");
+        assert_eq!(
+            fmt_h(hours(&[])),
+            "0",
+            "an empty sum is -0.0; it must print 0"
+        );
     }
 
     #[test]
@@ -725,10 +986,16 @@ mod tests {
         a.x.insert("ideas".into(), serde_json::json!([1, 2, 3, 7]));
         a.x.insert("track".into(), serde_json::json!("blue"));
         let b = board(vec![a, card("bb", "ready", &[])]);
-        let only = Filter { section: Some("fit".into()), ..Filter::default() };
+        let only = Filter {
+            section: Some("fit".into()),
+            ..Filter::default()
+        };
         assert_eq!(list(&b, &only, "2026-11-14").len(), 1);
         let text = show(&b.cards[0]);
-        assert!(text.contains("section fit") && text.contains("ideas: 1 to 3, 7"), "{text}");
+        assert!(
+            text.contains("section fit") && text.contains("ideas: 1 to 3, 7"),
+            "{text}"
+        );
         assert!(text.contains("x.track: \"blue\""), "{text}");
     }
 }

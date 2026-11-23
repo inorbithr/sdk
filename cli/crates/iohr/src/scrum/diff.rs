@@ -14,19 +14,32 @@ pub(crate) struct Change {
 /// Every change from `old` to `new`, in `new`'s card order, removed cards last.
 pub(crate) fn changes(old: &Board, new: &Board) -> Vec<Change> {
     let mut out = Vec::new();
-    let mut push = |card: &str, what: String| out.push(Change { card: card.to_owned(), what });
+    let mut push = |card: &str, what: String| {
+        out.push(Change {
+            card: card.to_owned(),
+            what,
+        });
+    };
     for c in &new.cards {
         match old.cards.iter().find(|o| o.id == c.id) {
             None => push(&c.id, format!("added to {}: {}", c.list, c.title)),
             Some(o) => card_changes(o, c).into_iter().for_each(|w| push(&c.id, w)),
         }
     }
-    for o in old.cards.iter().filter(|o| new.cards.iter().all(|c| c.id != o.id)) {
+    for o in old
+        .cards
+        .iter()
+        .filter(|o| new.cards.iter().all(|c| c.id != o.id))
+    {
         push(&o.id, "removed from the board".into());
     }
     out
 }
 
+#[allow(
+    clippy::many_single_char_names,
+    reason = "short names for a ported, local diff"
+)]
 fn card_changes(o: &Card, c: &Card) -> Vec<String> {
     let mut w = Vec::new();
     if o.list != c.list {
@@ -45,13 +58,21 @@ fn card_changes(o: &Card, c: &Card) -> Vec<String> {
         }
     }
     if c.notes != o.notes {
-        let line = c.notes.as_deref().and_then(|n| n.lines().last()).unwrap_or_default();
+        let line = c
+            .notes
+            .as_deref()
+            .and_then(|n| n.lines().last())
+            .unwrap_or_default();
         if !line.is_empty() {
             w.push(format!("note: {line}"));
         }
     }
     if o.blocked_by != c.blocked_by {
-        w.push(if c.blocked_by.is_empty() { "unblocked".into() } else { format!("blocked by {}", c.blocked_by.join(", ")) });
+        w.push(if c.blocked_by.is_empty() {
+            "unblocked".into()
+        } else {
+            format!("blocked by {}", c.blocked_by.join(", "))
+        });
     }
     if let Some(pr) = c.pr.as_ref().filter(|_| o.pr != c.pr) {
         w.push(format!("PR {pr}"));
@@ -59,7 +80,11 @@ fn card_changes(o: &Card, c: &Card) -> Vec<String> {
     if o.title != c.title {
         w.push(format!("renamed: {}", c.title));
     }
-    for (name, a, b) in [("start", &o.start, &c.start), ("due", &o.due, &c.due), ("size", &o.size, &c.size)] {
+    for (name, a, b) in [
+        ("start", &o.start, &c.start),
+        ("due", &o.due, &c.due),
+        ("size", &o.size, &c.size),
+    ] {
         if a != b {
             w.push(format!("{name} {a} → {b}"));
         }
@@ -76,14 +101,18 @@ fn card_changes(o: &Card, c: &Card) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scrum::change;
     use crate::scrum::board::tests::{board, card};
+    use crate::scrum::change;
 
     const T: &str = "2026-11-14";
 
     #[test]
     fn a_move_a_tick_a_note_and_an_add_are_named() {
-        let old = board(vec![card("aa", "ready", &[]), card("bb", "ready", &[]), card("gone", "backlog", &[])]);
+        let old = board(vec![
+            card("aa", "ready", &[]),
+            card("bb", "ready", &[]),
+            card("gone", "backlog", &[]),
+        ]);
         let mut new = old.clone();
         change::start(&mut new, "aa", None, T).expect("start");
         change::tick(&mut new, "aa", 2, false).expect("tick");
@@ -91,8 +120,16 @@ mod tests {
         new.cards.retain(|c| c.id != "gone");
         new.cards.push(card("cc", "backlog", &[]));
 
-        let got: Vec<String> = changes(&old, &new).iter().map(|c| format!("{}: {}", c.card, c.what)).collect();
-        let note = new.cards[1].notes.as_deref().and_then(|n| n.lines().last()).expect("note line").to_owned();
+        let got: Vec<String> = changes(&old, &new)
+            .iter()
+            .map(|c| format!("{}: {}", c.card, c.what))
+            .collect();
+        let note = new.cards[1]
+            .notes
+            .as_deref()
+            .and_then(|n| n.lines().last())
+            .expect("note line")
+            .to_owned();
         assert_eq!(
             got,
             [
@@ -104,6 +141,9 @@ mod tests {
             ]
         );
         assert!(note.contains("agent is on it"), "{note}");
-        assert!(changes(&new, &new).is_empty(), "nothing changed, nothing listed");
+        assert!(
+            changes(&new, &new).is_empty(),
+            "nothing changed, nothing listed"
+        );
     }
 }
