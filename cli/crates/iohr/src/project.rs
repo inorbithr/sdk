@@ -342,20 +342,20 @@ pub fn cloud_steps(name: &str) -> Vec<Step> {
 
 /// What [`write_files`] did with each path of the template.
 #[derive(Debug, Default, PartialEq, Eq)]
-struct Written {
+pub(crate) struct Written {
     /// Made now: the file was not there.
-    made: Vec<String>,
+    pub(crate) made: Vec<String>,
     /// Already there with exactly these bytes: not touched.
-    same: Vec<String>,
+    pub(crate) same: Vec<String>,
     /// Already there with other bytes (the person's own, or from an earlier init): not touched.
-    kept: Vec<String>,
+    pub(crate) kept: Vec<String>,
 }
 
 /// Writes the rendered files under `dir`, making it first. A path in `programs` gets the
 /// executable bit when it is made. A file that is already there is never written: the same
 /// bytes are `same`, any other bytes are `kept` (init run again in its folder leaves what a
 /// person changed), so nothing is written twice and nothing is overwritten.
-fn write_files(
+pub(crate) fn write_files(
     dir: &Path,
     files: &[(String, String)],
     programs: &[String],
