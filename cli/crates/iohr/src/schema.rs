@@ -331,19 +331,25 @@ pub fn check_tree(root: &Path) -> Result<Report, String> {
     for f in &tree.found {
         check_type(&schemas, f, &mut report);
     }
-    if report.types == 0 {
-        // A mistyped folder must not look green.
-        report.fail(".", "no schema found (<area>/<name>/v<major>.json)");
-    }
     // The manifest is optional; when it is there it and the tree must agree.
-    match Manifest::read(root) {
+    let has_manifest = match Manifest::read(root) {
         Ok(Some(m)) => {
             for p in m.problems(&tree.families) {
                 report.problems.push(p);
             }
+            true
         }
-        Ok(None) => {}
-        Err(why) => report.fail(MANIFEST_FILE, why),
+        Ok(None) => false,
+        Err(why) => {
+            report.fail(MANIFEST_FILE, why);
+            true
+        }
+    };
+    if report.types == 0 && !has_manifest {
+        // A mistyped folder must not look green. A manifest marks the folder as the project's
+        // schemas tree (`iohr project init` writes an empty one), so no schema yet is fine there;
+        // a type it lists without a file is still a problem above.
+        report.fail(".", "no schema found (<area>/<name>/v<major>.json)");
     }
     report.problems.sort_by(|a, b| a.target.cmp(&b.target));
     Ok(report)
@@ -612,6 +618,28 @@ mod tests {
         assert_eq!(
             problems(t.path()),
             [".: no schema found (<area>/<name>/v<major>.json)"]
+        );
+    }
+
+    #[test]
+    fn an_empty_manifest_with_no_schema_yet_passes() {
+        // What `iohr project init` writes: the folder is the project's, it just has no type yet.
+        let t = tempfile::tempdir().unwrap();
+        put(t.path(), "manifest.json", r#"{ "schemas": {} }"#);
+        assert_eq!(problems(t.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_manifest_listing_a_type_with_no_file_still_fails() {
+        let t = tempfile::tempdir().unwrap();
+        put(
+            t.path(),
+            "manifest.json",
+            r#"{ "schemas": { "acme/order": { "visibility": "account", "status": "draft" } } }"#,
+        );
+        assert_eq!(
+            problems(t.path()),
+            ["acme/order: is listed in manifest.json but has no v<major>.json"]
         );
     }
 
