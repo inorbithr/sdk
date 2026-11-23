@@ -30,6 +30,7 @@ Build:
   api          Make one authenticated call and print the answer
   openapi      The OpenAPI document for this credential
   lab          Check lab documents kept in your repository
+  schema       Check a project's own JSON Schemas, with their examples
   decisions    Read and write RFCs, PRDs and ADRs in Decisions
 
 Agents:

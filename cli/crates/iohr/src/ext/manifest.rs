@@ -150,6 +150,7 @@ pub const RESERVED: &[&str] = &[
     // still calls it fails as unknown rather than running someone else's program.
     "rfc",
     "runner",
+    "schema",
     "sdk",
     "session",
     "shell",

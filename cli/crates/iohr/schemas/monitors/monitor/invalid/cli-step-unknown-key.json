@@ -1,0 +1,1 @@
+{ "check": [{ "name": "eye-cli-chain", "target": { "cli": "eye" }, "steps": [{ "argv": ["scrum", "next", "--json"], "shell": "sh -c" }] }] }

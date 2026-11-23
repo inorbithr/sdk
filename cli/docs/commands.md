@@ -48,6 +48,7 @@ ends its `--help` with real examples.
 | `iohr api <METHOD> <PATH>` | One API call | [`iohr api`](sdk.md#iohr-api) |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` | [SDKs and the API](sdk.md#iohr-openapi-pull) |
 | `iohr lab check` | Check RFC and study files offline | [below](#iohr-lab-check) |
+| `iohr schema check` | Check a project's JSON Schemas, their examples and invalid cases | [below](#iohr-schema-check) |
 | `iohr decisions ...` | RFCs, PRDs, ADRs and studies in Decisions | [below](#iohr-decisions) |
 
 ### Agents
@@ -117,7 +118,7 @@ names stays, and `--json` or a pipe gives every cell whole. `iohr context` draws
 the same way. Plain output keeps the
 table alone, and an empty list keeps its header line, so scripts read the same bytes.
 
-The other checks are drawn the same way on a terminal: `iohr lab check`, `iohr memory check`,
+The other checks are drawn the same way on a terminal: `iohr lab check`, `iohr schema check`, `iohr memory check`,
 `iohr memory drift` (its code part), `iohr sdk check` and `iohr ext verify`. Each problem is a
 row with its mark, where it is, what is wrong, and labelled lines under it (the `rule` that
 found it, the operations a moved profile gained `+` and lost `-`, the `fix`). A memory finding
@@ -246,6 +247,34 @@ redaction on public documents as a reader without clearance sees them. Text insi
   matched.
 
 It works offline and exits 1 with every finding.
+
+## `iohr schema check`
+
+```sh
+iohr schema check [DIR] [--json]
+```
+
+Checks a project's own JSON Schemas (RFC 0234) against
+one layout: `DIR/<area>/<name>/v<major>.json`, with the examples beside it in `examples/`
+and the cases that must fail in `invalid/`. The validator is JSON Schema draft 2020-12 with
+`format` checked.
+
+- `DIR` defaults to `schemas`.
+- Each schema needs an `$id` that ends in its own path (`.../<area>/<name>/v0.json`) and is
+  unique in the tree, and it has to compile.
+- Every `examples/*.json` must validate, every `invalid/*.json` must be rejected, and both
+  folders must hold at least one file.
+- A `$ref` is answered from memory: the schemas of the tree and the three that ship inside
+  `iohr` (`scrum/card`, `scrum/board`, `monitors/monitor`, under
+  `https://schemas.inorbit.hr/iohr/`). A `$ref` to anything else is refused, never fetched.
+- Symbolic links and hidden folders are skipped, a file over 1 MiB is a problem, and a
+  tree deeper than 6 levels is not read past that.
+- A problem names the file and the field (a JSON pointer such as `/checklist/0/done`) and
+  the schema rule that failed, never the value.
+
+It works offline. It prints one `where: what` line per problem (a table on a terminal)
+and exits 1; a missing folder is a usage error, exit 2. `--json` prints
+`{dir, types, examples, invalid, problems:[{target, message}]}`.
 
 ## `iohr decisions`
 

@@ -39,6 +39,7 @@ mod project_space;
 mod project_template;
 mod runner;
 mod runner_ops;
+mod schema;
 mod sdk;
 mod sdk_add;
 pub(crate) mod session;
@@ -55,7 +56,7 @@ use clap::CommandFactory as _;
 use crate::Env;
 use crate::cli::{
     AccountsCommand, AuthCommand, BrowserCommand, Cli, Command, ExtCommand, LabCommand,
-    OpenapiCommand, ProjectCommand, SdkCommand,
+    OpenapiCommand, ProjectCommand, SchemaCommand, SdkCommand,
 };
 use crate::error::Error;
 use crate::output::Out;
@@ -81,6 +82,7 @@ fn calls_no_api(command: Option<&Command>) -> bool {
 /// # Errors
 ///
 /// [`Error`], whose [`exit_code`](Error::exit_code) the binary returns.
+#[allow(clippy::too_many_lines, reason = "one arm per command")]
 pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
     let out = Out {
         json: cli.global.json,
@@ -165,6 +167,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Sync(args) => atlas::sync(g, &env, &args, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
+        Command::Schema(SchemaCommand::Check(args)) => schema::check(&args, out),
         Command::Decisions(cmd) => decisions::run(g, &env, cmd, out).await,
         Command::Runner(cmd) => Box::pin(runner::run(g, &env, cmd, out)).await,
         Command::Session(args) => session::open(g, &args, out).await,

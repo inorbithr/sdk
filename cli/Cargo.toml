@@ -41,6 +41,9 @@ quote = "1"
 # walked directly.
 html5ever = "0.40"
 markup5ever_rcdom = "0.40"
+# One JSON Schema validator for the CLI (RFC 0234), pinned exactly. No default features: no
+# network resolver and no TLS, `$ref`s are served from memory.
+jsonschema = { version = "=0.63.0", default-features = false }
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl"] }
 # Held at 0.8: typify's API takes schemars 0.8 types (`RootSchema`); see the `ignore` in
 # .github/dependabot.yml. Moves to 1.x with typify (oxidecomputer/typify#886).

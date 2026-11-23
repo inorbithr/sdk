@@ -76,6 +76,7 @@ not `iohr` itself.
 | flate2 (pure Rust backend) | Extensions: the gzip of an extension's layer; the tar inside is read by `iohr` itself, one regular file only |
 | semver | Extensions: the newest release among a registry's tags; the version checks of `iohr upgrade`, the runner and the toolchain check |
 | regex (no Unicode tables but the Perl classes; iohr and iohr-lab) | `iohr lab check`: the redaction rules are regular expressions published as data (`spec/lab/rules.json`); also template answers and the memory text checks |
+| jsonschema (pinned `=0.63.0`, no default features: no network resolvers, no CLI) | `iohr schema check`: validates a project's examples and invalid cases against its JSON Schemas (draft 2020-12, `$ref`s answered from memory) |
 
 The OCI registry client is written here over reqwest ([ADR 0012](../../docs/adr/0012-extensions.md)):
 the published crates added a licence outside `deny.toml` and about 30 crates for four

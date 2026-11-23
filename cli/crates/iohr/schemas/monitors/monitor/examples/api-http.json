@@ -1,0 +1,14 @@
+{
+  "check": [
+    {
+      "name": "eye-api",
+      "label": "eye API",
+      "category": "availability",
+      "tags": { "app": "eye", "part": "api" },
+      "target": "http://127.0.0.1:7171/api/health",
+      "every": "60s",
+      "fail_after": 2,
+      "expect": { "status": 200, "max_ms": 2000, "headers": { "content-type": "application/json" } }
+    }
+  ]
+}

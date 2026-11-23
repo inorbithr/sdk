@@ -16,6 +16,7 @@ pub mod kb;
 pub mod memory;
 pub mod project;
 pub mod roles;
+pub mod schema;
 pub mod template;
 
 mod access;
