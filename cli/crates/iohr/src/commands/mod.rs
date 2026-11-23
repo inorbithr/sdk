@@ -41,6 +41,7 @@ mod project_template;
 mod runner;
 mod runner_ops;
 mod schema;
+mod scrum;
 mod sdk;
 mod sdk_add;
 pub(crate) mod session;

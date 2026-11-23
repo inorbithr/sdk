@@ -49,6 +49,7 @@ ends its `--help` with real examples.
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` | [SDKs and the API](sdk.md#iohr-openapi-pull) |
 | `iohr lab check` | Check RFC and study files offline | [below](#iohr-lab-check) |
 | `iohr schemas` | List, show, validate, check and scaffold a project's JSON Schemas (`new`, `bump`, `deprecate`) | [below](#iohr-schemas) |
+| `iohr atlas scrum ...` | The project's scrum board in `atlas/scrum/board.json`: views, guarded changes, `sync` to the Planner | [below](#iohr-atlas-scrum) |
 | `iohr monitors …` | Monitors kept as files in `.inorbit/monitors/`: check, run, list, show, history, enable, disable, delete, export, install | [below](#iohr-monitors) |
 | `iohr decisions ...` | RFCs, PRDs, ADRs and studies in Decisions | [below](#iohr-decisions) |
 
@@ -311,6 +312,47 @@ iohr schemas deprecate <area>/<name> [--replaced-by <area>/<name>] [--dir DIR] [
 - Every write command takes `--dry-run` (prints `would write ...`, writes nothing) and ends by
   running the check; a problem there is exit 1. A refusal is a usage error, exit 2.
   The old name `iohr schema` is gone (it was never released).
+
+## `iohr atlas scrum`
+
+```sh
+iohr atlas scrum [board | list | show | next | plan | capacity | add | edit | move | start | done | tick | note | check | render | sync | migrate] [--board FILE] [--watch] [--json]
+```
+
+The project's scrum board (RFC 0234): `atlas/scrum/board.json` is the one source, validated
+by the `scrum/card/v0` and `scrum/board/v0` schemas that ship inside `iohr`. `iohr project
+init` and `iohr atlas init` write an empty board and a README whose `scrum:board:start` ..
+`scrum:board:end` region `render` fills. `--board` names another file; the default is the
+nearest `atlas/scrum/board.json` up from the current folder.
+
+- Views, read only: `board` (the default), `list` (`--list`, `--section`, `--label`,
+  `--late`, `--blocked`), `show CARD`, `next` (ready cards whose dependencies are done),
+  `plan` (days by capacity; `capacity HOURS` sets how many hours a day holds).
+  `--watch` keeps `board`, `list`, `next` or `plan` on screen and redraws on a change
+  (with `--json`, one JSON line per change); with any other command it is a usage error.
+- Changes: `add`, `edit`, `move`, `start`, `done`, `tick`, `note`. Each runs the board
+  check first, writes through a temporary file and a rename, and refuses when the file
+  changed since it was read. A blocked card or an unfinished dependency refuses `start`
+  and a move to `doing`; `done` needs `--pr owner/repo#N` or `--evidence TEXT` and every
+  checklist item ticked; `--force TEXT` overrides and the reason is kept in `notes`.
+- `check`: the schemas, then unique ids, real dates, `start` not after `due`, dependencies
+  that exist and start no later, no cycles, and every `docs` path under `atlas/`.
+- `render [--check]`: rewrites the README region from the board; `--check` fails when it is
+  stale.
+- `sync [--dry-run] [--repo OWNER/REPO]`: sends the board to a Planner plan whose external
+  id is `scrum:<owner/repo>/<board>`. backlog is proposed, ready is ready, doing and review
+  are building (review adds the note "in review"), done is done, dropped is dropped. The
+  Planner item ids are written back to each card's `planner`; a second run sends nothing.
+  The `iohr coordinator item` verbs cannot set ready or dropped, so sync sets those two
+  through the Planner API directly, and a dropped item stays dropped there: a card moved
+  out of dropped is reported as refused. A refused step is reported, that card's later steps
+  are skipped and the other cards still go. `--dry-run` prints the equivalent
+  `iohr coordinator` lines and sends nothing.
+- `migrate`: one time, for a board written before the schemas: moves each card's `section`
+  and `ideas` under `x` (the schema's free object for a project's own fields), writes the
+  file, then runs `check`.
+
+Exit codes: 2 for a usage error (also an unknown card), 1 for a refusal or findings.
 
 ## `iohr monitors`
 

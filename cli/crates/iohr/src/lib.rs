@@ -53,6 +53,7 @@ mod prompt;
 mod runner;
 #[cfg(unix)]
 mod safe_open;
+mod scrum;
 #[cfg(unix)]
 mod session;
 mod steps;
