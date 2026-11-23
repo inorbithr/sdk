@@ -50,9 +50,9 @@ regex = { version = "1", default-features = false, features = ["std", "perf", "u
 schemars = "0.8"
 rustix = { version = "1", default-features = false, features = ["std", "event", "process", "pty", "termios", "fs", "stdio"] }
 semver = "1"
-sigstore-verify = { version = "0.15", default-features = false, features = ["aws-lc-rs"] }
+sigstore-verify = { version = "0.16", default-features = false, features = ["aws-lc-rs"] }
 syn = { version = "3", features = ["full"] }
-typify = "0.8"
+typify = "0.10"
 cliclack = "0.5"
 indicatif = "0.18"
 console = "0.16"
