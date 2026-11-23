@@ -31,6 +31,7 @@ Build:
   openapi      The OpenAPI document for this credential
   lab          Check lab documents kept in your repository
   schema       Check a project's own JSON Schemas, with their examples
+  monitors     Check, run and manage the monitors kept in your project's `.inorbit/monitors/`
   decisions    Read and write RFCs, PRDs and ADRs in Decisions
 
 Agents:

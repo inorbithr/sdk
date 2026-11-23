@@ -709,11 +709,11 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
     );
     assert!(out.status.success(), "{}", text(&out));
     let t = text(&out);
-    // 94: the timeout line every engineer shared is a core line of `base-engineer` now (in the
+    // 95 (one more: the disabled monitors example): the timeout line every engineer shared is a core line of `base-engineer` now (in the
     // packs and the brief), so the seed has one recall memory fewer than before; and
     // `base-engineer` has its own pack in `atlas/roles/` (ADR 0021).
     assert!(
-        t.contains("would: write 94 files into ./my-shop (in the folder you are in)"),
+        t.contains("would: write 95 files into ./my-shop (in the folder you are in)"),
         "{t}"
     );
     assert!(
