@@ -2538,8 +2538,9 @@ pub struct InitArgs {
     /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
     /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
     /// when you are inside a git repository, or a path of your own. It must not exist
-    /// or be empty, or be the folder this project was made in: run again there, init
-    /// leaves every file that is already there alone and commits nothing.
+    /// or be empty, or be the folder this project was made in (run again there, init
+    /// leaves every file that is already there alone and commits nothing), or you
+    /// pass `--existing`.
     #[arg(long, value_name = "DIR")]
     pub dir: Option<PathBuf>,
     /// The language, for a template that offers several (the same as `--set
@@ -2551,6 +2552,12 @@ pub struct InitArgs {
     /// "local"); the private listing takes it when that step lands.
     #[arg(long)]
     pub publisher: Option<String>,
+    /// Use a folder that already has files, such as a cloned repository: adds what is
+    /// missing, keeps every file you have, runs no `git init` and makes no commit when the
+    /// folder is a git repository. Scripts need it for a folder that is not empty; the menu
+    /// at a terminal offers such a folder, and picking it is the same answer.
+    #[arg(long)]
+    pub existing: bool,
     /// Skip the smoke test (it runs the project once with the language's own runtime).
     #[arg(long)]
     pub no_smoke: bool,

@@ -783,6 +783,83 @@ fn a_folder_that_is_not_empty_is_refused_and_dotfiles_alone_are_fine() {
     let out = iohr_in(h.path(), cwd.path(), &args);
     assert!(out.status.success(), "{}", text(&out));
     assert!(cwd.path().join("my-shop/extension.toml").is_file());
+
+    // The same command with --existing (RFC 0224 slice 2): the refusal names the flag, the
+    // file is kept byte for byte, and the manifest is written.
+    let cwd = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(cwd.path().join("my-shop")).unwrap();
+    std::fs::write(cwd.path().join("my-shop/notes.txt"), b"mine \xff\n").unwrap();
+    let out = iohr_in(h.path(), cwd.path(), &args);
+    assert!(!out.status.success());
+    assert!(text(&out).contains("--existing"), "{}", text(&out));
+    let mut with = args.to_vec();
+    with.push("--existing");
+    let out = iohr_in(h.path(), cwd.path(), &with);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        std::fs::read(cwd.path().join("my-shop/notes.txt")).unwrap(),
+        b"mine \xff\n"
+    );
+    assert!(cwd.path().join("my-shop/extension.toml").is_file());
+}
+
+#[test]
+fn a_cloned_repository_keeps_its_files_and_gets_no_commit() {
+    let h = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    let dir = canon(repo.path());
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+            .args(args)
+            .current_dir(&dir)
+            .output()
+    };
+    if !git(&["init", "-q"]).is_ok_and(|o| o.status.success()) {
+        return;
+    }
+    std::fs::write(dir.join("README.md"), "# mine\n").unwrap();
+    assert!(git(&["add", "README.md"]).unwrap().status.success());
+    assert!(
+        git(&["commit", "-q", "-m", "first"])
+            .unwrap()
+            .status
+            .success()
+    );
+    let count = || {
+        String::from_utf8(git(&["rev-list", "--count", "HEAD"]).unwrap().stdout)
+            .unwrap()
+            .trim()
+            .to_owned()
+    };
+    assert_eq!(count(), "1");
+    let out = iohr_in(
+        h.path(),
+        &dir,
+        &[
+            "project",
+            "init",
+            "ahto",
+            "--dir",
+            dir.to_str().unwrap(),
+            "--template",
+            "demo",
+            "--set",
+            "license=MIT",
+            "--yes",
+            "--no-smoke",
+            "--existing",
+        ],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains("yours to commit"), "{}", text(&out));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("README.md")).unwrap(),
+        "# mine\n"
+    );
+    assert!(dir.join("extension.toml").is_file());
+    assert!(dir.join("inorbit.toml").is_file());
+    assert_eq!(count(), "1", "init made no commit");
 }
 
 #[test]

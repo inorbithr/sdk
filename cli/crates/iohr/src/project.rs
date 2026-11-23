@@ -423,19 +423,21 @@ pub fn is_rerun(dir: &Path, files: &[(String, String)]) -> bool {
 /// person is standing in), and no file the template writes may already be there: nothing is
 /// overwritten. The one exception is a folder that already holds this very project
 /// ([`is_rerun`]): init run again there is allowed, and [`scaffold`] leaves every file that is
-/// already there alone. A read, so a dry run checks it too.
+/// already there alone. A folder the person chose as it is (`existing`: the menu's pick, or
+/// `--existing`, RFC 0224 slice 2) is allowed the same way: [`scaffold`] writes what is missing
+/// and keeps what is there. A read, so a dry run checks it too.
 ///
 /// # Errors
 ///
-/// A busy folder.
-pub fn check_target(dir: &Path, files: &[(String, String)]) -> Result<(), String> {
-    if !dir.exists() || is_rerun(dir, files) {
+/// A busy folder, with the flag that allows it.
+pub fn check_target(dir: &Path, files: &[(String, String)], existing: bool) -> Result<(), String> {
+    if !dir.exists() || existing || is_rerun(dir, files) {
         return Ok(());
     }
     let busy = !folder::only_dotfiles(dir) || files.iter().any(|(p, _)| dir.join(p).exists());
     if busy {
         return Err(format!(
-            "{} is not empty; choose another name or --dir",
+            "{} is not empty; choose another name or --dir, or pass --existing to add what is missing and keep your files",
             dir.display()
         ));
     }
@@ -480,8 +482,9 @@ pub fn scaffold(
     files: &[(String, String)],
     programs: &[String],
     template: &str,
+    existing: bool,
 ) -> Result<(Vec<String>, Step), String> {
-    check_target(dir, files)?;
+    check_target(dir, files, existing)?;
     check_manifest(files)?;
     let done = write_files(dir, files, programs)?;
     let said = if done.same.is_empty() && done.kept.is_empty() {
@@ -517,11 +520,29 @@ pub fn scaffold(
 
 /// The git step: a repository with its first commit, or a skipped step when git did not
 /// answer. `rerun` (init run again in its own folder, [`is_rerun`]) commits nothing: what is in
-/// the folder is the person's now, and a commit of it is theirs to make.
+/// the folder is the person's now, and a commit of it is theirs to make. The same holds for a
+/// folder that is the top of a git repository (its own `.git`, whoever chose it), and for an `existing` folder that has files
+/// (RFC 0224 slice 2): no `git init`, no commit over what the person has.
 #[must_use]
-pub fn git_step(dir: &Path, name: &str, template: &str, rerun: bool) -> Step {
+pub fn git_step(dir: &Path, name: &str, template: &str, rerun: bool, existing: bool) -> Step {
     let title = "A git repository with its first commit";
-    if rerun {
+    if folder::is_repo_top(dir) {
+        step(
+            "git",
+            title,
+            "skipped",
+            "this folder is already a git repository: nothing was committed, the new files are yours to commit",
+            "",
+        )
+    } else if existing && !folder::only_dotfiles(dir) {
+        step(
+            "git",
+            title,
+            "skipped",
+            "this folder already had files: no repository was made and nothing was committed, the new files are yours to commit",
+            "",
+        )
+    } else if rerun {
         step(
             "git",
             title,
@@ -1238,7 +1259,7 @@ mod tests {
         let dir = d.path().join("development/demo");
         let st = d.path().join("projects");
         let files = rendered("demo", "demo");
-        let (written, s) = scaffold(&dir, &files, &[], "demo").unwrap();
+        let (written, s) = scaffold(&dir, &files, &[], "demo", false).unwrap();
         assert_eq!(s.id, "scaffold");
         assert_eq!(written.len(), files.len());
         assert!(dir.join("src/demo/__main__.py").is_file());
@@ -1252,7 +1273,7 @@ mod tests {
                 .all(|s| s.state != "not-yet" || !s.needs.is_empty())
         );
         // The same folder again is a rerun: it succeeds and writes nothing.
-        let (again, s) = scaffold(&dir, &files, &[], "demo").unwrap();
+        let (again, s) = scaffold(&dir, &files, &[], "demo", false).unwrap();
         assert!(again.is_empty(), "{again:?}");
         assert!(s.said.contains("0 made"), "{}", s.said);
         // Someone else's folder is still refused.
@@ -1260,7 +1281,7 @@ mod tests {
         std::fs::create_dir_all(&other).unwrap();
         std::fs::write(other.join("keep.txt"), "x").unwrap();
         assert!(
-            scaffold(&other, &files, &[], "demo")
+            scaffold(&other, &files, &[], "demo", false)
                 .unwrap_err()
                 .contains("not empty")
         );
@@ -1437,7 +1458,7 @@ mod tests {
         let dir = d.path().join("development/my-shop");
         let st = d.path().join("projects");
         let (files, runner) = rendered_in("demo", "my-shop", "python");
-        scaffold(&dir, &files, &[], "demo").unwrap();
+        scaffold(&dir, &files, &[], "demo", false).unwrap();
         let (state, _) = register_step(&dir, &st, "my-shop", "demo", "").unwrap();
         let s = smoke(&dir, &state, "my-shop", runner.as_ref());
         assert!(s.ok, "{} / {}", s.said, s.output);
@@ -1628,7 +1649,7 @@ mod tests {
         }
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("my-shop");
-        scaffold(&dir, &files, &[], "blank").unwrap();
+        scaffold(&dir, &files, &[], "blank", false).unwrap();
         let (state, _) =
             register_step(&dir, &tmp.path().join("projects"), "my-shop", "blank", "").unwrap();
         let s = smoke(&dir, &state, "my-shop", runner.as_ref());
@@ -1725,7 +1746,7 @@ mod tests {
         }
         let tv = tpl.with_variant(&v.id).unwrap();
         let programs = template::programs(&tv, &[]);
-        scaffold(&dir, &files, &programs, "demo").unwrap();
+        scaffold(&dir, &files, &programs, "demo", false).unwrap();
         let st = tmp.path().join("projects");
         let (state, _) = register_step(&dir, &st, "my-shop", "demo", "").unwrap();
         let said = smoke(&dir, &state, "my-shop", runner.as_ref());
