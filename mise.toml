@@ -103,6 +103,7 @@ run = [
   "python3 tools/test_pr_preflight.py",
   "python3 tools/test_terminal_themes.py",
   "python3 tools/test_gate_record.py",
+  "python3 tools/test_prune_rust_caches.py",
   "python3 tools/terminal-themes.py --offline",
 ]
 
