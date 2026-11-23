@@ -9,6 +9,25 @@
 //! Silences and the run log live in `.inorbit/state/monitors`, git-ignored (ADR 0009). The work
 //! is in [`crate::monitors`]; this file wires the schemas in and prints.
 
+#![allow(
+    clippy::must_use_candidate,
+    clippy::missing_errors_doc,
+    clippy::too_many_lines,
+    clippy::doc_markdown,
+    clippy::format_push_string,
+    clippy::trivially_copy_pass_by_ref,
+    clippy::many_single_char_names,
+    clippy::items_after_statements,
+    clippy::if_not_else,
+    clippy::assert_is_empty,
+    clippy::needless_pass_by_value,
+    clippy::unnecessary_wraps,
+    clippy::manual_let_else,
+    clippy::uninlined_format_args,
+    clippy::cast_precision_loss,
+    reason = "ported whole from the Eye monitors crate, where these pedantic style lints were not on; its tests are the contract"
+)]
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -71,7 +90,11 @@ enum Line {
 
 /// A report's first two lines: `Title  ✓ <pass>` or `Title  ✗ N failed`, then `summary` dim.
 fn head(look: &Look, title: &str, failed: usize, pass: &str, summary: &str) -> String {
-    let verdict = if failed == 0 { look.good(&format!("\u{2713} {pass}")) } else { look.bad(&format!("\u{2717} {failed} failed")) };
+    let verdict = if failed == 0 {
+        look.good(&format!("\u{2713} {pass}"))
+    } else {
+        look.bad(&format!("\u{2717} {failed} failed"))
+    };
     format!("{}  {verdict}\n{}\n", look.bold(title), look.dim(summary))
 }
 
@@ -80,13 +103,25 @@ fn block(look: &Look, rows: &[(Line, String, String)]) -> String {
     if rows.is_empty() {
         return String::new();
     }
-    let pad = rows.iter().map(|(_, n, _)| n.chars().count()).max().unwrap_or(0);
+    let pad = rows
+        .iter()
+        .map(|(_, n, _)| n.chars().count())
+        .max()
+        .unwrap_or(0);
     let mut out = String::from("\n");
     for (mark, name, detail) in rows {
         let gap = " ".repeat(pad - name.chars().count());
         let line = match mark {
-            Line::Pass => format!("  {} {name}{gap}  {}", look.good("\u{2713}"), look.dim(detail)),
-            Line::Fail => format!("  {} {}{gap}  {detail}", look.bad("\u{2717}"), look.bold(name)),
+            Line::Pass => format!(
+                "  {} {name}{gap}  {}",
+                look.good("\u{2713}"),
+                look.dim(detail)
+            ),
+            Line::Fail => format!(
+                "  {} {}{gap}  {detail}",
+                look.bad("\u{2717}"),
+                look.bold(name)
+            ),
             Line::Skip => look.dim(&format!("  - {name}{gap}  {detail}")),
         };
         out.push_str(line.trim_end());
@@ -112,7 +147,11 @@ impl Ctx {
 
     fn modes(&self) -> BTreeMap<String, Mode> {
         let o = self.state.overrides(self.now);
-        self.report.monitors.iter().map(|m| (m.name.clone(), State::mode(m, &o, self.now))).collect()
+        self.report
+            .monitors
+            .iter()
+            .map(|m| (m.name.clone(), State::mode(m, &o, self.now)))
+            .collect()
     }
 }
 
@@ -120,7 +159,11 @@ impl Ctx {
 /// failed, 2 for wrong usage.
 pub(crate) fn run(a: &MonitorsArgs, out: Out) -> Result<(), Error> {
     let json = out.json;
-    let dir = match a.dir.clone().or_else(|| std::env::current_dir().ok().and_then(|d| monitors::find(&d))) {
+    let dir = match a.dir.clone().or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .and_then(|d| monitors::find(&d))
+    }) {
         Some(d) => d,
         None => return usage("no .inorbit/monitors here or above; pass --dir"),
     };
@@ -136,7 +179,14 @@ pub(crate) fn run(a: &MonitorsArgs, out: Out) -> Result<(), Error> {
         return check(&report, json);
     }
     let state = State::new(state::dir_for(&dir));
-    let cx = Ctx { dir, files, report, state, now: state::now(), json: json };
+    let cx = Ctx {
+        dir,
+        files,
+        report,
+        state,
+        now: state::now(),
+        json,
+    };
     match cmd {
         MonitorsCmd::Check => check(&cx.report, cx.json),
         MonitorsCmd::Export => match monitors::export(&cx.files) {
@@ -146,8 +196,25 @@ pub(crate) fn run(a: &MonitorsArgs, out: Out) -> Result<(), Error> {
             }
             Err(e) => failed(&e),
         },
-        MonitorsCmd::Install { file, block, dry_run, files } => install_cmd(&cx, &files, file.as_deref(), block, dry_run),
-        MonitorsCmd::Run { names, only, pick, watch, every } => run_cmd(&cx, names.into_iter().chain(only).collect(), &pick, watch, every),
+        MonitorsCmd::Install {
+            file,
+            block,
+            dry_run,
+            files,
+        } => install_cmd(&cx, &files, file.as_deref(), block, dry_run),
+        MonitorsCmd::Run {
+            names,
+            only,
+            pick,
+            watch,
+            every,
+        } => run_cmd(
+            &cx,
+            names.into_iter().chain(only).collect(),
+            &pick,
+            watch,
+            every,
+        ),
         MonitorsCmd::List { pick, failing, off } => list(&cx, &pick, failing, off),
         MonitorsCmd::Show { name, runs } => show(&cx, &name, runs),
         MonitorsCmd::History { name, last } => history(&cx, name.as_deref(), last),
@@ -158,29 +225,51 @@ pub(crate) fn run(a: &MonitorsArgs, out: Out) -> Result<(), Error> {
 }
 
 /// The monitors `names` and `pick` choose, in file order; wrong usage as the error.
-fn choose<'a>(cx: &'a Ctx, names: &[String], pick: &MonitorsPick) -> Result<Vec<&'a Monitor>, String> {
+fn choose<'a>(
+    cx: &'a Ctx,
+    names: &[String],
+    pick: &MonitorsPick,
+) -> Result<Vec<&'a Monitor>, String> {
     if let Some(unknown) = names.iter().find(|n| cx.find(n).is_none()) {
         return Err(format!("no monitor named {unknown}"));
     }
     let mut tags = Vec::new();
     for t in &pick.tag {
-        tags.push(t.split_once('=').ok_or_else(|| format!("--tag {t}: use key=value, such as app=web"))?);
+        tags.push(
+            t.split_once('=')
+                .ok_or_else(|| format!("--tag {t}: use key=value, such as app=web"))?,
+        );
     }
     let chosen: Vec<&Monitor> = cx
         .report
         .monitors
         .iter()
         .filter(|m| names.is_empty() || names.contains(&m.name))
-        .filter(|m| pick.surface.as_deref().is_none_or(|s| m.surface.as_str() == s))
-        .filter(|m| pick.category.as_deref().is_none_or(|c| m.category.as_deref() == Some(c)))
-        .filter(|m| tags.iter().all(|(k, v)| m.tags.get(*k).map(String::as_str) == Some(*v)))
+        .filter(|m| {
+            pick.surface
+                .as_deref()
+                .is_none_or(|s| m.surface.as_str() == s)
+        })
+        .filter(|m| {
+            pick.category
+                .as_deref()
+                .is_none_or(|c| m.category.as_deref() == Some(c))
+        })
+        .filter(|m| {
+            tags.iter()
+                .all(|(k, v)| m.tags.get(*k).map(String::as_str) == Some(*v))
+        })
         .collect();
-    if chosen.is_empty() && (pick.surface.is_some() || pick.category.is_some() || !tags.is_empty()) {
-        let what: Vec<String> = [pick.surface.as_ref().map(|s| format!("--surface {s}")), pick.category.as_ref().map(|c| format!("--category {c}"))]
-            .into_iter()
-            .flatten()
-            .chain(pick.tag.iter().map(|t| format!("--tag {t}")))
-            .collect();
+    if chosen.is_empty() && (pick.surface.is_some() || pick.category.is_some() || !tags.is_empty())
+    {
+        let what: Vec<String> = [
+            pick.surface.as_ref().map(|s| format!("--surface {s}")),
+            pick.category.as_ref().map(|c| format!("--category {c}")),
+        ]
+        .into_iter()
+        .flatten()
+        .chain(pick.tag.iter().map(|t| format!("--tag {t}")))
+        .collect();
         return Err(format!("no monitor matches {}", what.join(" ")));
     }
     Ok(chosen)
@@ -194,15 +283,26 @@ struct Runner {
 
 impl Runner {
     fn new(dir: &Path) -> Runner {
-        Runner { schemas: schemas_for(dir), cli: cli_for(dir) }
+        Runner {
+            schemas: schemas_for(dir),
+            cli: cli_for(dir),
+        }
     }
 
     fn run(&self, ms: &[Monitor]) -> Result<Vec<Ran>, monitors::Error> {
         let by_path = |shape: &str| match &self.schemas {
             Ok((s, ids)) => {
-                let rel = shape.strip_prefix("schemas/").filter(|r| !r.is_empty() && !r.contains(".."));
-                let id = rel.and_then(|r| ids.get(r)).ok_or_else(|| format!("{shape} is not a schema under schemas/"))?;
-                s.validator(id).map_err(|e| e.to_string())
+                let (path, frag) = shape
+                    .split_once('#')
+                    .map_or((shape, None), |(p, f)| (p, Some(f)));
+                let rel = path
+                    .strip_prefix("schemas/")
+                    .filter(|r| !r.is_empty() && !r.contains(".."));
+                let id = rel
+                    .and_then(|r| ids.get(r))
+                    .ok_or_else(|| format!("{shape} is not a schema under schemas/"))?;
+                let reference = frag.map_or_else(|| id.clone(), |f| format!("{id}#{f}"));
+                s.validator_ref(&reference).map_err(|e| e.to_string())
             }
             Err(e) => Err(e.clone()),
         };
@@ -243,7 +343,11 @@ impl Row<'_> {
 
     fn json(&self) -> Value {
         let why = self.why();
-        let hint = if self.failed() { why.as_deref().and_then(|w| explain::hint(self.m, w)) } else { None };
+        let hint = if self.failed() {
+            why.as_deref().and_then(|w| explain::hint(self.m, w))
+        } else {
+            None
+        };
         let (until, reason) = match &self.mode {
             Mode::Silenced { reason, until } => (until.map(iso), reason.clone()),
             _ => (None, None),
@@ -270,7 +374,10 @@ impl Row<'_> {
 /// Why a monitor switched off here was not run, and how to run it.
 fn off_why(m: &Monitor, mode: &Mode) -> String {
     match mode {
-        Mode::Off => format!("off: enabled = false in {}; `iohr monitors enable {}` runs it here", m.file, m.name),
+        Mode::Off => format!(
+            "off: enabled = false in {}; `iohr monitors enable {}` runs it here",
+            m.file, m.name
+        ),
         Mode::Silenced { reason, until } => {
             let mut s = String::from("silenced");
             if let Some(u) = until {
@@ -286,13 +393,32 @@ fn off_why(m: &Monitor, mode: &Mode) -> String {
 }
 
 /// Runs the `on` monitors among `chosen` once and logs them; the rest come back unrun.
-fn round<'a>(cx: &Ctx, runner: &Runner, chosen: &[&'a Monitor], now: u64) -> Result<Vec<Row<'a>>, monitors::Error> {
+fn round<'a>(
+    cx: &Ctx,
+    runner: &Runner,
+    chosen: &[&'a Monitor],
+    now: u64,
+) -> Result<Vec<Row<'a>>, monitors::Error> {
     let o = cx.state.overrides(now);
-    let mut rows: Vec<Row<'a>> = chosen.iter().map(|m| Row { m, mode: State::mode(m, &o, now), ran: None }).collect();
-    let on: Vec<Monitor> = rows.iter().filter(|r| r.mode == Mode::On).map(|r| r.m.clone()).collect();
+    let mut rows: Vec<Row<'a>> = chosen
+        .iter()
+        .map(|m| Row {
+            m,
+            mode: State::mode(m, &o, now),
+            ran: None,
+        })
+        .collect();
+    let on: Vec<Monitor> = rows
+        .iter()
+        .filter(|r| r.mode == Mode::On)
+        .map(|r| r.m.clone())
+        .collect();
     let ran = runner.run(&on)?;
     if let Err(e) = cx.state.record(&ran, now) {
-        out_note!("the run log in {} was not written: {e}", cx.state.dir.display());
+        out_note!(
+            "the run log in {} was not written: {e}",
+            cx.state.dir.display()
+        );
     }
     let mut by_name: BTreeMap<String, Ran> = ran.into_iter().map(|r| (r.name.clone(), r)).collect();
     for r in &mut rows {
@@ -301,13 +427,24 @@ fn round<'a>(cx: &Ctx, runner: &Runner, chosen: &[&'a Monitor], now: u64) -> Res
     Ok(rows)
 }
 
-fn run_cmd(cx: &Ctx, names: Vec<String>, pick: &MonitorsPick, watch: bool, every: Option<String>) -> Result<(), Error> {
+fn run_cmd(
+    cx: &Ctx,
+    names: Vec<String>,
+    pick: &MonitorsPick,
+    watch: bool,
+    every: Option<String>,
+) -> Result<(), Error> {
     let chosen = match choose(cx, &names, pick) {
         Ok(c) => c,
         Err(e) => return usage(&e),
     };
     let gap = match every.as_deref().map(monitors::secs).transpose() {
-        Ok(Some(0)) | Err(_) => return usage(&format!("--every {}: use a number with s, m, h or d, such as 30s or 5m", every.unwrap_or_default())),
+        Ok(Some(0)) | Err(_) => {
+            return usage(&format!(
+                "--every {}: use a number with s, m, h or d, such as 30s or 5m",
+                every.unwrap_or_default()
+            ));
+        }
         Ok(gap) => (watch || gap.is_some()).then(|| gap.unwrap_or(60)),
     };
     let runner = Runner::new(&cx.dir);
@@ -319,18 +456,35 @@ fn run_cmd(cx: &Ctx, names: Vec<String>, pick: &MonitorsPick, watch: bool, every
     };
     let failed = rows.iter().any(Row::failed);
     if cx.json {
-        out_line!("{}", json!({ "ok": !failed, "ran": rows.iter().map(Row::json).collect::<Vec<_>>() }));
+        out_line!(
+            "{}",
+            json!({ "ok": !failed, "ran": rows.iter().map(Row::json).collect::<Vec<_>>() })
+        );
     } else {
         out_text!("{}", view(&rows, &Look::stdout(cx.json)));
     }
-    let Some(gap) = gap else { return if failed { Err(Error::Findings("a monitor failed".into())) } else { Ok(()) } };
+    let Some(gap) = gap else {
+        return if failed {
+            Err(Error::Findings("a monitor failed".into()))
+        } else {
+            Ok(())
+        };
+    };
     // --watch: the first report above in full, then only the monitors whose verdict or state
     // changed, until Ctrl-C.
     let look = Look::stdout(cx.json);
     let key = |r: &Row| (r.verdict(), r.mode.as_str(), r.why());
-    let mut last: BTreeMap<String, (&'static str, &'static str, Option<String>)> = rows.iter().map(|r| (r.m.name.clone(), key(r))).collect();
+    let mut last: BTreeMap<String, (&'static str, &'static str, Option<String>)> =
+        rows.iter().map(|r| (r.m.name.clone(), key(r))).collect();
     if !cx.json {
-        out_line!("{}", look.dim(&format!("\nwatching {} monitors every {}; Ctrl-C stops", chosen.len(), human(gap))));
+        out_line!(
+            "{}",
+            look.dim(&format!(
+                "\nwatching {} monitors every {}; Ctrl-C stops",
+                chosen.len(),
+                human(gap)
+            ))
+        );
     }
     loop {
         std::thread::sleep(Duration::from_secs(gap));
@@ -341,13 +495,28 @@ fn run_cmd(cx: &Ctx, names: Vec<String>, pick: &MonitorsPick, watch: bool, every
                 return Err(from_monitors(e));
             }
         };
-        let changed: Vec<&Row> = rows.iter().filter(|r| last.get(&r.m.name).is_none_or(|k| k.0 != r.verdict() || k.1 != r.mode.as_str())).collect();
+        let changed: Vec<&Row> = rows
+            .iter()
+            .filter(|r| {
+                last.get(&r.m.name)
+                    .is_none_or(|k| k.0 != r.verdict() || k.1 != r.mode.as_str())
+            })
+            .collect();
         if cx.json && !changed.is_empty() {
-            out_line!("{}", json!({ "ok": !rows.iter().any(Row::failed), "ran": changed.iter().map(|r| r.json()).collect::<Vec<_>>() }));
+            out_line!(
+                "{}",
+                json!({ "ok": !rows.iter().any(Row::failed), "ran": changed.iter().map(|r| r.json()).collect::<Vec<_>>() })
+            );
         } else if !changed.is_empty() {
             for r in &changed {
-                let was = last.get(&r.m.name).map_or("new", |k| if k.1 == "on" { k.0 } else { k.1 });
-                let now_is = if r.mode == Mode::On { r.verdict() } else { r.mode.as_str() };
+                let was = last
+                    .get(&r.m.name)
+                    .map_or("new", |k| if k.1 == "on" { k.0 } else { k.1 });
+                let now_is = if r.mode == Mode::On {
+                    r.verdict()
+                } else {
+                    r.mode.as_str()
+                };
                 let line = format!("{}  {} {was} -> {now_is}", clock(now), r.m.name);
                 let line = match r.verdict() {
                     "fail" => format!("{}  {}", look.bad(&line), r.why().unwrap_or_default()),
@@ -355,7 +524,11 @@ fn run_cmd(cx: &Ctx, names: Vec<String>, pick: &MonitorsPick, watch: bool, every
                     _ => format!("{}  {}", look.dim(&line), r.why().unwrap_or_default()),
                 };
                 out_line!("{line}");
-                if let Some(h) = r.why().filter(|_| r.failed()).and_then(|w| explain::hint(r.m, &w)) {
+                if let Some(h) = r
+                    .why()
+                    .filter(|_| r.failed())
+                    .and_then(|w| explain::hint(r.m, &w))
+                {
                     out_line!("{}", look.dim(&format!("      hint   {h}")));
                 }
             }
@@ -372,12 +545,25 @@ fn view(rows: &[Row], look: &Look) -> String {
     let mut oks: Vec<&Row> = rows.iter().filter(|r| r.verdict() == "pass").collect();
     oks.sort_by_key(|r| r.m.surface.as_str());
     let skips: Vec<&Row> = rows.iter().filter(|r| r.verdict() == "skip").collect();
-    let ms: u64 = rows.iter().filter_map(|r| r.ran.as_ref()).map(|r| r.ms).sum();
+    let ms: u64 = rows
+        .iter()
+        .filter_map(|r| r.ran.as_ref())
+        .map(|r| r.ms)
+        .sum();
     let mut summary = format!("{} passed, {} failed", oks.len(), fails.len());
     for (n, what) in [
         (skips.iter().filter(|r| r.mode == Mode::Off).count(), "off"),
-        (skips.iter().filter(|r| matches!(r.mode, Mode::Silenced { .. })).count(), "silenced"),
-        (skips.iter().filter(|r| r.mode == Mode::On).count(), "skipped"),
+        (
+            skips
+                .iter()
+                .filter(|r| matches!(r.mode, Mode::Silenced { .. }))
+                .count(),
+            "silenced",
+        ),
+        (
+            skips.iter().filter(|r| r.mode == Mode::On).count(),
+            "skipped",
+        ),
     ] {
         if n > 0 {
             summary.push_str(&format!(", {n} {what}"));
@@ -386,9 +572,20 @@ fn view(rows: &[Row], look: &Look) -> String {
     summary.push_str(&format!(", {:.1} s", ms as f64 / 1000.0));
     let mut out = head(look, "Monitors", fails.len(), "all pass", &summary);
     for r in &fails {
-        out.push_str(&block(look, &[(Line::Fail, r.m.name.clone(), r.m.label.clone().unwrap_or_default())]));
+        out.push_str(&block(
+            look,
+            &[(
+                Line::Fail,
+                r.m.name.clone(),
+                r.m.label.clone().unwrap_or_default(),
+            )],
+        ));
         let why = r.why().unwrap_or_default();
-        let mut lines = vec![(r.m.surface.as_str(), explain::target(r.m)), ("wanted", explain::expected(r.m)), ("got", why.clone())];
+        let mut lines = vec![
+            (r.m.surface.as_str(), explain::target(r.m)),
+            ("wanted", explain::expected(r.m)),
+            ("got", why.clone()),
+        ];
         if let Some(h) = explain::hint(r.m, &why) {
             lines.push(("hint", h));
         }
@@ -396,16 +593,31 @@ fn view(rows: &[Row], look: &Look) -> String {
             out.push_str(&format!("      {} {v}\n", look.dim(&format!("{k:<6}"))));
         }
     }
-    let pad = oks.iter().map(|r| r.m.surface.as_str().len()).max().unwrap_or(0);
+    let pad = oks
+        .iter()
+        .map(|r| r.m.surface.as_str().len())
+        .max()
+        .unwrap_or(0);
     let ok_rows: Vec<(Line, String, String)> = oks
         .iter()
         .map(|r| {
             let ms = r.ran.as_ref().map_or(0, |x| x.ms);
-            (Line::Pass, r.m.name.clone(), format!("{ms:>5} ms  {:<pad$}  {}", r.m.surface.as_str(), r.m.label.as_deref().unwrap_or("")))
+            (
+                Line::Pass,
+                r.m.name.clone(),
+                format!(
+                    "{ms:>5} ms  {:<pad$}  {}",
+                    r.m.surface.as_str(),
+                    r.m.label.as_deref().unwrap_or("")
+                ),
+            )
         })
         .collect();
     out.push_str(&block(look, &ok_rows));
-    let skip_rows: Vec<(Line, String, String)> = skips.iter().map(|r| (Line::Skip, r.m.name.clone(), r.why().unwrap_or_default())).collect();
+    let skip_rows: Vec<(Line, String, String)> = skips
+        .iter()
+        .map(|r| (Line::Skip, r.m.name.clone(), r.why().unwrap_or_default()))
+        .collect();
     out.push_str(&block(look, &skip_rows));
     out
 }
@@ -458,7 +670,15 @@ fn monitor_json(m: &Monitor, mode: &Mode, past: Option<&Past>) -> Value {
 /// The last result in a few words: `pass 3m ago`, `FAIL 12s ago`, or `never run`.
 fn last_text(now: u64, past: Option<&Past>) -> String {
     match past.and_then(Past::last) {
-        Some(e) => format!("{} {}", if e.verdict == "fail" { "FAIL" } else { e.verdict.as_str() }, ago(now, e.at)),
+        Some(e) => format!(
+            "{} {}",
+            if e.verdict == "fail" {
+                "FAIL"
+            } else {
+                e.verdict.as_str()
+            },
+            ago(now, e.at)
+        ),
         None => "never run".into(),
     }
 }
@@ -472,19 +692,47 @@ fn list(cx: &Ctx, pick: &MonitorsPick, failing: bool, off: bool) -> Result<(), E
     let pasts = cx.state.pasts();
     let shown: Vec<&Monitor> = chosen
         .into_iter()
-        .filter(|m| !failing || pasts.get(&m.name).and_then(Past::last).is_some_and(|e| e.verdict == "fail"))
+        .filter(|m| {
+            !failing
+                || pasts
+                    .get(&m.name)
+                    .and_then(Past::last)
+                    .is_some_and(|e| e.verdict == "fail")
+        })
         .filter(|m| !off || modes.get(&m.name).is_some_and(|s| *s != Mode::On))
         .collect();
     if cx.json {
-        let rows: Vec<Value> = shown.iter().map(|m| monitor_json(m, &modes[&m.name], pasts.get(&m.name))).collect();
+        let rows: Vec<Value> = shown
+            .iter()
+            .map(|m| monitor_json(m, &modes[&m.name], pasts.get(&m.name)))
+            .collect();
         out_line!("{}", json!({ "ok": true, "monitors": rows }));
         return Ok(());
     }
     let look = Look::stdout(cx.json);
-    let failing_n = shown.iter().filter(|m| pasts.get(&m.name).and_then(Past::last).is_some_and(|e| e.verdict == "fail")).count();
+    let failing_n = shown
+        .iter()
+        .filter(|m| {
+            pasts
+                .get(&m.name)
+                .and_then(Past::last)
+                .is_some_and(|e| e.verdict == "fail")
+        })
+        .count();
     let off_n = shown.iter().filter(|m| modes[&m.name] != Mode::On).count();
-    out_line!("{}  {}", look.bold("Monitors"), look.dim(&format!("{} shown, {failing_n} failing last run, {off_n} off or silenced", shown.len())));
-    let head = ["NAME", "STATE", "LAST", "SURFACE", "CATEGORY", "EVERY", "AFTER", "LABEL", "TARGET"].map(String::from).to_vec();
+    out_line!(
+        "{}  {}",
+        look.bold("Monitors"),
+        look.dim(&format!(
+            "{} shown, {failing_n} failing last run, {off_n} off or silenced",
+            shown.len()
+        ))
+    );
+    let head = [
+        "NAME", "STATE", "LAST", "SURFACE", "CATEGORY", "EVERY", "AFTER", "LABEL", "TARGET",
+    ]
+    .map(String::from)
+    .to_vec();
     let rows: Vec<Vec<String>> = shown
         .iter()
         .map(|m| {
@@ -501,12 +749,37 @@ fn list(cx: &Ctx, pick: &MonitorsPick, failing: bool, off: bool) -> Result<(), E
             ]
         })
         .collect();
-    let widths: Vec<usize> = (0..head.len()).map(|i| std::iter::once(&head).chain(&rows).map(|r| r[i].chars().count()).max().unwrap_or(0)).collect();
-    let line = |r: &[String]| r.iter().zip(&widths).map(|(c, w)| format!("{c:<w$}")).collect::<Vec<_>>().join("  ").trim_end().to_owned();
+    let widths: Vec<usize> = (0..head.len())
+        .map(|i| {
+            std::iter::once(&head)
+                .chain(&rows)
+                .map(|r| r[i].chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let line = |r: &[String]| {
+        r.iter()
+            .zip(&widths)
+            .map(|(c, w)| format!("{c:<w$}"))
+            .collect::<Vec<_>>()
+            .join("  ")
+            .trim_end()
+            .to_owned()
+    };
     out_line!("\n{}", look.dim(&line(&head)));
     for r in &rows {
         let l = line(r);
-        out_line!("{}", if r[2].starts_with("FAIL") { look.bad(&l) } else if r[1] != "on" { look.dim(&l) } else { l });
+        out_line!(
+            "{}",
+            if r[2].starts_with("FAIL") {
+                look.bad(&l)
+            } else if r[1] != "on" {
+                look.dim(&l)
+            } else {
+                l
+            }
+        );
     }
     Ok(())
 }
@@ -525,18 +798,30 @@ fn definition(cx: &Ctx, m: &Monitor) -> Value {
 }
 
 fn show(cx: &Ctx, name: &str, n: usize) -> Result<(), Error> {
-    let Some(m) = cx.find(name) else { return usage(&format!("no monitor named {name}")) };
+    let Some(m) = cx.find(name) else {
+        return usage(&format!("no monitor named {name}"));
+    };
     let path = cx.dir.join(&m.file);
     let text = std::fs::read_to_string(&path).unwrap_or_default();
     let span = edit::locate(&text, name);
-    let source = span.as_ref().map(|s| text.lines().skip(s.start).take(s.end - s.start).collect::<Vec<_>>().join("\n").trim_end().to_owned());
+    let source = span.as_ref().map(|s| {
+        text.lines()
+            .skip(s.start)
+            .take(s.end - s.start)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end()
+            .to_owned()
+    });
     let line = span.as_ref().map(|s| s.header + 1);
     let mode = cx.modes().remove(name).unwrap_or(Mode::On);
     let past = cx.state.pasts().remove(name).unwrap_or_default();
     let recent: Vec<&Entry> = past.runs.iter().rev().take(n).collect();
     if cx.json {
         let mut v = monitor_json(m, &mode, Some(&past));
-        let o = v.as_object_mut().expect("monitor_json gives an object");
+        let Some(o) = v.as_object_mut() else {
+            return failed("monitor_json gave no object");
+        };
         o.insert("file".into(), json!(m.file));
         o.insert("line".into(), json!(line));
         o.insert("checks".into(), json!(explain::checks(m)));
@@ -550,21 +835,83 @@ fn show(cx: &Ctx, name: &str, n: usize) -> Result<(), Error> {
             "last_fail": past.last_fail.map(iso),
             "recent": recent.iter().map(|e| entry_json(e)).collect::<Vec<_>>(),
         });
-        out_line!("{}", json!({ "ok": true, "monitor": v, "history": history }));
+        out_line!(
+            "{}",
+            json!({ "ok": true, "monitor": v, "history": history })
+        );
         return Ok(());
     }
     let look = Look::stdout(cx.json);
-    let mut out = format!("{}  {}\n\n", look.bold(&m.name), m.label.as_deref().unwrap_or(""));
-    let tags = m.tags.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" ");
-    let at = |when: Option<u64>| when.map_or_else(|| "never".into(), |t| format!("{} ({})", self::when(t), ago(cx.now, t)));
+    let mut out = format!(
+        "{}  {}\n\n",
+        look.bold(&m.name),
+        m.label.as_deref().unwrap_or("")
+    );
+    let tags = m
+        .tags
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let at = |when: Option<u64>| {
+        when.map_or_else(
+            || "never".into(),
+            |t| format!("{} ({})", self::when(t), ago(cx.now, t)),
+        )
+    };
     let mut facts = vec![
         ("checks", explain::checks(m)),
-        ("file", format!("{}{}", path.display(), line.map(|l| format!(":{l}")).unwrap_or_default())),
-        ("surface", format!("{}{}", m.surface.as_str(), m.category.as_ref().map(|c| format!(", category {c}")).unwrap_or_default())),
-        ("every", format!("{}, pages after {} fail{} in a row", every_text(m), m.fail_after, if m.fail_after == 1 { "" } else { "s" })),
-        ("state", format!("{}{}", state_text(&mode), if m.enabled { "" } else { " (enabled = false in its file)" })),
+        (
+            "file",
+            format!(
+                "{}{}",
+                path.display(),
+                line.map(|l| format!(":{l}")).unwrap_or_default()
+            ),
+        ),
+        (
+            "surface",
+            format!(
+                "{}{}",
+                m.surface.as_str(),
+                m.category
+                    .as_ref()
+                    .map(|c| format!(", category {c}"))
+                    .unwrap_or_default()
+            ),
+        ),
+        (
+            "every",
+            format!(
+                "{}, pages after {} fail{} in a row",
+                every_text(m),
+                m.fail_after,
+                if m.fail_after == 1 { "" } else { "s" }
+            ),
+        ),
+        (
+            "state",
+            format!(
+                "{}{}",
+                state_text(&mode),
+                if m.enabled {
+                    ""
+                } else {
+                    " (enabled = false in its file)"
+                }
+            ),
+        ),
         ("last", last_text(cx.now, Some(&past))),
-        ("history", format!("{} runs logged, {} flaps, last pass {}, last fail {}", past.runs.len(), past.flaps, at(past.last_pass), at(past.last_fail))),
+        (
+            "history",
+            format!(
+                "{} runs logged, {} flaps, last pass {}, last fail {}",
+                past.runs.len(),
+                past.flaps,
+                at(past.last_pass),
+                at(past.last_fail)
+            ),
+        ),
     ];
     if !tags.is_empty() {
         facts.insert(3, ("tags", tags));
@@ -578,7 +925,10 @@ fn show(cx: &Ctx, name: &str, n: usize) -> Result<(), Error> {
             out.push_str(&format!("    {l}\n"));
         }
     }
-    out.push_str(&format!("\n  {}\n", look.dim(&format!("last {}, newest first", runs_n(recent.len())))));
+    out.push_str(&format!(
+        "\n  {}\n",
+        look.dim(&format!("last {}, newest first", runs_n(recent.len())))
+    ));
     out.push_str(&runs_text(&recent, &look));
     out_text!("{out}");
     Ok(())
@@ -587,7 +937,10 @@ fn show(cx: &Ctx, name: &str, n: usize) -> Result<(), Error> {
 /// Logged runs, one line each: when, the verdict, the time and the why.
 fn runs_text(runs: &[&Entry], look: &Look) -> String {
     if runs.is_empty() {
-        return format!("    {}\n", look.dim("none yet; `iohr monitors run` logs each run"));
+        return format!(
+            "    {}\n",
+            look.dim("none yet; `iohr monitors run` logs each run")
+        );
     }
     runs.iter()
         .map(|e| {
@@ -595,7 +948,10 @@ fn runs_text(runs: &[&Entry], look: &Look) -> String {
             match e.verdict.as_str() {
                 "fail" => format!("{}  {}\n", look.bad(&head), e.why.as_deref().unwrap_or("")),
                 "pass" => format!("{head}\n"),
-                _ => format!("{}\n", look.dim(&format!("{head}  {}", e.why.as_deref().unwrap_or("")))),
+                _ => format!(
+                    "{}\n",
+                    look.dim(&format!("{head}  {}", e.why.as_deref().unwrap_or("")))
+                ),
             }
         })
         .collect()
@@ -609,7 +965,10 @@ fn history(cx: &Ctx, name: Option<&str>, n: usize) -> Result<(), Error> {
     {
         return usage(&format!("no monitor named {name}"));
     }
-    let shown: Vec<(&String, &Past)> = pasts.iter().filter(|(k, _)| name.is_none_or(|n| n == k.as_str())).collect();
+    let shown: Vec<(&String, &Past)> = pasts
+        .iter()
+        .filter(|(k, _)| name.is_none_or(|n| n == k.as_str()))
+        .collect();
     let count = |p: &Past, v: &str| p.runs.iter().filter(|e| e.verdict == v).count();
     let log = cx.state.dir.join("runs.jsonl");
     if cx.json {
@@ -628,24 +987,52 @@ fn history(cx: &Ctx, name: Option<&str>, n: usize) -> Result<(), Error> {
                 })
             })
             .collect();
-        out_line!("{}", json!({ "ok": true, "log": log.display().to_string(), "monitors": rows }));
+        out_line!(
+            "{}",
+            json!({ "ok": true, "log": log.display().to_string(), "monitors": rows })
+        );
         return Ok(());
     }
     let look = Look::stdout(cx.json);
     let total: usize = shown.iter().map(|(_, p)| p.runs.len()).sum();
-    out_line!("{}  {}", look.bold("Monitor history"), look.dim(&format!("{} in {}", runs_n(total), log.display())));
+    out_line!(
+        "{}  {}",
+        look.bold("Monitor history"),
+        look.dim(&format!("{} in {}", runs_n(total), log.display()))
+    );
     if let Some((k, p)) = shown.first().filter(|_| name.is_some()) {
         let recent: Vec<&Entry> = p.runs.iter().rev().take(n).collect();
-        out_line!("\n  {}  {}, {} passed, {} failed, {} flaps", look.bold(k), runs_n(p.runs.len()), count(p, "pass"), count(p, "fail"), p.flaps);
+        out_line!(
+            "\n  {}  {}, {} passed, {} failed, {} flaps",
+            look.bold(k),
+            runs_n(p.runs.len()),
+            count(p, "pass"),
+            count(p, "fail"),
+            p.flaps
+        );
         out_text!("{}", runs_text(&recent, &look));
         return Ok(());
     }
     if shown.is_empty() {
-        out_line!("\n  {}", look.dim("no runs logged yet; `iohr monitors run` logs each run"));
+        out_line!(
+            "\n  {}",
+            look.dim("no runs logged yet; `iohr monitors run` logs each run")
+        );
         return Ok(());
     }
     let at = |t: Option<u64>| t.map_or_else(|| "never".into(), |t| ago(cx.now, t));
-    let head = ["NAME", "RUNS", "PASS", "FAIL", "FLAPS", "LAST PASS", "LAST FAIL", "LAST"].map(String::from).to_vec();
+    let head = [
+        "NAME",
+        "RUNS",
+        "PASS",
+        "FAIL",
+        "FLAPS",
+        "LAST PASS",
+        "LAST FAIL",
+        "LAST",
+    ]
+    .map(String::from)
+    .to_vec();
     let rows: Vec<Vec<String>> = shown
         .iter()
         .map(|(k, p)| {
@@ -661,20 +1048,52 @@ fn history(cx: &Ctx, name: Option<&str>, n: usize) -> Result<(), Error> {
             ]
         })
         .collect();
-    let widths: Vec<usize> = (0..head.len()).map(|i| std::iter::once(&head).chain(&rows).map(|r| r[i].chars().count()).max().unwrap_or(0)).collect();
-    let line = |r: &[String]| r.iter().zip(&widths).map(|(c, w)| format!("{c:<w$}")).collect::<Vec<_>>().join("  ").trim_end().to_owned();
+    let widths: Vec<usize> = (0..head.len())
+        .map(|i| {
+            std::iter::once(&head)
+                .chain(&rows)
+                .map(|r| r[i].chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let line = |r: &[String]| {
+        r.iter()
+            .zip(&widths)
+            .map(|(c, w)| format!("{c:<w$}"))
+            .collect::<Vec<_>>()
+            .join("  ")
+            .trim_end()
+            .to_owned()
+    };
     out_line!("\n{}", look.dim(&line(&head)));
     for r in &rows {
         let l = line(r);
-        out_line!("{}", if r[7] == "fail" { look.bad(&l) } else if r[4] != "0" { look.hot(&l) } else { l });
+        out_line!(
+            "{}",
+            if r[7] == "fail" {
+                look.bad(&l)
+            } else if r[4] != "0" {
+                look.hot(&l)
+            } else {
+                l
+            }
+        );
     }
     Ok(())
 }
 
 fn disable(cx: &Ctx, name: &str, for_: Option<&str>, reason: Option<String>) -> Result<(), Error> {
-    let Some(m) = cx.find(name) else { return usage(&format!("no monitor named {name}")) };
+    let Some(m) = cx.find(name) else {
+        return usage(&format!("no monitor named {name}"));
+    };
     let until = match for_.map(monitors::secs).transpose() {
-        Ok(Some(0)) | Err(_) => return usage(&format!("--for {}: use a number with s, m, h or d, such as 30m or 2h", for_.unwrap_or_default())),
+        Ok(Some(0)) | Err(_) => {
+            return usage(&format!(
+                "--for {}: use a number with s, m, h or d, such as 30m or 2h",
+                for_.unwrap_or_default()
+            ));
+        }
         Ok(s) => s.map(|s| cx.now + s),
     };
     // A monitor its file has off goes back to that with a bare `disable`; a silence needs --for
@@ -683,24 +1102,44 @@ fn disable(cx: &Ctx, name: &str, for_: Option<&str>, reason: Option<String>) -> 
         if let Err(e) = cx.state.forget(name) {
             return failed(&format!("{}: {e}", cx.state.dir.display()));
         }
-        return said(cx, m, &Mode::Off, &format!("{name} is off again, as {} says (enabled = false); it is not run and never fails a run.", m.file));
+        return said(
+            cx,
+            m,
+            &Mode::Off,
+            &format!(
+                "{name} is off again, as {} says (enabled = false); it is not run and never fails a run.",
+                m.file
+            ),
+        );
     }
     if let Err(e) = cx.state.disable(m, until, reason.clone()) {
         return failed(&format!("{}: {e}", cx.state.dir.display()));
     }
     let mode = Mode::Silenced { reason, until };
-    said(cx, m, &mode, &format!("{name} is {}; it is not run and never fails a run. `iohr monitors enable {name}` ends it.", state_text(&mode)))
+    said(
+        cx,
+        m,
+        &mode,
+        &format!(
+            "{name} is {}; it is not run and never fails a run. `iohr monitors enable {name}` ends it.",
+            state_text(&mode)
+        ),
+    )
 }
 
 fn enable(cx: &Ctx, name: &str) -> Result<(), Error> {
-    let Some(m) = cx.find(name) else { return usage(&format!("no monitor named {name}")) };
+    let Some(m) = cx.find(name) else {
+        return usage(&format!("no monitor named {name}"));
+    };
     if let Err(e) = cx.state.enable(m) {
         return failed(&format!("{}: {e}", cx.state.dir.display()));
     }
     let text = if m.enabled {
         format!("{name} is on again; the next `iohr monitors run` runs it.")
     } else {
-        format!("{name} now runs on this Mac; the next `iohr monitors run` runs it. Its file keeps enabled = false, so export still leaves it out; a bare `disable` puts it back.")
+        format!(
+            "{name} now runs on this Mac; the next `iohr monitors run` runs it. Its file keeps enabled = false, so export still leaves it out; a bare `disable` puts it back."
+        )
     };
     said(cx, m, &Mode::On, &text)
 }
@@ -712,7 +1151,10 @@ fn said(cx: &Ctx, m: &Monitor, mode: &Mode, line: &str) -> Result<(), Error> {
             Mode::Silenced { reason, until } => (until.map(iso), reason.clone()),
             _ => (None, None),
         };
-        out_line!("{}", json!({ "ok": true, "name": m.name, "state": mode.as_str(), "until": until, "reason": reason }));
+        out_line!(
+            "{}",
+            json!({ "ok": true, "name": m.name, "state": mode.as_str(), "until": until, "reason": reason })
+        );
     } else {
         out_line!("{line}");
     }
@@ -720,7 +1162,9 @@ fn said(cx: &Ctx, m: &Monitor, mode: &Mode, line: &str) -> Result<(), Error> {
 }
 
 fn delete(cx: &Ctx, name: &str, yes: bool) -> Result<(), Error> {
-    let Some(m) = cx.find(name) else { return usage(&format!("no monitor named {name}")) };
+    let Some(m) = cx.find(name) else {
+        return usage(&format!("no monitor named {name}"));
+    };
     let path = cx.dir.join(&m.file);
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
@@ -745,13 +1189,21 @@ fn delete(cx: &Ctx, name: &str, yes: bool) -> Result<(), Error> {
         let _ = cx.state.forget(name);
     }
     if cx.json {
-        out_line!("{}", json!({ "ok": true, "name": name, "file": path.display().to_string(), "lines": lines.map(|(a, b)| [a, b]), "removed": removed, "done": yes }));
+        out_line!(
+            "{}",
+            json!({ "ok": true, "name": name, "file": path.display().to_string(), "lines": lines.map(|(a, b)| [a, b]), "removed": removed, "done": yes })
+        );
         return Ok(());
     }
     let look = Look::stdout(cx.json);
-    let at = lines.map(|(a, b)| format!(" lines {a}-{b}")).unwrap_or_default();
+    let at = lines
+        .map(|(a, b)| format!(" lines {a}-{b}"))
+        .unwrap_or_default();
     if yes {
-        out_line!("removed {name} from {}{at}; the other entries and comments are as they were", path.display());
+        out_line!(
+            "removed {name} from {}{at}; the other entries and comments are as they were",
+            path.display()
+        );
     } else {
         out_line!("would remove {name} from {}{at}:\n", path.display());
         for l in removed.lines() {
@@ -766,7 +1218,10 @@ fn check(r: &Report, as_json: bool) -> Result<(), Error> {
     let bad = r.problems.len();
     if as_json {
         let names: Vec<&str> = r.monitors.iter().map(|m| m.name.as_str()).collect();
-        out_line!("{}", json!({ "ok": bad == 0, "monitors": names, "problems": r.problems, "warnings": r.warnings }));
+        out_line!(
+            "{}",
+            json!({ "ok": bad == 0, "monitors": names, "problems": r.problems, "warnings": r.warnings })
+        );
     } else {
         for p in &r.problems {
             out_line!("bad  {p}");
@@ -779,24 +1234,34 @@ fn check(r: &Report, as_json: bool) -> Result<(), Error> {
         }
     }
     if bad > 0 {
-        return Err(Error::Findings(format!("{bad} problem{} in the monitor files", if bad == 1 { "" } else { "s" })));
+        return Err(Error::Findings(format!(
+            "{bad} problem{} in the monitor files",
+            if bad == 1 { "" } else { "s" }
+        )));
     }
     Ok(())
 }
 
 /// `2026-11-14 17:20 UTC`.
 fn when(at: u64) -> String {
-    chrono::DateTime::from_timestamp(i64::try_from(at).unwrap_or(0), 0).map_or_else(|| at.to_string(), |t| t.format("%Y-%m-%d %H:%M UTC").to_string())
+    chrono::DateTime::from_timestamp(i64::try_from(at).unwrap_or(0), 0).map_or_else(
+        || at.to_string(),
+        |t| t.format("%Y-%m-%d %H:%M UTC").to_string(),
+    )
 }
 
 /// `17:20:05 UTC`, for a watch line.
 fn clock(at: u64) -> String {
-    chrono::DateTime::from_timestamp(i64::try_from(at).unwrap_or(0), 0).map_or_else(|| at.to_string(), |t| t.format("%H:%M:%S UTC").to_string())
+    chrono::DateTime::from_timestamp(i64::try_from(at).unwrap_or(0), 0)
+        .map_or_else(|| at.to_string(), |t| t.format("%H:%M:%S UTC").to_string())
 }
 
 /// `2026-11-14T17:20:05Z`, for JSON.
 fn iso(at: u64) -> String {
-    chrono::DateTime::from_timestamp(i64::try_from(at).unwrap_or(0), 0).map_or_else(|| at.to_string(), |t| t.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+    chrono::DateTime::from_timestamp(i64::try_from(at).unwrap_or(0), 0).map_or_else(
+        || at.to_string(),
+        |t| t.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+    )
 }
 
 /// `12s ago`, `5m ago`, `3h ago`, `2d ago`.
@@ -811,7 +1276,11 @@ fn runs_n(n: usize) -> String {
 
 /// How often `m` runs: a cli monitor (every 0) runs after each build, on `iohr monitors run`.
 fn every_text(m: &Monitor) -> String {
-    if m.every_secs == 0 { "build".into() } else { human(m.every_secs) }
+    if m.every_secs == 0 {
+        "build".into()
+    } else {
+        human(m.every_secs)
+    }
 }
 
 fn human(s: u64) -> String {
@@ -843,7 +1312,11 @@ fn from_monitors(e: monitors::Error) -> Error {
 
 /// The project's schemas for `expect.shape`: its `schemas/` folder over the embedded ones.
 fn schemas_for(dir: &Path) -> Result<(Schemas, BTreeMap<String, String>), String> {
-    let root = dir.ancestors().nth(2).map(|r| r.join("schemas")).filter(|s| s.is_dir());
+    let root = dir
+        .ancestors()
+        .nth(2)
+        .map(|r| r.join("schemas"))
+        .filter(|s| s.is_dir());
     match root {
         Some(s) => schema::load_tree(&s),
         None => Ok((Schemas::embedded()?, BTreeMap::new())),
@@ -851,20 +1324,37 @@ fn schemas_for(dir: &Path) -> Result<(Schemas, BTreeMap<String, String>), String
 }
 
 /// How `iohr monitors run` runs a project's own cli checks: this binary, throwaway folders under
-/// the system temp folder, and copies of the monitors folder (`{monitors}`) and, when the
+/// the system temp folder (this binary unless `IOHR_MONITORS_BIN` names the project's own), and copies of the monitors folder (`{monitors}`) and, when the
 /// project has one, of its scrum board (`{board}`), so no check writes to the project.
 fn cli_for(dir: &Path) -> Cli {
-    let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("iohr"));
-    let root = std::env::var_os("IOHR_MONITORS_TMP").map_or_else(|| std::env::temp_dir().join("iohr-monitors-cli"), PathBuf::from);
+    let bin = std::env::var_os("IOHR_MONITORS_BIN")
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_exe().ok())
+        .unwrap_or_else(|| PathBuf::from("iohr"));
+    let root = std::env::var_os("IOHR_MONITORS_TMP").map_or_else(
+        || std::env::temp_dir().join("iohr-monitors-cli"),
+        PathBuf::from,
+    );
     let mut copies = vec![("monitors".to_string(), dir.to_path_buf())];
-    if let Some(board) = dir.ancestors().nth(2).map(|r| r.join("atlas/scrum")).filter(|b| b.join("board.json").is_file()) {
+    if let Some(board) = dir
+        .ancestors()
+        .nth(2)
+        .map(|r| r.join("atlas/scrum"))
+        .filter(|b| b.join("board.json").is_file())
+    {
         copies.push(("board".to_string(), board));
     }
     Cli { bin, root, copies }
 }
 
 /// `install`: the project's monitors as one block of the agent's checks file.
-fn install_cmd(cx: &Ctx, only: &[String], file: Option<&Path>, block: Option<String>, dry_run: bool) -> Result<(), Error> {
+fn install_cmd(
+    cx: &Ctx,
+    only: &[String],
+    file: Option<&Path>,
+    block: Option<String>,
+    dry_run: bool,
+) -> Result<(), Error> {
     use crate::monitors::install as inst;
     let chosen = match inst::choose(&cx.files, only) {
         Ok(c) => c,
@@ -872,7 +1362,9 @@ fn install_cmd(cx: &Ctx, only: &[String], file: Option<&Path>, block: Option<Str
     };
     let root = cx.dir.ancestors().nth(2).unwrap_or(&cx.dir);
     let block = block.unwrap_or_else(|| inst::block_for(root));
-    let file = match file.map(Path::to_path_buf).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/iohr-agent/checks.toml"))) {
+    let file = match file.map(Path::to_path_buf).or_else(|| {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/iohr-agent/checks.toml"))
+    }) {
         Some(f) => f,
         None => return usage("no HOME; pass --file"),
     };
@@ -892,9 +1384,18 @@ fn install_cmd(cx: &Ctx, only: &[String], file: Option<&Path>, block: Option<Str
         return Ok(());
     }
     let verb = if done.dry_run { "would put" } else { "put" };
-    out_line!("{verb} {} checks in block {} of {} ({} declared there)", done.entries, done.block, done.file.display(), done.declared);
+    out_line!(
+        "{verb} {} checks in block {} of {} ({} declared there)",
+        done.entries,
+        done.block,
+        done.file.display(),
+        done.declared
+    );
     if done.cli > 0 {
-        out_line!("left out: {} cli checks (they never leave this machine)", done.cli);
+        out_line!(
+            "left out: {} cli checks (they never leave this machine)",
+            done.cli
+        );
     }
     if done.off > 0 {
         out_line!("left out: {} with enabled = false", done.off);

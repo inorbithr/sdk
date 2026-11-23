@@ -33,7 +33,10 @@ impl<F: Fn(&str) -> Result<Arc<Validator>, String>> Shapes for F {
 /// The `$id` of the schema at a repo path such as `schemas/api/items/v0.json`, for schema sets
 /// whose ids are a base URL plus the path under `schemas/` (a project's are). None for any other path.
 pub fn schema_id(base: &str, shape: &str) -> Option<String> {
-    shape.strip_prefix("schemas/").filter(|rest| !rest.is_empty() && !rest.contains("..")).map(|rest| format!("{base}{rest}"))
+    shape
+        .strip_prefix("schemas/")
+        .filter(|rest| !rest.is_empty() && !rest.contains(".."))
+        .map(|rest| format!("{base}{rest}"))
 }
 
 /// The first place a body breaks its schema: a JSON pointer and two type words, no value.
@@ -49,7 +52,11 @@ pub struct Mismatch {
 
 impl fmt::Display for Mismatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: expected {}, found {}", self.at, self.expected, self.found)
+        write!(
+            f,
+            "{}: expected {}, found {}",
+            self.at, self.expected, self.found
+        )
     }
 }
 
@@ -69,7 +76,11 @@ pub fn type_of(v: &Value) -> &'static str {
 fn types(kind: &TypeKind) -> String {
     match kind {
         TypeKind::Single(t) => t.as_str().to_owned(),
-        TypeKind::Multiple(set) => set.iter().map(JsonType::as_str).collect::<Vec<_>>().join(" or "),
+        TypeKind::Multiple(set) => set
+            .iter()
+            .map(JsonType::as_str)
+            .collect::<Vec<_>>()
+            .join(" or "),
     }
 }
 
@@ -84,16 +95,35 @@ pub fn first_mismatch(schema: &Validator, value: &Value) -> Option<Mismatch> {
     let at = if at.is_empty() { "/".to_owned() } else { at };
     let found = type_of(e.instance()).to_owned();
     Some(match e.kind() {
-        ValidationErrorKind::Type { kind } => Mismatch { at, expected: types(kind), found },
+        ValidationErrorKind::Type { kind } => Mismatch {
+            at,
+            expected: types(kind),
+            found,
+        },
         ValidationErrorKind::Required { property } => {
             let field = property.as_str().unwrap_or_default();
-            let at = if at == "/" { format!("/{field}") } else { format!("{at}/{field}") };
-            Mismatch { at, expected: "a field".into(), found: "none".into() }
+            let at = if at == "/" {
+                format!("/{field}")
+            } else {
+                format!("{at}/{field}")
+            };
+            Mismatch {
+                at,
+                expected: "a field".into(),
+                found: "none".into(),
+            }
         }
-        ValidationErrorKind::AdditionalProperties { .. } | ValidationErrorKind::UnevaluatedProperties { .. } => {
-            Mismatch { at, expected: "no other fields".into(), found: "another field".into() }
-        }
-        k => Mismatch { at, expected: k.keyword().to_owned(), found },
+        ValidationErrorKind::AdditionalProperties { .. }
+        | ValidationErrorKind::UnevaluatedProperties { .. } => Mismatch {
+            at,
+            expected: "no other fields".into(),
+            found: "another field".into(),
+        },
+        k => Mismatch {
+            at,
+            expected: k.keyword().to_owned(),
+            found,
+        },
     })
 }
 
@@ -101,7 +131,13 @@ pub fn first_mismatch(schema: &Validator, value: &Value) -> Option<Mismatch> {
 /// (`<pointer>: expected X, found Y`, or why it could not be checked). The body is not kept.
 pub fn check_body(shapes: &dyn Shapes, shape: &str, body: &[u8]) -> Result<(), String> {
     let schema = shapes.validator(shape)?;
-    let value: Value = serde_json::from_slice(body).map_err(|e| format!("/: expected JSON, found a parse error at line {} column {}", e.line(), e.column()))?;
+    let value: Value = serde_json::from_slice(body).map_err(|e| {
+        format!(
+            "/: expected JSON, found a parse error at line {} column {}",
+            e.line(),
+            e.column()
+        )
+    })?;
     match first_mismatch(&schema, &value) {
         None => Ok(()),
         Some(m) => Err(m.to_string()),
@@ -137,32 +173,50 @@ mod tests {
 
         let wrong = json!({ "items": [{ "id": 1, "score": 2 }, { "id": 2, "score": 1 }, { "id": 3, "score": 0 }, { "id": 4, "score": "secret-token-123" }] });
         let m = first_mismatch(&s, &wrong).unwrap();
-        assert_eq!(m.to_string(), "/items/3/score: expected integer, found string");
+        assert_eq!(
+            m.to_string(),
+            "/items/3/score: expected integer, found string"
+        );
         assert!(!m.to_string().contains("secret"));
 
         let missing = json!({ "items": [{ "id": 1 }] });
-        assert_eq!(first_mismatch(&s, &missing).unwrap().to_string(), "/items/0/score: expected a field, found none");
+        assert_eq!(
+            first_mismatch(&s, &missing).unwrap().to_string(),
+            "/items/0/score: expected a field, found none"
+        );
 
         let extra = json!({ "items": [], "password-hunter2": true });
         let m = first_mismatch(&s, &extra).unwrap().to_string();
         assert_eq!(m, "/: expected no other fields, found another field");
 
         let bad_enum = json!({ "items": [{ "id": 1, "score": 1, "kind": "private-value" }] });
-        assert_eq!(first_mismatch(&s, &bad_enum).unwrap().to_string(), "/items/0/kind: expected enum, found string");
+        assert_eq!(
+            first_mismatch(&s, &bad_enum).unwrap().to_string(),
+            "/items/0/kind: expected enum, found string"
+        );
 
         let nullable = json!({ "items": [{ "id": 1, "score": 1, "summary": 7 }] });
-        assert_eq!(first_mismatch(&s, &nullable).unwrap().to_string(), "/items/0/summary: expected null or string, found integer");
+        assert_eq!(
+            first_mismatch(&s, &nullable).unwrap().to_string(),
+            "/items/0/summary: expected null or string, found integer"
+        );
     }
 
     #[test]
     fn a_shape_path_maps_to_its_id_under_the_base() {
         let base = "https://schemas.inorbit.hr/eye/";
-        assert_eq!(schema_id(base, "schemas/api/items/v0.json").as_deref(), Some("https://schemas.inorbit.hr/eye/api/items/v0.json"));
+        assert_eq!(
+            schema_id(base, "schemas/api/items/v0.json").as_deref(),
+            Some("https://schemas.inorbit.hr/eye/api/items/v0.json")
+        );
         assert_eq!(schema_id(base, "api/items/v0.json"), None);
         assert_eq!(schema_id(base, "schemas/../secret.json"), None);
         let v = Arc::new(schema());
         let by_closure = move |_: &str| Ok(v.clone());
-        assert_eq!(check_body(&by_closure, "schemas/x/y/v0.json", br#"{"items":[]}"#), Ok(()));
+        assert_eq!(
+            check_body(&by_closure, "schemas/x/y/v0.json", br#"{"items":[]}"#),
+            Ok(())
+        );
     }
 
     struct One(Arc<Validator>);
@@ -177,7 +231,10 @@ mod tests {
         let s = One(Arc::new(schema()));
         assert_eq!(check_body(&s, "x", br#"{"items":[]}"#), Ok(()));
         let e = check_body(&s, "x", b"<html>secret</html>").unwrap_err();
-        assert!(e.starts_with("/: expected JSON, found a parse error at line 1"), "{e}");
+        assert!(
+            e.starts_with("/: expected JSON, found a parse error at line 1"),
+            "{e}"
+        );
         assert!(!e.contains("secret"));
     }
 }

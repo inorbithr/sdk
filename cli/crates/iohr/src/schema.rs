@@ -182,6 +182,20 @@ impl Schemas {
         Ok(v)
     }
 
+    /// The compiled validator for `reference`: a schema's `$id`, or an `$id` with a JSON pointer
+    /// fragment (`<id>#/$defs/request`) for one part of a schema.
+    pub(crate) fn validator_ref(&self, reference: &str) -> Result<Arc<Validator>, ValidateError> {
+        let Some((id, _)) = reference.split_once('#') else {
+            return self.validator(reference);
+        };
+        if !self.by_id.contains_key(id) {
+            return Err(ValidateError::Unknown(id.to_owned()));
+        }
+        Ok(Arc::new(
+            self.build(&serde_json::json!({ "$ref": reference }))?,
+        ))
+    }
+
     /// Checks `value` against the schema with this `$id`.
     ///
     /// # Errors
@@ -321,8 +335,14 @@ pub(crate) fn load_tree(root: &Path) -> Result<(Schemas, BTreeMap<String, String
     let mut ids = BTreeMap::new();
     for p in paths {
         let Ok(value) = read_json(&p) else { continue };
-        let Some(id) = value.get("$id").and_then(Value::as_str).map(str::to_owned) else { continue };
-        let rel = p.strip_prefix(root).unwrap_or(&p).to_string_lossy().replace('\\', "/");
+        let Some(id) = value.get("$id").and_then(Value::as_str).map(str::to_owned) else {
+            continue;
+        };
+        let rel = p
+            .strip_prefix(root)
+            .unwrap_or(&p)
+            .to_string_lossy()
+            .replace('\\', "/");
         ids.insert(rel, id.clone());
         more.push((id, value));
     }

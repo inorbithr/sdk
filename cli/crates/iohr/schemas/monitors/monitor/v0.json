@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.inorbit.hr/iohr/monitors/monitor/v0.json",
   "title": "Monitor file, v0",
-  "description": "One file of InOrbit monitors in a project's .inorbit/monitors/ folder (RFC 0008), read as JSON. It is the InOrbit agent's checks.toml format (core RFC 0040.1 and 0040.2; dataplane crates/iohr-agent/src/checks_file.rs): [[check]] entries the agent runs and expects to pass, and [[refuse]] entries it expects to be refused. This schema holds the shapes and bounds; the rules it cannot say (which keys go with which surface, every between 60s and 24h, URLs, names unique across files) are checked by the eye-monitors crate, and move with it to the SDK as iohr monitors. A cli check (target = { cli = \"eye\" }) runs the project's own built binary with argv, never a shell, in a throwaway folder that is removed after the run; the InOrbit agent has no cli surface yet, so eye monitors export leaves cli checks out (RFC 0008).",
+  "description": "One file of InOrbit monitors in a project's .inorbit/monitors/ folder (RFC 0008), read as JSON. It is the InOrbit agent's checks.toml format (core RFC 0040.1 and 0040.2; dataplane crates/iohr-agent/src/checks_file.rs): [[check]] entries the agent runs and expects to pass, and [[refuse]] entries it expects to be refused. This schema holds the shapes and bounds; the rules it cannot say (which keys go with which surface, every between 60s and 24h, URLs, names unique across files) are checked by iohr monitors check. A cli check (target = { cli = \"app\" }) runs the project's own built binary with argv, never a shell, in a throwaway folder that is removed after the run; the InOrbit agent has no cli surface yet, so iohr monitors export and install leave cli checks out (RFC 0008).",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -57,7 +57,7 @@
         },
         "label": { "type": "string", "pattern": "^[^\\u0000-\\u001f\\u007f]{1,128}$" },
         "notify": { "type": "boolean" },
-        "enabled": { "type": "boolean", "description": "eye only: false means off by default, for a check only some setups run (such as a second eye serve). eye monitors enable turns it on on one Mac; eye monitors export leaves the entry out, since the agent refuses the key (ADR 0009)." },
+        "enabled": { "type": "boolean", "description": "iohr monitors only: false means off by default, for a check only some setups run (such as a second instance of the service). iohr monitors enable turns it on on one machine; export and install leave the entry out, since the agent refuses the key (ADR 0009)." },
         "method": { "type": "string", "minLength": 1, "maxLength": 128, "description": "http (GET when left out), ws and grpc (needed there)." },
         "body": { "description": "http: the request body, at most 8 KiB as JSON." },
         "headers": {
@@ -99,7 +99,7 @@
       "minItems": 1,
       "maxItems": 32,
       "items": { "type": "string", "minLength": 1, "maxLength": 512 },
-      "description": "cli: the arguments after the binary, passed as they are, never through a shell. {tmp}, {home} and the copies the runner names (eye: {board}, {monitors}) are replaced by paths in the throwaway folder."
+      "description": "cli: the arguments after the binary, passed as they are, never through a shell. {tmp}, {home} and the copies the runner names (iohr monitors: {board}, {monitors}) are replaced by paths in the throwaway folder."
     },
     "step": {
       "type": "object",
@@ -142,7 +142,7 @@
           "description": "http: each response header must start with the value given."
         },
         "shape": {
-          "description": "http, sse and cli (its stdout): the JSON Schema the body must match, read at most 1 MiB, checked in memory and dropped; a failure names only the first mismatch as a location and two types, never a value (core RFC 0040.2, Reading a body). A path such as schemas/api/items/v0.json, or for sse a table of event name to schema path, where an event not named fails. Run by eye monitors run today; the InOrbit agent does not read bodies yet and refuses this key, so eye monitors export leaves it out (RFC 0008).",
+          "description": "http, sse and cli (its stdout): the JSON Schema the body must match, read at most 1 MiB, checked in memory and dropped; a failure names only the first mismatch as a location and two types, never a value (core RFC 0040.2, Reading a body). A path such as schemas/api/items/v0.json, or for sse a table of event name to schema path, where an event not named fails. Run by iohr monitors run today; the InOrbit agent does not read bodies yet and refuses this key, so iohr monitors export leaves it out (RFC 0008).",
           "oneOf": [
             { "$ref": "#/$defs/shape_path" },
             {

@@ -34,7 +34,9 @@ const RUNS: &str = "runs.jsonl";
 /// Seconds since 1970, UTC.
 #[must_use]
 pub fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// The state folder for a monitors folder: `IOHR_MONITORS_STATE` when set, else
@@ -76,7 +78,10 @@ pub enum Mode {
     /// Its file says `enabled = false` and nothing here turned it on.
     Off,
     /// Switched off here, with the reason and the end.
-    Silenced { reason: Option<String>, until: Option<u64> },
+    Silenced {
+        reason: Option<String>,
+        until: Option<u64>,
+    },
 }
 
 impl Mode {
@@ -115,7 +120,14 @@ impl Entry {
             Verdict::Fail(w) => ("fail", Some(w)),
             Verdict::Skip(w) => ("skip", Some(w)),
         };
-        Entry { at, name: r.name.clone(), verdict: verdict.into(), why: why.map(|w| w.chars().take(MAX_WHY).collect()), ms: r.ms, status: r.status }
+        Entry {
+            at,
+            name: r.name.clone(),
+            verdict: verdict.into(),
+            why: why.map(|w| w.chars().take(MAX_WHY).collect()),
+            ms: r.ms,
+            status: r.status,
+        }
     }
 }
 
@@ -152,7 +164,10 @@ impl State {
     /// The overrides still in force at `now`.
     #[must_use]
     pub fn overrides(&self, now: u64) -> BTreeMap<String, Override> {
-        let all: BTreeMap<String, Override> = fs::read(self.dir.join(SILENCES)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let all: BTreeMap<String, Override> = fs::read(self.dir.join(SILENCES))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
         all.into_iter().filter(|(_, o)| o.live(now)).collect()
     }
 
@@ -160,7 +175,10 @@ impl State {
     #[must_use]
     pub fn mode(m: &Monitor, overrides: &BTreeMap<String, Override>, now: u64) -> Mode {
         match overrides.get(&m.name).filter(|o| o.live(now)) {
-            Some(o) if !o.on => Mode::Silenced { reason: o.reason.clone(), until: o.until },
+            Some(o) if !o.on => Mode::Silenced {
+                reason: o.reason.clone(),
+                until: o.until,
+            },
             Some(_) => Mode::On,
             None if m.enabled => Mode::On,
             None => Mode::Off,
@@ -168,16 +186,35 @@ impl State {
     }
 
     /// Switches `m` off here until `until` (never when `None`).
-    pub fn disable(&self, m: &Monitor, until: Option<u64>, reason: Option<String>) -> std::io::Result<()> {
+    pub fn disable(
+        &self,
+        m: &Monitor,
+        until: Option<u64>,
+        reason: Option<String>,
+    ) -> std::io::Result<()> {
         let now = now();
-        self.write_overrides(&m.name, Some(Override { on: false, until, reason, since: now }), now)
+        self.write_overrides(
+            &m.name,
+            Some(Override {
+                on: false,
+                until,
+                reason,
+                since: now,
+            }),
+            now,
+        )
     }
 
     /// Switches `m` on here: drops its silence, and for a monitor whose file says
     /// `enabled = false`, keeps an override that turns it on.
     pub fn enable(&self, m: &Monitor) -> std::io::Result<()> {
         let now = now();
-        let o = (!m.enabled).then_some(Override { on: true, until: None, reason: None, since: now });
+        let o = (!m.enabled).then_some(Override {
+            on: true,
+            until: None,
+            reason: None,
+            since: now,
+        });
         self.write_overrides(&m.name, o, now)
     }
 
@@ -204,14 +241,20 @@ impl State {
         if ran.is_empty() {
             return Ok(());
         }
-        fs::create_dir_all(&self.dir)?;
+        ensure_dir(&self.dir)?;
         let path = self.dir.join(RUNS);
         let mut lines = String::new();
         for r in ran {
-            lines.push_str(&serde_json::to_string(&Entry::of(r, at)).map_err(std::io::Error::other)?);
+            lines.push_str(
+                &serde_json::to_string(&Entry::of(r, at)).map_err(std::io::Error::other)?,
+            );
             lines.push('\n');
         }
-        fs::OpenOptions::new().create(true).append(true).open(&path)?.write_all(lines.as_bytes())?;
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?
+            .write_all(lines.as_bytes())?;
         if fs::metadata(&path)?.len() > MAX_LOG {
             let text = fs::read_to_string(&path)?;
             let all: Vec<&str> = text.lines().collect();
@@ -224,7 +267,13 @@ impl State {
     /// Every logged run, oldest first; lines that do not parse are left out.
     #[must_use]
     pub fn runs(&self) -> Vec<Entry> {
-        fs::read_to_string(self.dir.join(RUNS)).map(|t| t.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()).unwrap_or_default()
+        fs::read_to_string(self.dir.join(RUNS))
+            .map(|t| {
+                t.lines()
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Each monitor's past, by name.
@@ -239,7 +288,13 @@ impl State {
                 _ => {}
             }
             let judged = |v: &str| v == "pass" || v == "fail";
-            if judged(&e.verdict) && p.runs.iter().rev().find(|r| judged(&r.verdict)).is_some_and(|r| r.verdict != e.verdict) {
+            if judged(&e.verdict)
+                && p.runs
+                    .iter()
+                    .rev()
+                    .find(|r| judged(&r.verdict))
+                    .is_some_and(|r| r.verdict != e.verdict)
+            {
                 p.flaps += 1;
             }
             p.runs.push(e);
@@ -248,11 +303,33 @@ impl State {
     }
 }
 
+/// Makes the state folder; one under a project's `.inorbit/state/` gets a `.gitignore` of its
+/// own there, so the state stays out of git without the project's `.gitignore` changing.
+fn ensure_dir(dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dir)?;
+    if let Some(state) = dir
+        .parent()
+        .filter(|p| p.file_name().is_some_and(|n| n == "state"))
+    {
+        let ignore = state.join(".gitignore");
+        if !ignore.exists() {
+            fs::write(ignore, "*\n")?;
+        }
+    }
+    Ok(())
+}
+
 /// Writes `bytes` to `path` through a file beside it, so a reader never sees half a file.
 fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
-    fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!(".{}.{}", path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(), std::process::id()));
+    ensure_dir(dir)?;
+    let tmp = dir.join(format!(
+        ".{}.{}",
+        path.file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default(),
+        std::process::id()
+    ));
     fs::write(&tmp, bytes)?;
     fs::rename(&tmp, path)
 }
@@ -261,22 +338,33 @@ fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use super::check_files;
+    use crate::monitors::check_files;
 
     fn monitors(text: &str) -> Vec<Monitor> {
-        let f = super::File { path: PathBuf::from("eye.toml"), value: super::parse(text).unwrap() };
+        let f = crate::monitors::File {
+            path: PathBuf::from("eye.toml"),
+            value: crate::monitors::parse(text).unwrap(),
+        };
         let r = check_files(&[f]);
         assert!(r.problems.is_empty(), "{:?}", r.problems);
         r.monitors
     }
 
     fn ran(name: &str, v: Verdict) -> Ran {
-        Ran { name: name.into(), verdict: v, ms: 3, status: Some(200) }
+        Ran {
+            name: name.into(),
+            verdict: v,
+            ms: 3,
+            status: Some(200),
+        }
     }
 
     #[test]
     fn silences_end_and_enable_turns_on_a_monitor_off_by_default() {
-        let t = tempfile::Builder::new().prefix("eye-monitors-state-").tempdir().unwrap();
+        let t = tempfile::Builder::new()
+            .prefix("eye-monitors-state-")
+            .tempdir()
+            .unwrap();
         let st = State::new(t.path().join("data/monitors"));
         let ms = monitors(
             "[[check]]\nname = \"api\"\ntarget = \"http://127.0.0.1:7171/api/health\"\nevery = \"60s\"\n\n\
@@ -287,10 +375,21 @@ mod tests {
         assert_eq!(State::mode(api, &st.overrides(now), now), Mode::On);
         assert_eq!(State::mode(follower, &st.overrides(now), now), Mode::Off);
 
-        st.disable(api, Some(now + 3600), Some("deploy".into())).unwrap();
+        st.disable(api, Some(now + 3600), Some("deploy".into()))
+            .unwrap();
         let o = st.overrides(now);
-        assert_eq!(State::mode(api, &o, now), Mode::Silenced { reason: Some("deploy".into()), until: Some(now + 3600) });
-        assert_eq!(State::mode(api, &o, now + 3601), Mode::On, "a silence past its end is gone");
+        assert_eq!(
+            State::mode(api, &o, now),
+            Mode::Silenced {
+                reason: Some("deploy".into()),
+                until: Some(now + 3600)
+            }
+        );
+        assert_eq!(
+            State::mode(api, &o, now + 3601),
+            Mode::On,
+            "a silence past its end is gone"
+        );
         assert!(st.overrides(now + 3601).is_empty());
 
         st.enable(follower).unwrap();
@@ -298,32 +397,58 @@ mod tests {
         let o = st.overrides(now);
         assert_eq!(State::mode(api, &o, now), Mode::On);
         assert_eq!(State::mode(follower, &o, now), Mode::On);
-        assert_eq!(o.len(), 1, "enable drops a silence and keeps only the on override: {o:?}");
-        let left: Vec<_> = fs::read_dir(&st.dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(
+            o.len(),
+            1,
+            "enable drops a silence and keeps only the on override: {o:?}"
+        );
+        let left: Vec<_> = fs::read_dir(&st.dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
         assert_eq!(left, ["silences.json"], "no temp file is left");
     }
 
     #[test]
     fn the_log_keeps_verdicts_without_bodies_counts_flaps_and_drops_its_oldest_half() {
-        let t = tempfile::Builder::new().prefix("eye-monitors-log-").tempdir().unwrap();
+        let t = tempfile::Builder::new()
+            .prefix("eye-monitors-log-")
+            .tempdir()
+            .unwrap();
         let st = State::new(t.path().to_path_buf());
-        st.record(&[ran("api", Verdict::Pass), ran("ui", Verdict::Skip("https runs in the agent".into()))], 100).unwrap();
-        st.record(&[ran("api", Verdict::Fail("x".repeat(1000)))], 200).unwrap();
+        st.record(
+            &[
+                ran("api", Verdict::Pass),
+                ran("ui", Verdict::Skip("https runs in the agent".into())),
+            ],
+            100,
+        )
+        .unwrap();
+        st.record(&[ran("api", Verdict::Fail("x".repeat(1000)))], 200)
+            .unwrap();
         st.record(&[ran("api", Verdict::Pass)], 300).unwrap();
         let p = &st.pasts()["api"];
-        assert_eq!((p.runs.len(), p.last_pass, p.last_fail, p.flaps), (3, Some(300), Some(200), 2));
+        assert_eq!(
+            (p.runs.len(), p.last_pass, p.last_fail, p.flaps),
+            (3, Some(300), Some(200), 2)
+        );
         assert_eq!(p.runs[1].why.as_ref().unwrap().chars().count(), MAX_WHY);
         assert_eq!(st.pasts()["ui"].flaps, 0);
 
         let big = ran("api", Verdict::Fail("y".repeat(MAX_WHY)));
         let n = usize::try_from(MAX_LOG).unwrap() / 300 + 10;
         for i in 0..n {
-            st.record(std::slice::from_ref(&big), 1000 + i as u64).unwrap();
+            st.record(std::slice::from_ref(&big), 1000 + i as u64)
+                .unwrap();
         }
         let len = fs::metadata(st.dir.join(RUNS)).unwrap().len();
         assert!(len <= MAX_LOG, "{len}");
         let runs = st.runs();
-        assert_eq!(runs.last().unwrap().at, 1000 + n as u64 - 1, "the newest run is kept");
+        assert_eq!(
+            runs.last().unwrap().at,
+            1000 + n as u64 - 1,
+            "the newest run is kept"
+        );
         assert!(runs.first().unwrap().at > 300, "the oldest runs are gone");
     }
 }

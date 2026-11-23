@@ -30,7 +30,15 @@ use super::{Monitor, Shape, Step};
 pub const MAX_STDERR: usize = 64 * 1024;
 /// Where every proxy variable points when a check has no network: a port nothing listens on.
 const NO_NETWORK: &str = "http://127.0.0.1:9";
-const PROXIES: [&str; 7] = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "INORBIT_PROXY"];
+const PROXIES: [&str; 7] = [
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "INORBIT_PROXY",
+];
 
 /// How to run the cli checks: the binary just built, where the throwaway folders go, and the
 /// project folders a check may name in its argv, each copied in when it is named.
@@ -52,7 +60,11 @@ impl Scratch {
     fn new(root: &Path, name: &str) -> io::Result<Scratch> {
         static N: AtomicU64 = AtomicU64::new(0);
         fs::create_dir_all(root)?;
-        let path = root.join(format!("{name}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let path = root.join(format!(
+            "{name}-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
         fs::create_dir(&path)?;
         let s = Scratch(path);
         fs::create_dir(s.0.join("home"))?;
@@ -87,7 +99,9 @@ impl Cli {
     pub fn run(&self, m: &Monitor, shapes: Option<&dyn Shapes>) -> Verdict {
         let scratch = match Scratch::new(&self.root, &m.name) {
             Ok(s) => s,
-            Err(e) => return Verdict::Fail(format!("could not make the throwaway folder: {}", e.kind())),
+            Err(e) => {
+                return Verdict::Fail(format!("could not make the throwaway folder: {}", e.kind()));
+            }
         };
         let deadline = Instant::now() + m.expect.max_ms.map_or(TIMEOUT, Duration::from_millis);
         for (i, step) in m.steps.iter().enumerate() {
@@ -98,8 +112,18 @@ impl Cli {
         Verdict::Pass
     }
 
-    fn step(&self, m: &Monitor, n: usize, step: &Step, dir: &Path, deadline: Instant, shapes: Option<&dyn Shapes>) -> Result<(), String> {
-        let argv = self.argv(step, dir).map_err(|e| format!("step {n}: could not copy a project folder in: {}", e.kind()))?;
+    fn step(
+        &self,
+        m: &Monitor,
+        n: usize,
+        step: &Step,
+        dir: &Path,
+        deadline: Instant,
+        shapes: Option<&dyn Shapes>,
+    ) -> Result<(), String> {
+        let argv = self
+            .argv(step, dir)
+            .map_err(|e| format!("step {n}: could not copy a project folder in: {}", e.kind()))?;
         if let (Some(path), Some(shapes)) = (&step.expect.request, shapes) {
             let schema = shapes.validator(path)?;
             let value = serde_json::Value::from(argv.clone());
@@ -124,25 +148,44 @@ impl Cli {
                 cmd.env(k, NO_NETWORK);
             }
         }
-        let mut kid = Kid(cmd.spawn().map_err(|e| format!("step {n}: the binary did not start: {}", e.kind()))?);
-        let out = kid.0.stdout.take().map(|r| thread::spawn(move || slurp(r, MAX_BODY)));
-        let err = kid.0.stderr.take().map(|r| thread::spawn(move || slurp(r, MAX_STDERR)));
-        let status = wait(&mut kid.0, deadline).ok_or_else(|| format!("step {n} timed out; the binary was stopped"))?;
+        let mut kid = Kid(cmd
+            .spawn()
+            .map_err(|e| format!("step {n}: the binary did not start: {}", e.kind()))?);
+        let out = kid
+            .0
+            .stdout
+            .take()
+            .map(|r| thread::spawn(move || slurp(r, MAX_BODY)));
+        let err = kid
+            .0
+            .stderr
+            .take()
+            .map(|r| thread::spawn(move || slurp(r, MAX_STDERR)));
+        let status = wait(&mut kid.0, deadline)
+            .ok_or_else(|| format!("step {n} timed out; the binary was stopped"))?;
         let (stdout, out_over) = out.and_then(|h| h.join().ok()).unwrap_or_default();
         let (stderr, _) = err.and_then(|h| h.join().ok()).unwrap_or_default();
 
         let want = step.expect.exit.unwrap_or(0);
         if status.code() != Some(want) {
-            let found = status.code().map_or_else(|| "a signal".to_owned(), |c| c.to_string());
+            let found = status
+                .code()
+                .map_or_else(|| "a signal".to_owned(), |c| c.to_string());
             return Err(format!("step {n} /exit: expected {want}, found {found}"));
         }
-        let text = String::from_utf8_lossy(&stderr).replace(&dir.to_string_lossy().into_owned(), "{tmp}").replace(&self.bin.to_string_lossy().into_owned(), "iohr");
+        let text = String::from_utf8_lossy(&stderr)
+            .replace(&dir.to_string_lossy().into_owned(), "{tmp}")
+            .replace(&self.bin.to_string_lossy().into_owned(), "iohr");
         if let Some(kind) = leak(&text) {
             return Err(format!("step {n} stderr holds {kind}"));
         }
         match (&step.expect.shape, shapes) {
-            (Some(_), _) if out_over => Err(format!("shape step {n} /: expected at most {MAX_BODY} bytes, found more")),
-            (Some(Shape::One(path)), Some(shapes)) => check_body(shapes, path, &stdout).map_err(|e| format!("shape step {n} {e}")),
+            (Some(_), _) if out_over => Err(format!(
+                "shape step {n} /: expected at most {MAX_BODY} bytes, found more"
+            )),
+            (Some(Shape::One(path)), Some(shapes)) => {
+                check_body(shapes, path, &stdout).map_err(|e| format!("shape step {n} {e}"))
+            }
             _ => Ok(()),
         }
     }
@@ -152,7 +195,9 @@ impl Cli {
     fn argv(&self, step: &Step, dir: &Path) -> io::Result<Vec<String>> {
         let mut out = Vec::with_capacity(step.argv.len());
         for a in &step.argv {
-            let mut a = a.replace("{tmp}", &dir.to_string_lossy()).replace("{home}", &dir.join("home").to_string_lossy());
+            let mut a = a
+                .replace("{tmp}", &dir.to_string_lossy())
+                .replace("{home}", &dir.join("home").to_string_lossy());
             for (name, from) in &self.copies {
                 let key = format!("{{{name}}}");
                 if a.contains(&key) {
@@ -216,7 +261,20 @@ fn wait(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
 
 /// The kind of secret or personal value in `text`, if any: never the value itself.
 pub fn leak(text: &str) -> Option<&'static str> {
-    const TOKENS: [&str; 12] = ["ghp_", "gho_", "ghs_", "ghu_", "github_pat_", "sk-", "xoxb-", "xoxp-", "AKIA", "iohr_", "eyJ", "glpat-"];
+    const TOKENS: [&str; 12] = [
+        "ghp_",
+        "gho_",
+        "ghs_",
+        "ghu_",
+        "github_pat_",
+        "sk-",
+        "xoxb-",
+        "xoxp-",
+        "AKIA",
+        "iohr_",
+        "eyJ",
+        "glpat-",
+    ];
     if text.contains("-----BEGIN") {
         return Some("a private key");
     }
@@ -224,7 +282,10 @@ pub fn leak(text: &str) -> Option<&'static str> {
     let starts_word = |at: usize| text[..at].chars().next_back().is_none_or(|c| !tokenish(c));
     for t in TOKENS {
         for (at, _) in text.match_indices(t) {
-            let tail = text[at + t.len()..].chars().take_while(|&c| tokenish(c)).count();
+            let tail = text[at + t.len()..]
+                .chars()
+                .take_while(|&c| tokenish(c))
+                .count();
             if starts_word(at) && tail >= 12 {
                 return Some("a token");
             }
@@ -233,20 +294,35 @@ pub fn leak(text: &str) -> Option<&'static str> {
     let lower = text.to_ascii_lowercase();
     for k in ["bearer ", "token=", "password=", "secret=", "api_key="] {
         for (at, _) in lower.match_indices(k) {
-            if lower[at + k.len()..].chars().take_while(|&c| tokenish(c)).count() >= 8 {
+            if lower[at + k.len()..]
+                .chars()
+                .take_while(|&c| tokenish(c))
+                .count()
+                >= 8
+            {
                 return Some("a secret");
             }
         }
     }
     for (at, _) in text.match_indices('@') {
-        let user = text[..at].chars().rev().take_while(|&c| c.is_ascii_alphanumeric() || "._%+-".contains(c)).count();
-        let host: String = text[at + 1..].chars().take_while(|&c| c.is_ascii_alphanumeric() || c == '.' || c == '-').collect();
+        let user = text[..at]
+            .chars()
+            .rev()
+            .take_while(|&c| c.is_ascii_alphanumeric() || "._%+-".contains(c))
+            .count();
+        let host: String = text[at + 1..]
+            .chars()
+            .take_while(|&c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+            .collect();
         if user > 0 && host.trim_end_matches('.').contains('.') {
             return Some("an email");
         }
     }
     for home in ["/Users/", "/home/"] {
-        if text.match_indices(home).any(|(at, _)| text[at + home.len()..].starts_with(|c: char| c.is_ascii_alphanumeric())) {
+        if text
+            .match_indices(home)
+            .any(|(at, _)| text[at + home.len()..].starts_with(|c: char| c.is_ascii_alphanumeric()))
+        {
             return Some("a home path");
         }
     }
@@ -263,11 +339,20 @@ mod tests {
         assert_eq!(leak("no card task-1 on the board; disk-free"), None);
         assert_eq!(leak("error: unexpected argument '--nope' found"), None);
         // Built at run time so no token-shaped literal sits in the source (gitleaks).
-        assert_eq!(leak(&format!("auth: {}_{}", "ghp", "0123456789abcdefABCDEF")), Some("a token"));
-        assert_eq!(leak("Authorization: Bearer abcdefgh12345678"), Some("a secret"));
+        assert_eq!(
+            leak(&format!("auth: {}_{}", "ghp", "0123456789abcdefABCDEF")),
+            Some("a token")
+        );
+        assert_eq!(
+            leak("Authorization: Bearer abcdefgh12345678"),
+            Some("a secret")
+        );
         assert_eq!(leak("mail me at someone@example.org"), Some("an email"));
         assert_eq!(leak("read /Users/someone/x"), Some("a home path"));
-        assert_eq!(leak("-----BEGIN OPENSSH PRIVATE KEY-----"), Some("a private key"));
+        assert_eq!(
+            leak("-----BEGIN OPENSSH PRIVATE KEY-----"),
+            Some("a private key")
+        );
         assert_eq!(leak("in {tmp}/board/board.json"), None);
     }
 
@@ -279,7 +364,10 @@ mod tests {
 
     #[test]
     fn the_scratch_folder_is_gone_after_a_panic() {
-        let tmp = tempfile::Builder::new().prefix("eye-monitors-scratch-").tempdir().unwrap();
+        let tmp = tempfile::Builder::new()
+            .prefix("eye-monitors-scratch-")
+            .tempdir()
+            .unwrap();
         let root = tmp.path().join("scratch");
         let r = std::panic::catch_unwind(|| {
             let s = Scratch::new(&root, "boom").unwrap();
@@ -287,6 +375,9 @@ mod tests {
             panic!("on purpose");
         });
         assert!(r.is_err());
-        assert!(!root.exists(), "the scratch folder or its empty parent is left behind");
+        assert!(
+            !root.exists(),
+            "the scratch folder or its empty parent is left behind"
+        );
     }
 }

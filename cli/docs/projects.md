@@ -603,12 +603,15 @@ and calls nothing.
 `--no-sync`, or no sign-in, also leaves the built-in roles in `atlas/roles/` with a plain
 line saying so; `iohr sync` imports them later ([roles](roles-and-memory.md#built-in-roles)).
 
+The `monitors` step creates `.inorbit/monitors/example.toml`, a disabled `example-health`
+check (`iohr monitors`).
+
 ### Not built yet
 
 The platform has no API yet for a space's members, per-project scopes and tokens, or the
 project summary, so the chosen visibility is the space's access floor (the whole account or
 its managers), not a member list. These steps, and the others that need InOrbit (the
-project's private listing, a memory namespace, monitors and notifications), are reported
+project's private listing, a memory namespace and notifications), are reported
 as `not yet`, each with the API it waits on. Nothing is skipped in silence, and a step that
 needs your or an admin's say becomes an ask. Every step can be run again, and nothing is
 overwritten.

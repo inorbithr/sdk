@@ -1,0 +1,15 @@
+# A monitor says what "up" means for one thing your project runs. Edit it, set `enabled = true`,
+# then `iohr monitors check` reads every file here offline, `iohr monitors run` runs them from
+# this machine, and `iohr monitors install` hands them to the InOrbit agent, which watches
+# them around the clock. Drop the example if you have no service yet.
+
+[[check]]
+name = "example-health"
+label = "the service answers its health route"
+category = "availability"
+tags = { app = "example" }
+target = "http://127.0.0.1:8080/health"
+every = "60s"
+fail_after = 2
+enabled = false
+expect = { status = 200, max_ms = 2000 }

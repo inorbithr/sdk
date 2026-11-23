@@ -63,15 +63,33 @@ pub fn run(m: &Monitor) -> Ran {
 pub fn run_with(m: &Monitor, shapes: Option<&dyn Shapes>, cli: Option<&Cli>) -> Ran {
     let start = Instant::now();
     let (verdict, status) = match (&m.by, m.surface, &m.target) {
-        (Some(by), ..) => (Verdict::Skip(format!("refused by the {by}, never sent")), None),
-        (None, Surface::Http | Surface::Sse, Target::Url(u)) if u.scheme() == "http" => http(m, u, start, shapes),
-        (None, Surface::Http | Surface::Sse, _) => (Verdict::Skip("https runs in the agent, not here".into()), None),
-        (None, Surface::Tcp, Target::HostPort { host, port }) => (tcp(host, *port, timeout(m)), None),
+        (Some(by), ..) => (
+            Verdict::Skip(format!("refused by the {by}, never sent")),
+            None,
+        ),
+        (None, Surface::Http | Surface::Sse, Target::Url(u)) if u.scheme() == "http" => {
+            http(m, u, start, shapes)
+        }
+        (None, Surface::Http | Surface::Sse, _) => (
+            Verdict::Skip("https runs in the agent, not here".into()),
+            None,
+        ),
+        (None, Surface::Tcp, Target::HostPort { host, port }) => {
+            (tcp(host, *port, timeout(m)), None)
+        }
         (None, Surface::Cli, _) => match cli {
             Some(c) => (c.run(m, shapes), None),
-            None => (Verdict::Skip("cli checks run with the binary just built (iohr monitors run)".into()), None),
+            None => (
+                Verdict::Skip(
+                    "cli checks run with the binary just built (iohr monitors run)".into(),
+                ),
+                None,
+            ),
         },
-        (None, s, _) => (Verdict::Skip(format!("{} runs in the agent, not here", s.as_str())), None),
+        (None, s, _) => (
+            Verdict::Skip(format!("{} runs in the agent, not here", s.as_str())),
+            None,
+        ),
     };
     let ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
     let verdict = match verdict {
@@ -81,24 +99,46 @@ pub fn run_with(m: &Monitor, shapes: Option<&dyn Shapes>, cli: Option<&Cli>) -> 
         },
         v => v,
     };
-    Ran { name: m.name.clone(), verdict, ms, status }
+    Ran {
+        name: m.name.clone(),
+        verdict,
+        ms,
+        status,
+    }
 }
 
 /// Runs every monitor once, or only the ones named in `only`, in file order. A name in `only`
 /// that no monitor has is wrong usage.
-pub fn run_all(monitors: &[Monitor], only: &[String], shapes: Option<&dyn Shapes>, cli: Option<&Cli>) -> Result<Vec<Ran>, super::Error> {
-    if let Some(unknown) = only.iter().find(|n| !monitors.iter().any(|m| &m.name == *n)) {
+pub fn run_all(
+    monitors: &[Monitor],
+    only: &[String],
+    shapes: Option<&dyn Shapes>,
+    cli: Option<&Cli>,
+) -> Result<Vec<Ran>, super::Error> {
+    if let Some(unknown) = only
+        .iter()
+        .find(|n| !monitors.iter().any(|m| &m.name == *n))
+    {
         return Err(super::Error::Usage(format!("no monitor named {unknown}")));
     }
-    Ok(monitors.iter().filter(|m| only.is_empty() || only.contains(&m.name)).map(|m| run_with(m, shapes, cli)).collect())
+    Ok(monitors
+        .iter()
+        .filter(|m| only.is_empty() || only.contains(&m.name))
+        .map(|m| run_with(m, shapes, cli))
+        .collect())
 }
 
 fn timeout(m: &Monitor) -> Duration {
-    m.expect.max_ms.map_or(TIMEOUT, |ms| Duration::from_millis(ms.saturating_mul(2)).clamp(Duration::from_secs(1), TIMEOUT))
+    m.expect.max_ms.map_or(TIMEOUT, |ms| {
+        Duration::from_millis(ms.saturating_mul(2)).clamp(Duration::from_secs(1), TIMEOUT)
+    })
 }
 
 fn connect(host: &str, port: u16, limit: Duration) -> Result<TcpStream, String> {
-    let addrs: Vec<SocketAddr> = (host, port).to_socket_addrs().map_err(|e| format!("{host}: {e}"))?.collect();
+    let addrs: Vec<SocketAddr> = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| format!("{host}: {e}"))?
+        .collect();
     let mut last = format!("{host}: no address");
     for a in addrs {
         match TcpStream::connect_timeout(&a, limit) {
@@ -126,7 +166,10 @@ pub struct Head {
 
 impl Head {
     pub fn get(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+        self.headers
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
     }
 }
 
@@ -146,7 +189,9 @@ pub fn parse_head(text: &str) -> Option<Head> {
 /// by its start, and a redirect's location.
 pub fn judge(m: &Monitor, head: &Head) -> Verdict {
     match m.expect.status {
-        Some(want) if head.status != want => return Verdict::Fail(format!("answered {}, wanted {want}", head.status)),
+        Some(want) if head.status != want => {
+            return Verdict::Fail(format!("answered {}, wanted {want}", head.status));
+        }
         None if head.status >= 400 => return Verdict::Fail(format!("answered {}", head.status)),
         _ => {}
     }
@@ -166,7 +211,9 @@ pub fn judge(m: &Monitor, head: &Head) -> Verdict {
     if let Some(want) = &m.expect.location_prefix
         && !loc.starts_with(want.as_str())
     {
-        return Verdict::Fail(format!("location is {loc:?}, wanted it to start with {want:?}"));
+        return Verdict::Fail(format!(
+            "location is {loc:?}, wanted it to start with {want:?}"
+        ));
     }
     if m.surface == Surface::Sse {
         if !(200..300).contains(&head.status) {
@@ -180,7 +227,12 @@ pub fn judge(m: &Monitor, head: &Head) -> Verdict {
     Verdict::Pass
 }
 
-fn http(m: &Monitor, u: &url::Url, start: Instant, shapes: Option<&dyn Shapes>) -> (Verdict, Option<u16>) {
+fn http(
+    m: &Monitor,
+    u: &url::Url,
+    start: Instant,
+    shapes: Option<&dyn Shapes>,
+) -> (Verdict, Option<u16>) {
     let limit = timeout(m);
     let (Some(host), Some(port)) = (u.host_str(), u.port_or_known_default()) else {
         return (Verdict::Fail("the URL has no host".into()), None);
@@ -195,8 +247,14 @@ fn http(m: &Monitor, u: &url::Url, start: Instant, shapes: Option<&dyn Shapes>) 
     let path = &u[url::Position::BeforePath..url::Position::AfterQuery];
     let method = m.method.as_deref().unwrap_or("GET");
     let authority = &u[url::Position::BeforeHost..url::Position::AfterPort];
-    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: {authority}\r\nUser-Agent: iohr-monitors\r\nConnection: close\r\n");
-    let accept = if m.surface == Surface::Sse { "text/event-stream" } else { "*/*" };
+    let mut req = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {authority}\r\nUser-Agent: iohr-monitors\r\nConnection: close\r\n"
+    );
+    let accept = if m.surface == Surface::Sse {
+        "text/event-stream"
+    } else {
+        "*/*"
+    };
     if !m.headers.contains_key("accept") {
         req.push_str(&format!("Accept: {accept}\r\n"));
     }
@@ -235,8 +293,15 @@ fn http(m: &Monitor, u: &url::Url, start: Instant, shapes: Option<&dyn Shapes>) 
     let status = Some(head.status);
     let v = judge(m, &head);
     let shape = m.expect.shape.as_ref().zip(shapes);
-    let wanted = if m.surface == Surface::Sse { m.events.min(MAX_EVENTS) } else { 0 };
-    if v != Verdict::Pass || (shape.is_none() && wanted == 0) || (m.surface == Surface::Sse && wanted == 0) {
+    let wanted = if m.surface == Surface::Sse {
+        m.events.min(MAX_EVENTS)
+    } else {
+        0
+    };
+    if v != Verdict::Pass
+        || (shape.is_none() && wanted == 0)
+        || (m.surface == Surface::Sse && wanted == 0)
+    {
         return (v, status);
     }
     let code = head.status;
@@ -256,7 +321,9 @@ fn http(m: &Monitor, u: &url::Url, start: Instant, shapes: Option<&dyn Shapes>) 
 
     if m.surface == Surface::Http {
         // http with a shape: the whole body, at most 1 MiB, then checked and dropped.
-        let Some((Shape::One(path), shapes)) = shape else { return (v, status) };
+        let Some((Shape::One(path), shapes)) = shape else {
+            return (v, status);
+        };
         while !body.done() {
             match read(&mut body) {
                 Ok(true) => {}
@@ -265,7 +332,10 @@ fn http(m: &Monitor, u: &url::Url, start: Instant, shapes: Option<&dyn Shapes>) 
             }
         }
         if !body.done() && body.length.is_some() {
-            return (Verdict::Fail(format!("shape {code} /: the body ended early")), status);
+            return (
+                Verdict::Fail(format!("shape {code} /: the body ended early")),
+                status,
+            );
         }
         let verdict = match check_body(shapes, path, &body.out) {
             Ok(()) => Verdict::Pass,
@@ -288,10 +358,19 @@ fn http(m: &Monitor, u: &url::Url, start: Instant, shapes: Option<&dyn Shapes>) 
                     Shape::Events(t) => t.get(&e.name),
                 };
                 let Some(path) = path else {
-                    return (Verdict::Fail(format!("shape {code} event {}: expected a named event, found another event", seen)), status);
+                    return (
+                        Verdict::Fail(format!(
+                            "shape {code} event {}: expected a named event, found another event",
+                            seen
+                        )),
+                        status,
+                    );
                 };
                 if let Err(why) = check_body(shapes, path, e.data.as_bytes()) {
-                    return (Verdict::Fail(format!("shape {code} event {seen} ({}) {why}", e.name)), status);
+                    return (
+                        Verdict::Fail(format!("shape {code} event {seen} ({}) {why}", e.name)),
+                        status,
+                    );
                 }
             }
             if seen >= wanted {
@@ -304,7 +383,10 @@ fn http(m: &Monitor, u: &url::Url, start: Instant, shapes: Option<&dyn Shapes>) 
             Err(e) => return (Verdict::Fail(format!("shape {code} /: {e}")), status),
         }
     }
-    (Verdict::Fail(format!("{seen} data events, wanted {wanted}")), status)
+    (
+        Verdict::Fail(format!("{seen} data events, wanted {wanted}")),
+        status,
+    )
 }
 
 /// A response body as it comes in: chunked framing undone, capped at [`MAX_BODY`].
@@ -319,9 +401,22 @@ struct Body {
 
 impl Body {
     fn new(head: &Head) -> Body {
-        let chunked = head.get("transfer-encoding").is_some_and(|t| t.to_ascii_lowercase().contains("chunked"));
-        let length = if chunked { None } else { head.get("content-length").and_then(|l| l.parse().ok()) };
-        Body { chunked, length, raw: Vec::new(), out: Vec::new(), total: 0, ended: false }
+        let chunked = head
+            .get("transfer-encoding")
+            .is_some_and(|t| t.to_ascii_lowercase().contains("chunked"));
+        let length = if chunked {
+            None
+        } else {
+            head.get("content-length").and_then(|l| l.parse().ok())
+        };
+        Body {
+            chunked,
+            length,
+            raw: Vec::new(),
+            out: Vec::new(),
+            total: 0,
+            ended: false,
+        }
     }
 
     fn done(&self) -> bool {
@@ -336,7 +431,9 @@ impl Body {
             self.raw.extend_from_slice(bytes);
             while let Some(i) = self.raw.windows(2).position(|w| w == b"\r\n") {
                 let line = std::str::from_utf8(&self.raw[..i]).unwrap_or_default();
-                let size = usize::from_str_radix(line.split(';').next().unwrap_or_default().trim(), 16).map_err(|_| "expected a chunk size, found something else".to_owned())?;
+                let size =
+                    usize::from_str_radix(line.split(';').next().unwrap_or_default().trim(), 16)
+                        .map_err(|_| "expected a chunk size, found something else".to_owned())?;
                 if size == 0 {
                     self.ended = true;
                     self.raw.clear();
@@ -382,20 +479,30 @@ pub fn take_events(bytes: &[u8]) -> (Vec<Event>, usize) {
         let line = raw.trim_end_matches('\n').trim_end_matches('\r');
         if line.is_empty() {
             if has_data {
-                out.push(Event { name: if name.is_empty() { "message".into() } else { std::mem::take(&mut name) }, data: std::mem::take(&mut data) });
+                out.push(Event {
+                    name: if name.is_empty() {
+                        "message".into()
+                    } else {
+                        std::mem::take(&mut name)
+                    },
+                    data: std::mem::take(&mut data),
+                });
             }
             name.clear();
             data.clear();
             has_data = false;
             used = pos;
-        } else if let Some(v) = line.strip_prefix("data:").or((line == "data").then_some("")) {
+        } else if let Some(v) = line
+            .strip_prefix("data:")
+            .or((line == "data").then_some(""))
+        {
             if has_data {
                 data.push('\n');
             }
             data.push_str(v.strip_prefix(' ').unwrap_or(v));
             has_data = true;
         } else if let Some(v) = line.strip_prefix("event:") {
-            name = v.trim().to_owned();
+            v.trim().clone_into(&mut name);
         }
     }
     (out, used)
@@ -410,7 +517,7 @@ pub fn count_events(text: &str) -> u32 {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use super::{File, check_files, parse};
+    use crate::monitors::{File, check_files, parse};
     use std::net::TcpListener;
     use std::thread;
 
@@ -430,16 +537,28 @@ mod tests {
     }
 
     fn monitor(toml: &str) -> Monitor {
-        let r = check_files(&[File { path: "t.toml".into(), value: parse(toml).unwrap() }]);
+        let r = check_files(&[File {
+            path: "t.toml".into(),
+            value: parse(toml).unwrap(),
+        }]);
         assert!(r.problems.is_empty(), "{:?}", r.problems);
         r.monitors.into_iter().next().unwrap()
     }
 
     #[test]
     fn http_judges_status_and_content_type_and_catches_the_html_fallback() {
-        let json = serve("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}", 1);
-        let html = serve("HTTP/1.1 200 OK\r\ncontent-type: text/html\r\n\r\n<html>", 1);
-        let gone = serve("HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\n\r\n{}", 1);
+        let json = serve(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}",
+            1,
+        );
+        let html = serve(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\n\r\n<html>",
+            1,
+        );
+        let gone = serve(
+            "HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\n\r\n{}",
+            1,
+        );
         let m = |port: u16| {
             monitor(&format!(
                 "[[check]]\nname = \"p\"\ntarget = \"http://127.0.0.1:{port}/api/health/store\"\nevery = \"60s\"\nexpect = {{ status = 200, headers = {{ content-type = \"application/json\" }} }}\n"
@@ -448,23 +567,40 @@ mod tests {
         assert_eq!(run(&m(json)).verdict, Verdict::Pass);
         let r = run(&m(html));
         assert_eq!(r.status, Some(200));
-        assert!(matches!(&r.verdict, Verdict::Fail(w) if w.contains("text/html")), "{r:?}");
+        assert!(
+            matches!(&r.verdict, Verdict::Fail(w) if w.contains("text/html")),
+            "{r:?}"
+        );
         assert!(matches!(run(&m(gone)).verdict, Verdict::Fail(w) if w.contains("503")));
     }
 
     #[test]
     fn a_refusal_with_an_answer_passes_on_that_answer() {
-        let port = serve("HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain\r\n\r\nupgrade", 1);
-        let m = monitor(&format!("[[refuse]]\nname = \"ws-route\"\ntarget = \"http://127.0.0.1:{port}/api/trends/live\"\nevery = \"15m\"\nexpect = {{ status = 400 }}\n"));
+        let port = serve(
+            "HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain\r\n\r\nupgrade",
+            1,
+        );
+        let m = monitor(&format!(
+            "[[refuse]]\nname = \"ws-route\"\ntarget = \"http://127.0.0.1:{port}/api/trends/live\"\nevery = \"15m\"\nexpect = {{ status = 400 }}\n"
+        ));
         assert_eq!(run(&m).verdict, Verdict::Pass);
-        let by = monitor("[[refuse]]\nname = \"meta\"\ntarget = \"http://169.254.169.254/\"\nevery = \"1h\"\nby = \"policy\"\n");
+        let by = monitor(
+            "[[refuse]]\nname = \"meta\"\ntarget = \"http://169.254.169.254/\"\nevery = \"1h\"\nby = \"policy\"\n",
+        );
         assert!(matches!(run(&by).verdict, Verdict::Skip(_)));
     }
 
     #[test]
     fn sse_needs_an_event_stream_and_counts_data_events() {
-        let port = serve("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n: hi\n\ndata: {\"a\":1}\n\ndata: 2\n\n", 2);
-        let m = |events: u32| monitor(&format!("[[check]]\nname = \"s\"\nsurface = \"sse\"\ntarget = \"http://127.0.0.1:{port}/api/stream\"\nevery = \"5m\"\nevents = {events}\n"));
+        let port = serve(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n: hi\n\ndata: {\"a\":1}\n\ndata: 2\n\n",
+            2,
+        );
+        let m = |events: u32| {
+            monitor(&format!(
+                "[[check]]\nname = \"s\"\nsurface = \"sse\"\ntarget = \"http://127.0.0.1:{port}/api/stream\"\nevery = \"5m\"\nevents = {events}\n"
+            ))
+        };
         assert_eq!(run(&m(2)).verdict, Verdict::Pass);
         assert!(matches!(run(&m(3)).verdict, Verdict::Fail(w) if w.contains("2 data events")));
         assert_eq!(count_events(": comment\n\ndata: x\r\n\r\n"), 1);
@@ -474,17 +610,26 @@ mod tests {
     impl Shapes for Inline {
         fn validator(&self, shape: &str) -> Result<std::sync::Arc<jsonschema::Validator>, String> {
             let schema = match shape {
-                "schemas/api/items/v0.json" => serde_json::json!({ "type": "object", "required": ["items"], "properties": { "items": { "type": "array", "items": { "type": "object", "required": ["score"], "properties": { "score": { "type": "integer" } } } } } }),
-                "schemas/api/change/v0.json" => serde_json::json!({ "type": "object", "required": ["topic"], "properties": { "topic": { "type": "string" } } }),
+                "schemas/api/items/v0.json" => {
+                    serde_json::json!({ "type": "object", "required": ["items"], "properties": { "items": { "type": "array", "items": { "type": "object", "required": ["score"], "properties": { "score": { "type": "integer" } } } } } })
+                }
+                "schemas/api/change/v0.json" => {
+                    serde_json::json!({ "type": "object", "required": ["topic"], "properties": { "topic": { "type": "string" } } })
+                }
                 _ => return Err(format!("no schema {shape}")),
             };
-            jsonschema::validator_for(&schema).map(std::sync::Arc::new).map_err(|e| e.to_string())
+            jsonschema::validator_for(&schema)
+                .map(std::sync::Arc::new)
+                .map_err(|e| e.to_string())
         }
     }
 
     #[test]
     fn a_shape_check_reads_the_body_chunked_or_not_and_names_only_the_first_mismatch() {
-        let good = serve("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 23\r\n\r\n{\"items\":[{\"score\":1}]}", 2);
+        let good = serve(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 23\r\n\r\n{\"items\":[{\"score\":1}]}",
+            2,
+        );
         // Chunked, split mid-value, the fourth item's score a string holding a secret.
         let bad = serve(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n1b\r\n{\"items\":[{\"score\":1},{\"sco\r\n2f\r\nre\":2},{\"score\":3},{\"score\":\"hunter2-secret\"}]}\r\n0\r\n\r\n",
@@ -495,10 +640,16 @@ mod tests {
                 "[[check]]\nname = \"eye-items\"\ntarget = \"http://127.0.0.1:{port}/api/items\"\nevery = \"5m\"\nexpect = {{ status = 200, shape = \"schemas/api/items/v0.json\" }}\n"
             ))
         };
-        assert_eq!(run_with(&m(good), Some(&Inline), None).verdict, Verdict::Pass);
+        assert_eq!(
+            run_with(&m(good), Some(&Inline), None).verdict,
+            Verdict::Pass
+        );
         assert_eq!(run(&m(good)).verdict, Verdict::Pass, "no Shapes: head only");
         let r = run_with(&m(bad), Some(&Inline), None);
-        assert_eq!(r.line(), "FAIL shape eye-items 200 /items/3/score: expected integer, found string");
+        assert_eq!(
+            r.line(),
+            "FAIL shape eye-items 200 /items/3/score: expected integer, found string"
+        );
         assert!(!format!("{r:?}").contains("hunter2"));
     }
 
@@ -514,17 +665,36 @@ mod tests {
             ))
         };
         let table = "{ change = \"schemas/api/change/v0.json\" }";
-        assert_eq!(run_with(&m(1, table), Some(&Inline), None).verdict, Verdict::Pass);
+        assert_eq!(
+            run_with(&m(1, table), Some(&Inline), None).verdict,
+            Verdict::Pass
+        );
         let r = run_with(&m(2, table), Some(&Inline), None);
-        assert_eq!(r.line(), "FAIL shape eye-stream 200 event 2 (change) /topic: expected string, found integer");
-        let r = run_with(&m(1, "{ item = \"schemas/api/items/v0.json\" }"), Some(&Inline), None);
-        assert!(matches!(&r.verdict, Verdict::Fail(w) if w.contains("expected a named event")), "{r:?}");
+        assert_eq!(
+            r.line(),
+            "FAIL shape eye-stream 200 event 2 (change) /topic: expected string, found integer"
+        );
+        let r = run_with(
+            &m(1, "{ item = \"schemas/api/items/v0.json\" }"),
+            Some(&Inline),
+            None,
+        );
+        assert!(
+            matches!(&r.verdict, Verdict::Fail(w) if w.contains("expected a named event")),
+            "{r:?}"
+        );
     }
 
     #[test]
     fn events_keep_their_names_and_wait_for_the_blank_line() {
         let (ev, used) = take_events(b"event: item\ndata: {\"a\":\ndata: 1}\n\ndata: half");
-        assert_eq!(ev, vec![Event { name: "item".into(), data: "{\"a\":\n1}".into() }]);
+        assert_eq!(
+            ev,
+            vec![Event {
+                name: "item".into(),
+                data: "{\"a\":\n1}".into()
+            }]
+        );
         assert_eq!(used, 34);
     }
 
@@ -535,10 +705,16 @@ mod tests {
             let l = TcpListener::bind("127.0.0.1:0").unwrap();
             l.local_addr().unwrap().port()
         };
-        let m = |port: u16| monitor(&format!("[[check]]\nname = \"t\"\ntarget = \"127.0.0.1:{port}\"\nevery = \"5m\"\n"));
+        let m = |port: u16| {
+            monitor(&format!(
+                "[[check]]\nname = \"t\"\ntarget = \"127.0.0.1:{port}\"\nevery = \"5m\"\n"
+            ))
+        };
         assert_eq!(run(&m(open)).verdict, Verdict::Pass);
         assert!(matches!(run(&m(closed)).verdict, Verdict::Fail(_)));
-        let tls = monitor("[[check]]\nname = \"c\"\nsurface = \"tls\"\ntarget = \"example.com\"\nevery = \"1d\"\n");
+        let tls = monitor(
+            "[[check]]\nname = \"c\"\nsurface = \"tls\"\ntarget = \"example.com\"\nevery = \"1d\"\n",
+        );
         assert!(matches!(run(&tls).verdict, Verdict::Skip(_)));
     }
 }

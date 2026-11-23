@@ -28,7 +28,13 @@ fn header(line: &str) -> Option<&'static str> {
     match t {
         "[[check]]" => Some("check"),
         "[[refuse]]" => Some("refuse"),
-        _ if t.starts_with("[[check.") || t.starts_with("[[refuse.") || t.starts_with("[check.") || t.starts_with("[refuse.") => Some("sub"),
+        _ if t.starts_with("[[check.")
+            || t.starts_with("[[refuse.")
+            || t.starts_with("[check.")
+            || t.starts_with("[refuse.") =>
+        {
+            Some("sub")
+        }
         _ if t.starts_with('[') && t.ends_with(']') && !t.contains('=') => Some("other"),
         _ => None,
     }
@@ -42,7 +48,11 @@ fn name_of(line: &str) -> Option<String> {
     }
     let v = v.trim();
     let v = v.split_once(" #").map_or(v, |(a, _)| a.trim_end());
-    let s: String = toml::from_str::<toml::Table>(&format!("v = {v}")).ok()?.get("v")?.as_str()?.to_owned();
+    let s: String = toml::from_str::<toml::Table>(&format!("v = {v}"))
+        .ok()?
+        .get("v")?
+        .as_str()?
+        .to_owned();
     Some(s)
 }
 
@@ -50,11 +60,18 @@ fn name_of(line: &str) -> Option<String> {
 #[must_use]
 pub fn locate(text: &str, name: &str) -> Option<Span> {
     let lines: Vec<&str> = text.lines().collect();
-    let heads: Vec<usize> = (0..lines.len()).filter(|&i| matches!(header(lines[i]), Some("check" | "refuse"))).collect();
+    let heads: Vec<usize> = (0..lines.len())
+        .filter(|&i| matches!(header(lines[i]), Some("check" | "refuse")))
+        .collect();
     for h in heads {
         // The entry's own keys run to its first sub-table or the next table of any kind.
-        let own_end = (h + 1..lines.len()).find(|&i| header(lines[i]).is_some()).unwrap_or(lines.len());
-        if !lines[h + 1..own_end].iter().any(|l| name_of(l).as_deref() == Some(name)) {
+        let own_end = (h + 1..lines.len())
+            .find(|&i| header(lines[i]).is_some())
+            .unwrap_or(lines.len());
+        if !lines[h + 1..own_end]
+            .iter()
+            .any(|l| name_of(l).as_deref() == Some(name))
+        {
             continue;
         }
         let mut start = h;
@@ -62,7 +79,9 @@ pub fn locate(text: &str, name: &str) -> Option<Span> {
             start -= 1;
         }
         // It ends before the next entry or other table, less the comments that belong to it.
-        let next = (h + 1..lines.len()).find(|&i| matches!(header(lines[i]), Some("check" | "refuse" | "other"))).unwrap_or(lines.len());
+        let next = (h + 1..lines.len())
+            .find(|&i| matches!(header(lines[i]), Some("check" | "refuse" | "other")))
+            .unwrap_or(lines.len());
         let mut last = next;
         while last > h + 1 && {
             let l = lines[last - 1].trim();
@@ -74,7 +93,11 @@ pub fn locate(text: &str, name: &str) -> Option<Span> {
         while end < next && lines[end].trim().is_empty() {
             end += 1;
         }
-        return Some(Span { start, header: h, end });
+        return Some(Span {
+            start,
+            header: h,
+            end,
+        });
     }
     None
 }
@@ -85,7 +108,11 @@ pub fn locate(text: &str, name: &str) -> Option<Span> {
 pub fn cut(text: &str, name: &str) -> Result<(String, String), String> {
     let span = locate(text, name).ok_or_else(|| format!("no entry named {name} in this file"))?;
     let lines: Vec<&str> = text.lines().collect();
-    let mut kept: Vec<&str> = lines[..span.start].iter().chain(&lines[span.end..]).copied().collect();
+    let mut kept: Vec<&str> = lines[..span.start]
+        .iter()
+        .chain(&lines[span.end..])
+        .copied()
+        .collect();
     while kept.last().is_some_and(|l| l.trim().is_empty()) {
         kept.pop();
     }
@@ -96,11 +123,23 @@ pub fn cut(text: &str, name: &str) -> Result<(String, String), String> {
     let removed = lines[span.start..span.end].join("\n").trim_end().to_owned() + "\n";
     let entries = |t: &str| -> Result<Vec<Value>, String> {
         let v = super::parse(t)?;
-        Ok(["check", "refuse"].iter().flat_map(|k| v.get(*k).and_then(Value::as_array).cloned().unwrap_or_default()).collect())
+        Ok(["check", "refuse"]
+            .iter()
+            .flat_map(|k| {
+                v.get(*k)
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .collect())
     };
     let before = entries(text)?;
-    let after = entries(&out).map_err(|e| format!("the file would not parse after the cut ({e}); edit it by hand"))?;
-    let want: Vec<&Value> = before.iter().filter(|e| e.get("name").and_then(Value::as_str) != Some(name)).collect();
+    let after = entries(&out)
+        .map_err(|e| format!("the file would not parse after the cut ({e}); edit it by hand"))?;
+    let want: Vec<&Value> = before
+        .iter()
+        .filter(|e| e.get("name").and_then(Value::as_str) != Some(name))
+        .collect();
     if after.iter().collect::<Vec<_>>() != want {
         return Err("the cut would change other entries; edit the file by hand".into());
     }
@@ -123,24 +162,44 @@ mod tests {
         assert_eq!(lines[s.end], "# A free note about the next part.");
 
         let (out, removed) = cut(FILE, "cli").unwrap();
-        assert!(removed.starts_with("# Belongs to cli.\n[[check]]\nname = \"cli\"") && removed.contains("[[check.steps]]"), "{removed}");
+        assert!(
+            removed.starts_with("# Belongs to cli.\n[[check]]\nname = \"cli\"")
+                && removed.contains("[[check.steps]]"),
+            "{removed}"
+        );
         assert_eq!(out, FILE.replace(&removed, "").replace("\n\n\n", "\n\n"));
-        assert!(out.contains("# The file's own note.") && out.contains("# A free note about the next part."));
+        assert!(
+            out.contains("# The file's own note.")
+                && out.contains("# A free note about the next part.")
+        );
 
         let (out, removed) = cut(FILE, "admin").unwrap();
-        assert!(out.ends_with("# A free note about the next part.\n"), "{out}");
+        assert!(
+            out.ends_with("# A free note about the next part.\n"),
+            "{out}"
+        );
         assert!(removed.starts_with("[[refuse]]"));
 
         let (out, _) = cut(FILE, "api").unwrap();
-        assert!(out.starts_with("# The file's own note.\n# Two lines.\n\n# Belongs to cli.\n[[check]]"), "{out}");
+        assert!(
+            out.starts_with("# The file's own note.\n# Two lines.\n\n# Belongs to cli.\n[[check]]"),
+            "{out}"
+        );
 
-        assert!(cut(FILE, "nope").unwrap_err().contains("no entry named nope"));
+        assert!(
+            cut(FILE, "nope")
+                .unwrap_err()
+                .contains("no entry named nope")
+        );
         assert!(locate(FILE, "argv").is_none());
     }
 
     #[test]
     fn a_cut_that_would_change_another_entry_is_refused() {
         let tricky = "[[check]]\nname = \"a\"\nnote = \"\"\"\n[[check]]\nname = \"b\"\n\"\"\"\ntarget = \"x:1\"\n";
-        assert!(cut(tricky, "b").is_err(), "a header inside a string is not an entry");
+        assert!(
+            cut(tricky, "b").is_err(),
+            "a header inside a string is not an entry"
+        );
     }
 }
