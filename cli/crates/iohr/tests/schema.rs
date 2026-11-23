@@ -1,4 +1,4 @@
-//! `iohr schema check` as a binary: exit codes, one line per problem, `--json`, and a
+//! `iohr schemas check` as a binary: exit codes, one line per problem, `--json`, and a
 //! copy of a real project tree.
 
 #![allow(
@@ -53,7 +53,7 @@ fn text(b: &[u8]) -> String {
 fn a_good_tree_passes() {
     let d = tempfile::tempdir().unwrap();
     good_tree(&d.path().join("schemas"));
-    let o = run(&["schema", "check"], d.path());
+    let o = run(&["schemas", "check"], d.path());
     assert!(o.status.success(), "{}{}", text(&o.stdout), text(&o.stderr));
 }
 
@@ -63,7 +63,7 @@ fn an_invalid_case_that_passes_fails_the_check_with_one_line() {
     let root = d.path().join("schemas");
     good_tree(&root);
     put(&root, "demo/thing/invalid/fine.json", r#"{"name":"x"}"#);
-    let o = run(&["schema", "check", "schemas"], d.path());
+    let o = run(&["schemas", "check", "schemas"], d.path());
     assert_eq!(o.status.code(), Some(1), "{}", text(&o.stderr));
     let all = format!("{}{}", text(&o.stdout), text(&o.stderr));
     let lines: Vec<&str> = all.lines().filter(|l| l.contains("fine.json")).collect();
@@ -75,13 +75,13 @@ fn json_output_counts_and_lists_problems() {
     let d = tempfile::tempdir().unwrap();
     let root = d.path().join("schemas");
     good_tree(&root);
-    let ok = run(&["schema", "check", "--json"], d.path());
+    let ok = run(&["schemas", "check", "--json"], d.path());
     let v: serde_json::Value = serde_json::from_slice(&ok.stdout).unwrap();
     assert_eq!(v["types"], 1, "{v}");
     assert_eq!(v["problems"].as_array().unwrap().len(), 0, "{v}");
 
     put(&root, "demo/thing/examples/bad.json", r#"{"name":1}"#);
-    let bad = run(&["schema", "check", "--json"], d.path());
+    let bad = run(&["schemas", "check", "--json"], d.path());
     assert_eq!(bad.status.code(), Some(1));
     let v: serde_json::Value = serde_json::from_slice(&bad.stdout).unwrap();
     assert_eq!(v["problems"].as_array().unwrap().len(), 1, "{v}");
@@ -90,7 +90,7 @@ fn json_output_counts_and_lists_problems() {
 #[test]
 fn a_missing_folder_is_a_usage_error() {
     let d = tempfile::tempdir().unwrap();
-    let o = run(&["schema", "check", "nowhere"], d.path());
+    let o = run(&["schemas", "check", "nowhere"], d.path());
     assert_eq!(o.status.code(), Some(2), "{}", text(&o.stderr));
     assert!(
         text(&o.stderr).contains("nowhere: no such folder"),
@@ -123,6 +123,6 @@ fn a_copy_of_a_real_project_tree_passes() {
     let dst = d.path().join("schemas");
     std::fs::create_dir_all(&dst).unwrap();
     copy_tree(Path::new(&src), &dst);
-    let o = run(&["schema", "check"], d.path());
+    let o = run(&["schemas", "check"], d.path());
     assert!(o.status.success(), "{}{}", text(&o.stdout), text(&o.stderr));
 }
