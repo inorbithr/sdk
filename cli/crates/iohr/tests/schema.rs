@@ -112,7 +112,8 @@ fn copy_tree(from: &Path, to: &Path) {
 }
 
 /// A copy of another project's `schemas/` tree, named by `IOHR_TEST_SCHEMAS_TREE`,
-/// passes the check unchanged. Skipped when the variable is not set.
+/// passes the check unchanged. Opt-in: CI does not set the variable, so there it returns at
+/// once; run it by hand with `IOHR_TEST_SCHEMAS_TREE=<project>/schemas`.
 #[test]
 fn a_copy_of_a_real_project_tree_passes() {
     let Some(src) = std::env::var_os("IOHR_TEST_SCHEMAS_TREE") else {

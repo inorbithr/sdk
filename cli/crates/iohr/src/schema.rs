@@ -371,6 +371,10 @@ pub fn check_tree(root: &Path) -> Result<Report, String> {
     for f in found {
         check_type(&schemas, &f, &mut report);
     }
+    if report.types == 0 {
+        // A mistyped folder must not look green.
+        report.fail(".", "no schema found (<area>/<name>/v<major>.json)");
+    }
     report.problems.sort_by(|a, b| a.target.cmp(&b.target));
     Ok(report)
 }
@@ -534,6 +538,16 @@ mod tests {
         let r = check_tree(t.path()).unwrap();
         assert_eq!((r.types, r.examples, r.invalid), (1, 1, 1));
         assert!(r.problems.is_empty(), "{:?}", r.problems);
+    }
+
+    #[test]
+    fn a_folder_with_no_schema_is_a_problem() {
+        let t = tempfile::tempdir().unwrap();
+        put(t.path(), "notes/readme.json", "{}");
+        assert_eq!(
+            problems(t.path()),
+            [".: no schema found (<area>/<name>/v<major>.json)"]
+        );
     }
 
     #[test]

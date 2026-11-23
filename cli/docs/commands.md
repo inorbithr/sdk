@@ -269,6 +269,7 @@ and the cases that must fail in `invalid/`. The validator is JSON Schema draft 2
   `https://schemas.inorbit.hr/iohr/`). A `$ref` to anything else is refused, never fetched.
 - Symbolic links and hidden folders are skipped, a file over 1 MiB is a problem, and a
   tree deeper than 6 levels is not read past that.
+- A folder with no schema in it is a problem, so a mistyped `DIR` never passes.
 - A problem names the file and the field (a JSON pointer such as `/checklist/0/done`) and
   the schema rule that failed, never the value.
 
