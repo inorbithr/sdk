@@ -1,0 +1,1 @@
+{ "id": "bad-label", "title": "Labels are lower-case tags", "list": "ready", "labels": ["Not A Tag"], "size": "S", "hours": 1, "start": "2026-11-14", "due": "2026-11-14", "docs": {}, "checklist": [{ "text": "one", "done": false }], "acceptance": ["one"], "tests": ["one"] }

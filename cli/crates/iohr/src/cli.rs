@@ -240,6 +240,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "api",
             "openapi",
             "lab",
+            "schema",
             "decisions",
         ],
     ),
@@ -493,6 +494,11 @@ pub enum Command {
     /// Lab documents: RFCs and studies kept in your repository.
     #[command(subcommand)]
     Lab(LabCommand),
+    /// Check a project's own JSON Schemas, with their examples.
+    ///
+    /// JSON Schemas kept in your repository: the layout, the examples and the invalid cases.
+    #[command(subcommand)]
+    Schema(SchemaCommand),
     /// Read and write RFCs, PRDs and ADRs in Decisions.
     ///
     /// Decisions: RFCs, PRDs and ADRs in the Decisions product:
@@ -690,6 +696,23 @@ pub enum LabCommand {
     /// front matter, status logs, and the redaction rules on public documents. Reads
     /// only the files named, makes no network call, needs no sign-in.
     Check(LabCheck),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SchemaCommand {
+    /// Check a schemas tree: every schema has its `$id`, every example passes, every invalid case fails.
+    ///
+    /// Check a project's schemas folder, laid out as `<area>/<name>/v<major>.json` with
+    /// `examples/` and `invalid/` beside each schema (RFC 0147). Reads only the files in the
+    /// folder, makes no network call, needs no sign-in. Exits 1 with one line per problem.
+    Check(SchemaCheck),
+}
+
+#[derive(Debug, Args)]
+pub struct SchemaCheck {
+    /// The schemas folder. Default: `./schemas`.
+    #[arg(default_value = "schemas")]
+    pub dir: PathBuf,
 }
 
 /// The flags of `iohr upgrade`.

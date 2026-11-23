@@ -1,0 +1,1 @@
+{ "check": [{ "name": "eye-cli-board", "target": { "cli": "eye" }, "every": "5m", "argv": ["scrum", "board", "--json"] }] }

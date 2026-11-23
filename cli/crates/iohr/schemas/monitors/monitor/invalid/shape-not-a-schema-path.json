@@ -1,0 +1,5 @@
+{
+  "check": [
+    { "name": "eye-items", "target": "http://127.0.0.1:7171/api/items", "every": "5m", "expect": { "shape": "../secrets/items.json" } }
+  ]
+}

@@ -35,6 +35,7 @@ etcetera.workspace = true
 flate2.workspace = true
 getrandom.workspace = true
 html5ever.workspace = true
+jsonschema.workspace = true
 indicatif.workspace = true
 markup5ever_rcdom.workspace = true
 regex.workspace = true

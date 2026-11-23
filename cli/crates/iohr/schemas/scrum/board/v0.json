@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.inorbit.hr/iohr/scrum/board/v0.json",
+  "title": "Scrum board, v0",
+  "description": "a project's scrum board (atlas/scrum/board.json, RFC 0234): its lists in order and its cards. The single source; README.md beside it is the view people read.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "board",
+    "updated",
+    "lists",
+    "cards"
+  ],
+  "properties": {
+    "board": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]{1,80}$",
+      "description": "The board's name; the Planner plan id its cards are claimed under."
+    },
+    "updated": {
+      "type": "string",
+      "format": "date"
+    },
+    "day_hours": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Build hours one day holds across every agent working in parallel; the plan flags a day above it. Absent means one person's day (20 h)."
+    },
+    "lists": {
+      "type": "array",
+      "const": [
+        "backlog",
+        "ready",
+        "doing",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "description": "The Trello lists, left to right."
+    },
+    "cards": {
+      "type": "array",
+      "items": {
+        "$ref": "https://schemas.inorbit.hr/iohr/scrum/card/v0.json"
+      }
+    }
+  }
+}

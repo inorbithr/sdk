@@ -1,0 +1,20 @@
+{
+  "check": [
+    {
+      "name": "eye-cli-board",
+      "target": { "cli": "eye" },
+      "argv": ["scrum", "--board", "{board}/board.json", "board", "--json"],
+      "expect": { "shape": "schemas/cli/scrum-board/v0.json", "request": "schemas/cli/scrum-board/v0.json#/$defs/request", "max_ms": 5000 }
+    },
+    {
+      "name": "eye-cli-card-chain",
+      "target": { "cli": "eye" },
+      "expect": { "max_ms": 10000 },
+      "steps": [
+        { "argv": ["scrum", "--board", "{board}/board.json", "add", "monitor-probe", "--title", "Monitor probe", "--json"], "expect": { "shape": "schemas/cli/scrum-add/v0.json" } },
+        { "argv": ["scrum", "--board", "{board}/board.json", "show", "monitor-probe", "--json"], "expect": { "shape": "schemas/cli/scrum-show/v0.json" } },
+        { "argv": ["scrum", "--board", "{board}/board.json", "show", "no-such-card"], "expect": { "exit": 2 } }
+      ]
+    }
+  ]
+}

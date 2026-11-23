@@ -1,0 +1,1 @@
+{ "id": "ideas-page", "title": "Project fields are not at the top", "section": "ideas", "list": "ready", "size": "S", "hours": 1, "start": "2026-11-14", "due": "2026-11-14", "docs": {}, "checklist": [{ "text": "one", "done": false }], "acceptance": ["one"], "tests": ["one"] }

@@ -1,0 +1,10 @@
+{
+  "check": [
+    { "name": "eye-stream", "surface": "sse", "target": "http://127.0.0.1:7171/api/stream", "events": 0, "every": "5m", "expect": { "status": 200 } },
+    { "name": "eye-share", "target": "localhost:9494", "every": "5m", "expect": { "max_ms": 2000 } }
+  ],
+  "refuse": [
+    { "name": "eye-trends-live-route", "target": "http://127.0.0.1:7171/api/trends/live", "every": "15m", "expect": { "status": 400 } },
+    { "name": "no-metadata", "target": { "url": "http://169.254.169.254/" }, "every": "1h", "by": "policy" }
+  ]
+}

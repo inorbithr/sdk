@@ -1,0 +1,1 @@
+{ "refuse": [{ "name": "no-metadata", "target": "http://169.254.169.254/", "every": "1h", "by": "policy", "expect": { "status": 403 } }] }

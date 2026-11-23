@@ -1,0 +1,1 @@
+{ "id": "Fit-Page", "title": "A card", "x": { "section": "fit" }, "list": "ready", "size": "S", "hours": 1, "start": "2026-11-14", "due": "2026-11-14", "docs": {}, "checklist": [{ "text": "one", "done": false }], "acceptance": ["one"], "tests": ["one"] }
