@@ -1318,7 +1318,16 @@ fn schemas_for(dir: &Path) -> Result<(Schemas, BTreeMap<String, String>), String
         .map(|r| r.join("schemas"))
         .filter(|s| s.is_dir());
     match root {
-        Some(s) => schema::load_tree(&s),
+        Some(s) => {
+            // The one tree loader `iohr schemas check` uses; what it reports is `check`'s job.
+            let tree = schema::load_tree(&s, &mut schema::Report::default())?;
+            let ids = tree
+                .found
+                .iter()
+                .map(|f| (format!("{}.json", f.name), f.id.clone()))
+                .collect();
+            Ok((Schemas::embedded()?.with(tree.loaded), ids))
+        }
         None => Ok((Schemas::embedded()?, BTreeMap::new())),
     }
 }

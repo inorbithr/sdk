@@ -327,30 +327,6 @@ pub(crate) fn version_files(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The schemas of a project's `schemas/` folder, loaded on top of the embedded ones, with the
-/// repo path under that folder (`api/items/v0`) of each one that has a string `$id`. A file that
-/// is not JSON or has no `$id` is left out: [`check_tree`] is what reports those.
-pub(crate) fn load_tree(root: &Path) -> Result<(Schemas, BTreeMap<String, String>), String> {
-    let mut paths = Vec::new();
-    version_files(root, 0, &mut paths);
-    let mut more = Vec::new();
-    let mut ids = BTreeMap::new();
-    for p in paths {
-        let Ok(value) = read_json(&p) else { continue };
-        let Some(id) = value.get("$id").and_then(Value::as_str).map(str::to_owned) else {
-            continue;
-        };
-        let rel = p
-            .strip_prefix(root)
-            .unwrap_or(&p)
-            .to_string_lossy()
-            .replace('\\', "/");
-        ids.insert(rel, id.clone());
-        more.push((id, value));
-    }
-    Ok((Schemas::embedded()?.with(more), ids))
-}
-
 /// Checks a project's schemas tree.
 ///
 /// Rules, one problem per breach: a schema sits at `<area>/<name>/v<major>.json`; it parses; it
