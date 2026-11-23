@@ -126,7 +126,43 @@ fn a_bad_path_or_visibility_is_refused() {
         d.path(),
     );
     assert_eq!(o.status.code(), Some(2), "{}", all(&o));
+    for bad in ["../outside", "a/../b", "/etc/x", "a//b", "a/./b"] {
+        let o = run(&["schemas", "new", bad], d.path());
+        assert_eq!(o.status.code(), Some(2), "{bad}: {}", all(&o));
+    }
     assert!(!d.path().join("schemas").exists());
+    assert!(!d.path().parent().unwrap().join("outside").exists());
+}
+
+#[test]
+fn a_failed_write_leaves_the_manifest_as_it_was() {
+    let d = project();
+    let root = d.path().join("schemas");
+    let before = read(&root, "manifest.json");
+    // A file where the new type's area folder has to go: the folder cannot be made.
+    std::fs::write(root.join("orders"), "in the way").unwrap();
+    let o = run(&["schemas", "new", "orders/order"], d.path());
+    assert!(!o.status.success(), "{}", all(&o));
+    assert_eq!(read(&root, "manifest.json"), before);
+    let o = run(&["schemas", "new", "orders2/order"], d.path());
+    assert!(o.status.success(), "a later new is refused: {}", all(&o));
+}
+
+#[test]
+fn bump_rewrites_only_the_id_member() {
+    let d = project();
+    let root = d.path().join("schemas");
+    let v0 = read(&root, "billing/invoice/v0.json");
+    let doc: serde_json::Value = serde_json::from_str(&v0).unwrap();
+    let id = doc["$id"].as_str().unwrap().to_owned();
+    let marked = v0.replacen('{', &format!("{{\n  \"$comment\": {id:?},"), 1);
+    std::fs::write(root.join("billing/invoice/v0.json"), &marked).unwrap();
+    let o = run(&["schemas", "bump", "billing/invoice"], d.path());
+    assert!(o.status.success(), "{}", all(&o));
+    let v1: serde_json::Value =
+        serde_json::from_str(&read(&root, "billing/invoice/v1.json")).unwrap();
+    assert_eq!(v1["$comment"].as_str(), Some(id.as_str()));
+    assert!(v1["$id"].as_str().unwrap().ends_with("/v1.json"), "{v1}");
 }
 
 #[test]

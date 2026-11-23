@@ -435,28 +435,80 @@ impl Plan {
     }
 
     /// Writes the plan under `root`. New files go through the project writer, which never
-    /// overwrites; the manifest is replaced.
+    /// overwrites, and are written first; the manifest is replaced last, through a temp file
+    /// and a rename, so a failed write never leaves it listing a type with no files.
     ///
     /// # Errors
     ///
-    /// A message when a write failed, or when a file a plan makes is there already.
+    /// A message when a write failed, or when a file a plan makes is there already; in
+    /// both cases the manifest is unchanged.
     pub fn apply(&self, root: &Path) -> Result<(), String> {
-        let mut files = Vec::new();
-        for c in &self.changes {
-            match c.action {
-                Action::Write => files.push((c.rel.clone(), c.text.clone())),
-                Action::Update => {
-                    std::fs::write(root.join(&c.rel), &c.text)
-                        .map_err(|e| format!("cannot write {}: {}", c.rel, e.kind()))?;
-                }
-            }
+        let files: Vec<(String, String)> = self
+            .changes
+            .iter()
+            .filter(|c| matches!(c.action, Action::Write))
+            .map(|c| (c.rel.clone(), c.text.clone()))
+            .collect();
+        // `symlink_metadata`, not `exists`: a dangling link counts as there.
+        if let Some((rel, _)) = files
+            .iter()
+            .find(|(rel, _)| root.join(rel).symlink_metadata().is_ok())
+        {
+            return Err(format!("{rel} is there already; nothing is overwritten"));
         }
         let done = crate::project::write_files(root, &files, &[])?;
         if let Some(kept) = done.same.iter().chain(&done.kept).next() {
             return Err(format!("{kept} is there already; nothing is overwritten"));
         }
+        for c in self
+            .changes
+            .iter()
+            .filter(|c| matches!(c.action, Action::Update))
+        {
+            replace_file(&root.join(&c.rel), &c.text)
+                .map_err(|e| format!("cannot write {}: {}", c.rel, e.kind()))?;
+        }
         Ok(())
     }
+}
+
+/// Replaces `path` with `text` atomically: a temp file beside it, then a rename.
+fn replace_file(path: &Path, text: &str) -> std::io::Result<()> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{name}.tmp-{}", std::process::id()));
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// Replaces the value of the first `"key": old` member in a JSON text, keeping the rest of
+/// the text as written. `None` when no such member is there.
+fn replace_member(text: &str, key: &str, old: &str, new: &str) -> Option<String> {
+    let one = |s: &str| serde_json::to_string(s).unwrap_or_default();
+    let (k, old_v) = (one(key), one(old));
+    let mut from = 0;
+    while let Some(i) = text[from..].find(&k) {
+        let after = from + i + k.len();
+        let rest = text[after..].trim_start();
+        if let Some(rest) = rest.strip_prefix(':') {
+            let value = rest.trim_start();
+            if value.starts_with(&old_v) {
+                let at = text.len() - value.len();
+                return Some(format!(
+                    "{}{}{}",
+                    &text[..at],
+                    one(new),
+                    &text[at + old_v.len()..]
+                ));
+            }
+        }
+        from = after;
+    }
+    None
 }
 
 fn dumps(v: &Value) -> String {
@@ -593,7 +645,6 @@ pub fn plan_bump(root: &Path, fam: &str) -> Result<Plan, String> {
             e.column()
         )
     })?;
-    let one = |s: &str| serde_json::to_string(s).unwrap_or_default();
     let old_id = doc.get("$id").and_then(Value::as_str).map(str::to_owned);
     let new_id = match &old_id {
         Some(id) => match id.strip_suffix(&format!("/v{cur}.json")) {
@@ -605,21 +656,20 @@ pub fn plan_bump(root: &Path, fam: &str) -> Result<Plan, String> {
         }
     };
     // Rewritten in the text, so the file keeps the author's key order and layout.
+    // Only the `$id` member is rewritten, never the same string elsewhere in the file.
     let mut copy = text.clone();
     if let Some(old) = &old_id {
-        copy = copy.replace(&one(old), &one(&new_id));
-        if !copy.contains(&one(&new_id)) {
-            return Err(format!(
-                "{from}: its $id is written in a way iohr cannot rewrite"
-            ));
-        }
+        copy = replace_member(&copy, "$id", old, &new_id)
+            .ok_or_else(|| format!("{from}: its $id is written in a way iohr cannot rewrite"))?;
     }
     if cur == 0
         && let Some(d) = doc.get("description").and_then(Value::as_str)
     {
         let cleaned = d.replace(DRAFT_LINE, "").trim().to_owned();
-        if cleaned != d {
-            copy = copy.replace(&one(d), &one(&cleaned));
+        if cleaned != d
+            && let Some(c) = replace_member(&copy, "description", d, &cleaned)
+        {
+            copy = c;
         }
     }
     plan.write(format!("{fam}/v{next}.json"), copy);

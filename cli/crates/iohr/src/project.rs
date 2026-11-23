@@ -364,7 +364,8 @@ pub(crate) fn write_files(
     let mut done = Written::default();
     for (rel, text) in files {
         let p = dir.join(rel);
-        if p.exists() {
+        // `symlink_metadata`, not `exists`: a dangling link is there, never written through.
+        if p.symlink_metadata().is_ok() {
             match std::fs::read(&p) {
                 Ok(have) if have == text.as_bytes() => done.same.push(rel.clone()),
                 _ => done.kept.push(rel.clone()),
