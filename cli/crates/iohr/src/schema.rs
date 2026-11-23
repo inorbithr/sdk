@@ -11,7 +11,7 @@
 //! A violation names the field (a JSON pointer) and the rule it broke, never the value, so it
 //! is safe to show and to log.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -19,6 +19,8 @@ use std::sync::{Arc, Mutex};
 use jsonschema::{Draft, Retrieve, Uri, Validator};
 use serde::Serialize;
 use serde_json::Value;
+
+use crate::schema_manage::{FILE as MANIFEST_FILE, Manifest};
 
 /// Where the CLI's own schemas are published.
 pub const BASE: &str = "https://schemas.inorbit.hr/iohr/";
@@ -34,7 +36,7 @@ const EMBEDDED: [(&str, &str); 3] = [
 ];
 
 /// The largest schema, example or invalid case that is read.
-const MAX_FILE: u64 = 1024 * 1024;
+pub(crate) const MAX_FILE: u64 = 1024 * 1024;
 /// How deep a tree is walked; a deeper one is not a layout this check knows.
 const MAX_DEPTH: usize = 6;
 /// How many violations one validation reports.
@@ -231,7 +233,7 @@ pub struct Report {
 }
 
 impl Report {
-    fn fail(&mut self, target: impl Into<String>, message: impl Into<String>) {
+    pub(crate) fn fail(&mut self, target: impl Into<String>, message: impl Into<String>) {
         self.problems.push(Problem {
             target: target.into(),
             message: message.into(),
@@ -240,14 +242,14 @@ impl Report {
 }
 
 /// A schema file found in a tree.
-struct Found {
+pub(crate) struct Found {
     /// `scrum/card/v0`.
-    name: String,
-    id: String,
-    dir: PathBuf,
+    pub(crate) name: String,
+    pub(crate) id: String,
+    pub(crate) dir: PathBuf,
 }
 
-fn read_json(path: &Path) -> Result<Value, String> {
+pub(crate) fn read_json(path: &Path) -> Result<Value, String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("cannot read: {}", e.kind()))?;
     if meta.len() > MAX_FILE {
         return Err(format!("over {MAX_FILE} bytes"));
@@ -258,7 +260,7 @@ fn read_json(path: &Path) -> Result<Value, String> {
 }
 
 /// The `.json` files directly in `dir`, sorted; none when it is missing.
-fn json_files(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn json_files(dir: &Path) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|rd| {
             rd.filter_map(Result::ok)
@@ -272,7 +274,7 @@ fn json_files(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-fn file_name(p: &Path) -> String {
+pub(crate) fn file_name(p: &Path) -> String {
     p.file_name()
         .map(|f| f.to_string_lossy().into_owned())
         .unwrap_or_default()
@@ -322,14 +324,63 @@ fn version_files(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
 ///
 /// A message when `root` is not a folder.
 pub fn check_tree(root: &Path) -> Result<Report, String> {
+    let mut report = Report::default();
+    let tree = load_tree(root, &mut report)?;
+    let embedded = Schemas::embedded()?;
+    let schemas = embedded.with(tree.loaded.clone());
+    for f in &tree.found {
+        check_type(&schemas, f, &mut report);
+    }
+    // The manifest is optional; when it is there it and the tree must agree.
+    let has_manifest = match Manifest::read(root) {
+        Ok(Some(m)) => {
+            for p in m.problems(&tree.families) {
+                report.problems.push(p);
+            }
+            true
+        }
+        Ok(None) => false,
+        Err(why) => {
+            report.fail(MANIFEST_FILE, why);
+            true
+        }
+    };
+    if report.types == 0 && !has_manifest {
+        // A mistyped folder must not look green. A manifest marks the folder as the project's
+        // schemas tree (`iohr project init` writes an empty one), so no schema yet is fine there;
+        // a type it lists without a file is still a problem above.
+        report.fail(".", "no schema found (<area>/<name>/v<major>.json)");
+    }
+    report.problems.sort_by(|a, b| a.target.cmp(&b.target));
+    Ok(report)
+}
+
+/// The schemas of a tree that parse and have a good `$id`, and the families it holds.
+pub(crate) struct Tree {
+    pub(crate) found: Vec<Found>,
+    /// By `$id`.
+    pub(crate) loaded: BTreeMap<String, Value>,
+    /// Every `<area>/<name>` that has a version file, even one that did not load.
+    pub(crate) families: BTreeSet<String>,
+}
+
+/// Reads every schema of the tree at `root`, counting them and recording what is wrong with
+/// the ones that cannot be used (a wrong place, not JSON, no or a repeated `$id`).
+///
+/// # Errors
+///
+/// A message when `root` is not a folder.
+pub(crate) fn load_tree(root: &Path, report: &mut Report) -> Result<Tree, String> {
     if !root.is_dir() {
         return Err(format!("{}: no such folder", root.display()));
     }
     let mut paths = Vec::new();
     version_files(root, 0, &mut paths);
-    let mut report = Report::default();
-    let mut found: Vec<Found> = Vec::new();
-    let mut loaded: BTreeMap<String, Value> = BTreeMap::new();
+    let mut tree = Tree {
+        found: Vec::new(),
+        loaded: BTreeMap::new(),
+        families: BTreeSet::new(),
+    };
     let mut owner: BTreeMap<String, String> = BTreeMap::new();
     for p in paths {
         let rel = p.strip_prefix(root).unwrap_or(&p).with_extension("");
@@ -339,6 +390,9 @@ pub fn check_tree(root: &Path) -> Result<Report, String> {
         if depth < 3 {
             report.fail(&name, "a schema sits at <area>/<name>/v<major>.json");
             continue;
+        }
+        if let Some((fam, _)) = name.rsplit_once('/') {
+            tree.families.insert(fam.to_owned());
         }
         let value = match read_json(&p) {
             Ok(v) => v,
@@ -359,24 +413,41 @@ pub fn check_tree(root: &Path) -> Result<Report, String> {
             report.fail(&name, format!("$id is also the $id of {other}"));
             continue;
         }
-        loaded.insert(id.clone(), value);
-        found.push(Found {
+        tree.loaded.insert(id.clone(), value);
+        tree.found.push(Found {
             name,
             id,
             dir: p.parent().unwrap_or(root).to_owned(),
         });
     }
-    let embedded = Schemas::embedded()?;
-    let schemas = embedded.with(loaded.clone());
-    for f in found {
-        check_type(&schemas, &f, &mut report);
+    Ok(tree)
+}
+
+/// The majors each `<area>/<name>` of the tree has, sorted; a type is listed even when its
+/// files are broken (a check says so). Empty for a folder that is not there.
+#[must_use]
+pub fn families(root: &Path) -> BTreeMap<String, Vec<u32>> {
+    let mut paths = Vec::new();
+    version_files(root, 0, &mut paths);
+    let mut out: BTreeMap<String, Vec<u32>> = BTreeMap::new();
+    for p in paths {
+        let rel = p.strip_prefix(root).unwrap_or(&p).with_extension("");
+        let name = rel.to_string_lossy().replace('\\', "/");
+        let Some((fam, v)) = name.rsplit_once('/') else {
+            continue;
+        };
+        if rel.components().count() < 3 {
+            continue;
+        }
+        if let Some(n) = v.strip_prefix('v').and_then(|n| n.parse::<u32>().ok()) {
+            out.entry(fam.to_owned()).or_default().push(n);
+        }
     }
-    if report.types == 0 {
-        // A mistyped folder must not look green.
-        report.fail(".", "no schema found (<area>/<name>/v<major>.json)");
+    for majors in out.values_mut() {
+        majors.sort_unstable();
+        majors.dedup();
     }
-    report.problems.sort_by(|a, b| a.target.cmp(&b.target));
-    Ok(report)
+    out
 }
 
 fn check_type(schemas: &Schemas, f: &Found, r: &mut Report) {
@@ -547,6 +618,28 @@ mod tests {
         assert_eq!(
             problems(t.path()),
             [".: no schema found (<area>/<name>/v<major>.json)"]
+        );
+    }
+
+    #[test]
+    fn an_empty_manifest_with_no_schema_yet_passes() {
+        // What `iohr project init` writes: the folder is the project's, it just has no type yet.
+        let t = tempfile::tempdir().unwrap();
+        put(t.path(), "manifest.json", r#"{ "schemas": {} }"#);
+        assert_eq!(problems(t.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_manifest_listing_a_type_with_no_file_still_fails() {
+        let t = tempfile::tempdir().unwrap();
+        put(
+            t.path(),
+            "manifest.json",
+            r#"{ "schemas": { "acme/order": { "visibility": "account", "status": "draft" } } }"#,
+        );
+        assert_eq!(
+            problems(t.path()),
+            ["acme/order: is listed in manifest.json but has no v<major>.json"]
         );
     }
 

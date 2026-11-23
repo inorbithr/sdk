@@ -341,6 +341,34 @@ pub(crate) const ALL: &[(&[&str], &[Example])] = &[
         ],
     ),
     (
+        &["schemas"],
+        &[
+            ex(&["schemas", "list"], "The types in ./schemas."),
+            ex(
+                &["schemas", "check"],
+                "Check the layout, the examples and the invalid cases.",
+            ),
+            ex(
+                &["schemas", "new", "billing/invoice"],
+                "Start a new schema as a draft.",
+            ),
+            ex(
+                &["schemas", "show", "billing/invoice"],
+                "One type, with its examples.",
+            ),
+            ex(
+                &[
+                    "schemas",
+                    "validate",
+                    "invoice.json",
+                    "--type",
+                    "billing/invoice",
+                ],
+                "Check a document against a type.",
+            ),
+        ],
+    ),
+    (
         &["decisions"],
         &[
             ex(&["decisions", "list"], "The documents of your spaces."),
