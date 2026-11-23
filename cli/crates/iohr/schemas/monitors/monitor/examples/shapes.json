@@ -1,6 +1,6 @@
 {
   "check": [
-    { "name": "eye-items", "target": "http://127.0.0.1:7171/api/items", "every": "5m", "expect": { "status": 200, "headers": { "content-type": "application/json" }, "shape": "schemas/api/items/v0.json" } },
-    { "name": "eye-stream", "surface": "sse", "target": "http://127.0.0.1:7171/api/stream", "events": 1, "every": "5m", "expect": { "status": 200, "shape": { "item": "schemas/api/item/v0.json", "change": "schemas/api/change/v0.json" } } }
+    { "name": "app-items", "target": "http://127.0.0.1:7171/api/items", "every": "5m", "expect": { "status": 200, "headers": { "content-type": "application/json" }, "shape": "schemas/api/items/v0.json" } },
+    { "name": "app-stream", "surface": "sse", "target": "http://127.0.0.1:7171/api/stream", "events": 1, "every": "5m", "expect": { "status": 200, "shape": { "item": "schemas/api/item/v0.json", "change": "schemas/api/change/v0.json" } } }
   ]
 }

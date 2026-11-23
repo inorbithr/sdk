@@ -1,1 +1,1 @@
-{ "check": [{ "name": "eye-cli-board", "target": { "cli": "/usr/local/bin/eye" }, "argv": ["scrum", "board", "--json"] }] }
+{ "check": [{ "name": "app-cli-board", "target": { "cli": "/usr/local/bin/app" }, "argv": ["scrum", "board", "--json"] }] }

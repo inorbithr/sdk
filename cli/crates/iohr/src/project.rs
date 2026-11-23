@@ -331,13 +331,48 @@ pub fn cloud_steps(name: &str) -> Vec<Step> {
             "per-project memory namespaces (PRD 0082, RFC 0106, RFC 0127.2)",
         ),
         step(
-            "monitors",
-            "Its own monitors and a notifications channel",
+            "notifications",
+            "A notifications channel",
             "not-yet",
-            "a heartbeat monitor tagged project:<name> and push to your phone",
-            "monitors with a project tag; a notifications API; push as a subscription channel (RFC 0127.2)",
+            "push to your phone when a monitor fails",
+            "a notifications API; push as a subscription channel (RFC 0127.2)",
         ),
     ]
+}
+
+/// The project's own monitors: the files in `<dir>/.inorbit/monitors`, counted as `iohr monitors
+/// check` reads them. `done` with the counts, or `failed` when a file breaks a rule.
+#[must_use]
+pub fn monitors_step(dir: &Path) -> Step {
+    let title = "Its own monitors";
+    let folder = dir.join(crate::monitors::DIR);
+    let files = match crate::monitors::load(&folder) {
+        Ok(f) => f,
+        Err(e) => return step("monitors", title, "failed", e.to_string(), ""),
+    };
+    let report = crate::monitors::check_files(&files);
+    if !report.problems.is_empty() {
+        let said = format!(
+            "{} problem{} in {}; `iohr monitors check` lists them",
+            report.problems.len(),
+            if report.problems.len() == 1 { "" } else { "s" },
+            crate::monitors::DIR
+        );
+        return step("monitors", title, "failed", said, "");
+    }
+    let (n, f) = (report.monitors.len(), files.len());
+    step(
+        "monitors",
+        title,
+        "done",
+        format!(
+            "{n} monitor{} in {f} file{} under {}; `iohr monitors run` runs them here, `iohr monitors install` hands them to the agent",
+            if n == 1 { "" } else { "s" },
+            if f == 1 { "" } else { "s" },
+            crate::monitors::DIR
+        ),
+        "",
+    )
 }
 
 /// What [`write_files`] did with each path of the template.

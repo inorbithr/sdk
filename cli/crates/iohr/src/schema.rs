@@ -169,7 +169,7 @@ impl Schemas {
     }
 
     /// The compiled validator for the schema with this `$id`, compiled once and kept.
-    fn validator(&self, id: &str) -> Result<Arc<Validator>, ValidateError> {
+    pub(crate) fn validator(&self, id: &str) -> Result<Arc<Validator>, ValidateError> {
         if let Some(v) = self.compiled.lock().ok().and_then(|c| c.get(id).cloned()) {
             return Ok(v);
         }
@@ -182,6 +182,20 @@ impl Schemas {
             c.insert(id.to_owned(), v.clone());
         }
         Ok(v)
+    }
+
+    /// The compiled validator for `reference`: a schema's `$id`, or an `$id` with a JSON pointer
+    /// fragment (`<id>#/$defs/request`) for one part of a schema.
+    pub(crate) fn validator_ref(&self, reference: &str) -> Result<Arc<Validator>, ValidateError> {
+        let Some((id, _)) = reference.split_once('#') else {
+            return self.validator(reference);
+        };
+        if !self.by_id.contains_key(id) {
+            return Err(ValidateError::Unknown(id.to_owned()));
+        }
+        Ok(Arc::new(
+            self.build(&serde_json::json!({ "$ref": reference }))?,
+        ))
     }
 
     /// Checks `value` against the schema with this `$id`.
@@ -289,7 +303,7 @@ fn is_version_file(name: &str) -> bool {
 
 /// Every `v<n>.json` under `dir`, skipping `examples/`, `invalid/`, hidden folders and
 /// symbolic links (a link could point out of the tree being checked).
-fn version_files(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+pub(crate) fn version_files(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
     };

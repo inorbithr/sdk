@@ -28,6 +28,7 @@ mod init_extensions;
 mod lab;
 mod login;
 mod memory;
+mod monitors;
 mod openapi;
 mod permissions;
 mod profile;
@@ -169,6 +170,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::Schemas(cmd) => schema::run(cmd, out),
+        Command::Monitors(args) => monitors::run(&args, out),
         Command::Decisions(cmd) => decisions::run(g, &env, cmd, out).await,
         Command::Runner(cmd) => Box::pin(runner::run(g, &env, cmd, out)).await,
         Command::Session(args) => session::open(g, &args, out).await,

@@ -1,10 +1,10 @@
 {
   "check": [
     {
-      "name": "eye-api",
-      "label": "eye API",
+      "name": "app-api",
+      "label": "app API",
       "category": "availability",
-      "tags": { "app": "eye", "part": "api" },
+      "tags": { "app": "app", "part": "api" },
       "target": "http://127.0.0.1:7171/api/health",
       "every": "60s",
       "fail_after": 2,

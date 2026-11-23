@@ -241,6 +241,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "openapi",
             "lab",
             "schemas",
+            "monitors",
             "decisions",
         ],
     ),
@@ -501,6 +502,15 @@ pub enum Command {
     /// version and retire them. Everything is a file in your folder; nothing leaves it.
     #[command(subcommand)]
     Schemas(SchemaCommand),
+    /// Check, run and manage the monitors kept in your project's `.inorbit/monitors/`.
+    ///
+    /// Monitors as files in your repository: each `*.toml` there is a block of the InOrbit
+    /// agent's `checks.toml`. `check` reads them offline against the schema and the agent's rules
+    /// (the default); `run` runs them from here; `list`, `show` and `history` say what each is and
+    /// how it ran; `disable` and `enable` switch one off or on on this machine; `delete` cuts one
+    /// out of its file; `export` prints one `checks.toml`; `install` puts them into the agent's
+    /// checks file. Local state stays in `.inorbit/state`. Needs no sign-in.
+    Monitors(MonitorsArgs),
     /// Read and write RFCs, PRDs and ADRs in Decisions.
     ///
     /// Decisions: RFCs, PRDs and ADRs in the Decisions product:
@@ -740,6 +750,131 @@ pub enum SchemaCommand {
     /// The files stay at their addresses so documents written against them keep validating.
     /// Ends by checking the folder.
     Deprecate(SchemaDeprecate),
+}
+
+#[derive(Debug, Args)]
+pub struct MonitorsArgs {
+    /// The monitors folder; defaults to the nearest .inorbit/monitors above this folder.
+    #[arg(long, global = true)]
+    pub dir: Option<PathBuf>,
+    #[command(subcommand)]
+    pub cmd: Option<MonitorsCmd>,
+}
+
+/// Which monitors a command takes, beyond their names.
+#[derive(Debug, Clone, Args, Default)]
+pub struct MonitorsPick {
+    /// Only the monitors on this surface, such as cli, http or tcp.
+    #[arg(long)]
+    pub surface: Option<String>,
+    /// Only the monitors in this category, such as availability or contract.
+    #[arg(long)]
+    pub category: Option<String>,
+    /// Only the monitors with this tag, as key=value; repeat to need several.
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub tag: Vec<String>,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum MonitorsCmd {
+    /// Check every file against the schema and the agent's rules, offline (the default).
+    Check,
+    /// Run monitors from here, all of them or the ones named: status, headers, time and the
+    /// body's shape; cli checks run the project's own binary in a throwaway folder. Monitors switched off
+    /// here are listed, never run, and never fail the run.
+    Run {
+        /// Run only these monitors.
+        names: Vec<String>,
+        /// Run only this monitor; repeat for more (the same as naming it).
+        #[arg(long)]
+        only: Vec<String>,
+        #[command(flatten)]
+        pick: MonitorsPick,
+        /// Keep running every --every (60s by default) until Ctrl-C, printing only what changes
+        /// after the first full report.
+        #[arg(long)]
+        watch: bool,
+        /// How long between runs with --watch, such as 30s or 5m; implies --watch.
+        #[arg(long, value_name = "DUR")]
+        every: Option<String>,
+    },
+    /// One line per monitor: what it is, how often it runs, whether it is on here, and its last
+    /// result with its age.
+    List {
+        #[command(flatten)]
+        pick: MonitorsPick,
+        /// Only the monitors whose last run failed.
+        #[arg(long)]
+        failing: bool,
+        /// Only the monitors that are off or silenced here.
+        #[arg(long)]
+        off: bool,
+    },
+    /// One monitor in full: what it checks in plain words, the file and line it lives in, its
+    /// definition, its state here and its last runs.
+    #[command(alias = "get")]
+    Show {
+        name: String,
+        /// How many past runs to show.
+        #[arg(long, default_value_t = 10)]
+        runs: usize,
+    },
+    /// Past runs from the run log: per monitor its passes, fails, flaps and last pass and fail;
+    /// for one monitor, its runs with the time and the why.
+    History {
+        name: Option<String>,
+        /// How many runs to show for one monitor.
+        #[arg(long, default_value_t = 20)]
+        last: usize,
+    },
+    /// Switch a monitor off on this Mac, for a while or until `enable`; it is listed as
+    /// silenced, never run, and never fails a run. No file is edited. On a monitor its file has
+    /// off, a bare `disable` undoes `enable`.
+    Disable {
+        name: String,
+        /// How long, such as 30m, 2h or 1d; without it, until `iohr monitors enable`.
+        #[arg(long = "for", value_name = "DUR")]
+        for_: Option<String>,
+        /// Why, shown wherever the monitor is listed.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Switch a monitor on on this Mac: ends its silence, or turns on one its file has off.
+    Enable { name: String },
+    /// Remove a monitor's entry from its file, keeping every other entry and comment as it
+    /// was. Without --yes it only prints what it would remove.
+    Delete {
+        name: String,
+        /// Remove it; without this nothing changes.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Print every file folded into one checks.toml the InOrbit agent takes today, without the
+    /// keys it does not read (expect.shape, enabled), the cli checks it cannot run and the
+    /// monitors off by default.
+    Export,
+    /// Put this project's monitors into the agent's checks file, as one block, and say what changed.
+    ///
+    /// Writes the same entries `export` prints into `~/.config/iohr-agent/checks.toml`, between
+    /// `# BEGIN` and `# END` lines named for the project, through the install `agent.install-checks`
+    /// uses: the new file is linted with `iohr agent checks lint` first, the old one is kept as
+    /// `checks.toml.bak-<UTC time>`, and the file is swapped in one rename. The agent declares
+    /// the checks and the platform keeps one monitor per entry. Restart the agent to load them.
+    /// A project with cli checks installs the rest; cli checks never leave this machine.
+    Install {
+        /// Monitor files to install, by name; none installs them all. A file with a cli
+        /// check is refused when named.
+        files: Vec<String>,
+        /// The checks file. Default: `~/.config/iohr-agent/checks.toml`.
+        #[arg(long, value_name = "FILE")]
+        file: Option<PathBuf>,
+        /// The block's name in the file. Default: the project folder's name.
+        #[arg(long, value_name = "NAME")]
+        block: Option<String>,
+        /// Print what would change; write nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Debug, Args)]

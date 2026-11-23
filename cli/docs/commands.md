@@ -50,6 +50,7 @@ ends its `--help` with real examples.
 | `iohr lab check` | Check RFC and study files offline | [below](#iohr-lab-check) |
 | `iohr schemas` | List, show, validate, check and scaffold a project's JSON Schemas (`new`, `bump`, `deprecate`) | [below](#iohr-schemas) |
 | `iohr atlas scrum ...` | The project's scrum board in `atlas/scrum/board.json`: views, guarded changes, `sync` to the Planner | [below](#iohr-atlas-scrum) |
+| `iohr monitors …` | Monitors kept as files in `.inorbit/monitors/`: check, run, list, show, history, enable, disable, delete, export, install | [below](#iohr-monitors) |
 | `iohr decisions ...` | RFCs, PRDs, ADRs and studies in Decisions | [below](#iohr-decisions) |
 
 ### Agents
@@ -352,6 +353,40 @@ nearest `atlas/scrum/board.json` up from the current folder.
   file, then runs `check`.
 
 Exit codes: 2 for a usage error (also an unknown card), 1 for a refusal or findings.
+
+## `iohr monitors`
+
+```sh
+iohr monitors [--dir DIR]                        # check (the default)
+iohr monitors check|list|show|history|export     # read
+iohr monitors run [NAME...] [--only ..] [--surface ..] [--category ..] [--tag K=V]
+iohr monitors disable NAME [--for DUR] [--reason ..]   # on this machine only
+iohr monitors enable NAME
+iohr monitors delete NAME [--yes]
+iohr monitors install [FILES...] [--file F] [--block NAME]
+```
+
+Monitors as files: each `*.toml` in `.inorbit/monitors/` (found from the nearest parent, or
+`--dir`) is a block of the InOrbit agent's `checks.toml`. No sign-in is needed.
+
+- `check` validates every file offline against the embedded `monitors/monitor` schema and
+  the agent's rules. Exit 1 on findings, 2 on usage errors.
+- `run` runs http checks from here (status, headers, time, body shape). `cli` checks run
+  the project's own binary in a throwaway folder (`IOHR_MONITORS_BIN`, else `iohr`).
+  Monitors switched off are listed, never run, and never fail the run.
+- `list`, `show` and `history` read the file and the run log. State lives in
+  `.inorbit/state/monitors` and is self-ignored by git.
+- `disable` and `enable` switch one on this machine; no file is edited. `delete` cuts one
+  entry out and keeps the rest of the file; without `--yes` it only prints.
+- `export` folds the files into one `checks.toml` for the agent, dropping what it cannot read.
+- `install` writes the monitors into the agent's checks file as one block, first running the
+  agent's own `checks lint` on the candidate and swapping it in only if the lint passes.
+  `cli` checks are refused for install. The lint runs `agent checks lint` from the program in
+  `IOHR_MONITORS_LINT`, else this binary, else `iohr` on PATH; it needs the agent installed
+  with its `agent.toml`.
+
+Env vars: `IOHR_MONITORS_STATE`, `IOHR_MONITORS_TMP`, `IOHR_MONITORS_BIN`, `IOHR_MONITORS_LINT`.
+`iohr project init` adds a disabled `example.toml` and a `monitors` step.
 
 ## `iohr decisions`
 

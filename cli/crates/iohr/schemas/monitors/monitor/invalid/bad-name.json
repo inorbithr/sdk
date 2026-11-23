@@ -1,1 +1,1 @@
-{ "check": [{ "name": "Eye API", "target": "http://127.0.0.1:7171/api/health", "every": "60s" }] }
+{ "check": [{ "name": "App API", "target": "http://127.0.0.1:7171/api/health", "every": "60s" }] }

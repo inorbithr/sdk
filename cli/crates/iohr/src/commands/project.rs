@@ -1890,6 +1890,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                             sp.end(mark, &said);
                         }
                         report.steps.push(st);
+                        report.steps.push(project::monitors_step(&dir));
                         report.steps.extend(project::cloud_steps(name));
                     }
                     Some(Err(e)) => {
@@ -2443,13 +2444,15 @@ mod tests {
         let lines: Vec<String> = [
             "done: wrote inorbit.toml",
             "not yet: a Keychain slot for the project's own token",
-            "not yet: its own monitors",
+            "not yet: a notifications channel",
         ]
         .map(String::from)
         .to_vec();
         assert_eq!(
             not_built_yet(&lines).as_deref(),
-            Some("not yet: a Keychain slot for the project's own token\nnot yet: its own monitors")
+            Some(
+                "not yet: a Keychain slot for the project's own token\nnot yet: a notifications channel"
+            )
         );
         assert_eq!(
             not_built_yet(&["done: wrote inorbit.toml".to_owned()]),
