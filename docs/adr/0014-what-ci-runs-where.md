@@ -107,10 +107,31 @@ ref that saved them. Eviction then removed `main`'s Rust caches for macOS, Windo
 - The trade-off is that a pull request that changes `mise.toml` installs its tools again on
   each run, about one to two minutes per job.
 
+## Amendment, 2026-11-23: superseded Rust caches are pruned
+
+The merge queue's `cli 1.94` leg found no cache and compiled for 15 minutes 8 seconds (job
+1436 s); the 1.99.0 leg hit its cache and compiled for 1 minute 36 seconds (job 837 s). The
+repository's cache held 21 entries, 11.45 GB, over the 10 GB limit, so eviction removed the
+least recently used entry. Each lockfile change saved a new Rust cache and left the old one
+under the same prefix; three superseded entries held 2.23 GB.
+
+- The `cache-prune` job runs `tools/prune-rust-caches.py` first on every push to `main`. It
+  deletes every `refs/heads/main` entry whose key starts `v0-rust`, except the newest per
+  prefix (the key without its last eight-hex lockfile hash). It never touches pull-request
+  or merge-queue refs, mise caches or any check.
+- Ordering: rust-cache saves in its post step, after every later step in a job, so a prune
+  step in the same job cannot see the entry that run saves. The prune therefore runs at the
+  start of the next main run and removes what the previous run superseded; a cache is never
+  deleted before its replacement exists. A separate job, not a step in the composite action,
+  because `actions: write` is a job permission and eight jobs use the action; only
+  `cache-prune`, only on main, holds it.
+- Left alone: mise caches saved by pull-request refs are about 0.09 GB each.
+
 ## Sources
 
 - https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/storing-and-sharing-data-from-a-workflow
 - https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache
+- https://docs.github.com/en/rest/actions/cache#delete-github-actions-caches-for-a-repository-using-a-cache-key
 - https://github.com/jdx/mise-action (inputs `cache` and `cache_save`)
 - https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#schedule
 - https://docs.github.com/en/actions/reference/limits (maximum concurrent macOS jobs)
