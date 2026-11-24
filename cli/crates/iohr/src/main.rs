@@ -30,6 +30,24 @@ fn main() -> ExitCode {
         );
         return iohr::report_usage_clap(&args, json, &e);
     }
+    // The command future is large, and Windows gives the main thread 1 MiB of stack (Linux
+    // gives 8 MiB): every command overflowed it on windows-latest. Run on a thread with a
+    // stack the size every platform can hold.
+    let worker = std::thread::Builder::new()
+        .name("iohr".into())
+        .stack_size(STACK_BYTES)
+        .spawn(move || run_command(&args, json, cli));
+    match worker.map(std::thread::JoinHandle::join) {
+        Ok(Ok(code)) => code,
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(e) => iohr::report_failure(json, &iohr::Error::Failed(format!("cannot start: {e}"))),
+    }
+}
+
+/// The stack the command runs on: 16 MiB, room above Linux's 8 MiB main thread default.
+const STACK_BYTES: usize = 16 * 1024 * 1024;
+
+fn run_command(args: &[std::ffi::OsString], json: bool, cli: Cli) -> ExitCode {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -42,7 +60,7 @@ fn main() -> ExitCode {
     match runtime.block_on(run(cli, Env::from_process())) {
         Ok(()) => ExitCode::SUCCESS,
         Err(iohr::Error::Usage(message)) if !message.is_empty() => {
-            iohr::report_usage_message(&args, json, &message)
+            iohr::report_usage_message(args, json, &message)
         }
         Err(e) => iohr::report_failure(json, &e),
     }
