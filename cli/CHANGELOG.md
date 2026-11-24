@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.1.2](https://github.com/inorbithr/sdk/compare/iohr/v0.1.1...iohr/v0.1.2) (2026-11-24)
+
+
+### Features
+
+* **cli:** iohr atlas scrum, Eye's board in the CLI (RFC 0234 S2) ([#611](https://github.com/inorbithr/sdk/issues/611)) ([91f99cf](https://github.com/inorbithr/sdk/commit/91f99cf56f7f334be0f85deeec6fa6698d8d3407))
+* **cli:** iohr monitors, the repo monitors from Eye (RFC 0234 S3) ([#613](https://github.com/inorbithr/sdk/issues/613)) ([e03d3ea](https://github.com/inorbithr/sdk/commit/e03d3ea271f8e5ec716dd74be77c02bd095ab1c3))
+* **cli:** iohr schema check and one JSON Schema validator (RFC 0234) ([#610](https://github.com/inorbithr/sdk/issues/610)) ([18216f7](https://github.com/inorbithr/sdk/commit/18216f76d687c2f8a932b8fa6d2e6d6623a2212e))
+* **cli:** iohr schemas, manage a project's schemas (RFC 0222) ([#614](https://github.com/inorbithr/sdk/issues/614)) ([dfdacbc](https://github.com/inorbithr/sdk/commit/dfdacbc021c9da6b2fd4db67fc61449fe5c341c1))
+* **cli:** local tool ceiling, repository allow-list and OS sandbox for iohr runner ([#468](https://github.com/inorbithr/sdk/issues/468)) ([10f5ee6](https://github.com/inorbithr/sdk/commit/10f5ee6f5d47505af290e7642802b9527e830a89))
+* **cli:** one key between the chat box and the terminal, draft kept (PRD 0207) ([#507](https://github.com/inorbithr/sdk/issues/507)) ([28cd6d3](https://github.com/inorbithr/sdk/commit/28cd6d3fa60c0d719d3e08e13cfee2a7ba786ffe))
+* **cli:** role check gates, base-engineer pack and multi-language selection ([#595](https://github.com/inorbithr/sdk/issues/595)) ([d9b540a](https://github.com/inorbithr/sdk/commit/d9b540aedf8334f61b99b2de08ae341a82ac1858))
+* **iohr:** project init uses an existing folder, such as a cloned repository ([#606](https://github.com/inorbithr/sdk/issues/606)) ([bf41c4c](https://github.com/inorbithr/sdk/commit/bf41c4c469df7f063c998e357d7772163d4e2150))
+
+
+### Bug fixes
+
+* **cli:** a held Esc waits once more when the panel ran late, so Option+h in two reads is not lost on a loaded runner ([#585](https://github.com/inorbithr/sdk/issues/585)) ([a8a3cf7](https://github.com/inorbithr/sdk/commit/a8a3cf7596dae849f7308ed834ea8099eeee5086))
+* **cli:** built-in roles inherit one root, check before import and say why they upgrade ([#588](https://github.com/inorbithr/sdk/issues/588)) ([b107f6a](https://github.com/inorbithr/sdk/commit/b107f6ac17d65fed2ed94270e0059cb36622bc37))
+* **cli:** hold a lone Esc in the key reader so Option+h survives a stalled panel ([#598](https://github.com/inorbithr/sdk/issues/598)) ([9a07d60](https://github.com/inorbithr/sdk/commit/9a07d60289d64f80687a238c4fdef6ab03e32c0b))
+* **cli:** run iohr commands on a 16 MiB stack so Windows does not overflow ([#622](https://github.com/inorbithr/sdk/issues/622)) ([32504c7](https://github.com/inorbithr/sdk/commit/32504c7b13bf8275649ebfea9cdf70798e2a8a83))
+* **cli:** synthetic test identifiers, runner disclosures and a secret scan ([#460](https://github.com/inorbithr/sdk/issues/460)) ([fa951e8](https://github.com/inorbithr/sdk/commit/fa951e8687fda4a446127607a58d940aad8be836))
+* **cli:** the panel keeps reading keys after a stop and a held Esc yields to a waiting h ([#597](https://github.com/inorbithr/sdk/issues/597)) ([95a78eb](https://github.com/inorbithr/sdk/commit/95a78ebf68d6538804e48c71ba8974c4988cd0c7))
+* **cli:** the runner obeys the host's build rules (per-job target, caps, gate lease) ([#577](https://github.com/inorbithr/sdk/issues/577)) ([ab0ccef](https://github.com/inorbithr/sdk/commit/ab0ccef78f8a202a5ac4df8b5cc7cc73b8a7a39a))
+* **cli:** the Rust, C#, TypeScript and Dart services log and count a request before replying ([#586](https://github.com/inorbithr/sdk/issues/586)) ([d84d57e](https://github.com/inorbithr/sdk/commit/d84d57ed400d0344fd35bf107e0d5a8945f4cdb8))
+* **cli:** the Rust, C#, TypeScript and Dart services log and count a request before replying ([#587](https://github.com/inorbithr/sdk/issues/587)) ([9cdaeee](https://github.com/inorbithr/sdk/commit/9cdaeee7e126cb9fcaf0eeea0907ce849b435a52))
+* sdk main gate: url 2.5.9 (RUSTSEC-2026-0592) and a non-reserved id for the ask example ([#607](https://github.com/inorbithr/sdk/issues/607)) ([bd64cac](https://github.com/inorbithr/sdk/commit/bd64cacd1473f004f4006d9e7a3a3315c6e889c6))
+
+
+### Dependencies
+
+* **rust:** bump the rust group across 1 directory with 2 updates ([#573](https://github.com/inorbithr/sdk/issues/573)) ([6050089](https://github.com/inorbithr/sdk/commit/6050089572132fcb33835bf48007fe224c23811e))
+
 ## [0.1.1](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0...iohr/v0.1.1) (2026-11-14)
 
 
