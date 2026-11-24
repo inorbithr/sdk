@@ -137,12 +137,17 @@ pub fn checks(m: &Monitor) -> String {
 pub fn hint(m: &Monitor, why: &str) -> Option<String> {
     let w = why.to_ascii_lowercase();
     let off = format!("`iohr monitors disable {}`", m.name);
-    if w.contains("connection refused") {
+    // The same failures read differently per OS: Windows says "actively refused" (os error
+    // 10061), "did not properly respond" (10060) and "no such host is known" (11001).
+    if w.contains("connection refused") || w.contains("actively refused") {
         return Some(format!(
             "nothing listens on that port; start it, or {off} until it runs"
         ));
     }
-    if w.contains("timed out") || w.contains("would block") || w.contains("temporarily unavailable")
+    if w.contains("timed out")
+        || w.contains("would block")
+        || w.contains("temporarily unavailable")
+        || w.contains("did not properly respond")
     {
         return Some(match m.surface {
             Surface::Cli => {
@@ -156,6 +161,7 @@ pub fn hint(m: &Monitor, why: &str) -> Option<String> {
     if w.contains("failed to lookup")
         || w.contains("nodename nor servname")
         || w.contains("no address")
+        || w.contains("no such host")
     {
         return Some("the host name does not resolve; check the target".into());
     }
@@ -284,6 +290,26 @@ mod tests {
                 .unwrap()
                 .starts_with("nothing listens on that port")
         );
+        for windows in [
+            (
+                "127.0.0.1:1: No connection could be made because the target machine actively refused it. (os error 10061)",
+                "nothing listens on that port",
+            ),
+            (
+                "10.0.0.1:443: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond. (os error 10060)",
+                "it accepted but did not answer in time",
+            ),
+            (
+                "nowhere.invalid:443: No such host is known. (os error 11001)",
+                "the host name does not resolve",
+            ),
+        ] {
+            assert!(
+                hint(&api, windows.0).unwrap().starts_with(windows.1),
+                "{}",
+                windows.0
+            );
+        }
         assert!(
             hint(&api, "answered 404, wanted 200")
                 .unwrap()
