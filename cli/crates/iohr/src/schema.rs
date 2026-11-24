@@ -22,11 +22,20 @@ use serde_json::Value;
 
 use crate::schema_manage::{FILE as MANIFEST_FILE, Manifest};
 
+/// The one place the schemas origin is written: every `$id` base in the CLI is built from
+/// it, `schema_manage::DEFAULT_BASE` included. A macro, because `concat!` takes literals only.
+macro_rules! schemas_origin {
+    ($($tail:literal),*) => {
+        concat!("https://schemas.inorbit.hr/", $($tail),*)
+    };
+}
+pub(crate) use schemas_origin;
+
 /// Where the CLI's own schemas are published.
-pub const BASE: &str = "https://schemas.inorbit.hr/iohr/";
-pub const SCRUM_CARD: &str = "https://schemas.inorbit.hr/iohr/scrum/card/v0.json";
-pub const SCRUM_BOARD: &str = "https://schemas.inorbit.hr/iohr/scrum/board/v0.json";
-pub const MONITOR: &str = "https://schemas.inorbit.hr/iohr/monitors/monitor/v0.json";
+pub const BASE: &str = schemas_origin!("iohr/");
+pub const SCRUM_CARD: &str = schemas_origin!("iohr/scrum/card/v0.json");
+pub const SCRUM_BOARD: &str = schemas_origin!("iohr/scrum/board/v0.json");
+pub const MONITOR: &str = schemas_origin!("iohr/monitors/monitor/v0.json");
 
 /// The schemas inside the binary, by `$id`.
 const EMBEDDED: [(&str, &str); 3] = [
