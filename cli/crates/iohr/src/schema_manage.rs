@@ -35,7 +35,7 @@ const KEYS: [&str; 6] = [
     "note",
 ];
 /// The `$id` base of a project that names none: its name goes after it.
-pub const DEFAULT_BASE: &str = "https://schemas.inorbit.hr/";
+pub const DEFAULT_BASE: &str = crate::schema::schemas_origin!();
 
 /// One line of the manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
