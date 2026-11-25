@@ -926,7 +926,7 @@ pub struct SchemaNew {
     #[arg(long)]
     pub owner: Option<String>,
     /// Who sees it once published: public, account or shared.
-    #[arg(long, default_value = "account", value_parser = crate::schema_manage::VISIBILITY)]
+    #[arg(long, default_value = "account", value_parser = crate::schema_manage::visibility())]
     pub visibility: String,
     /// The schemas folder. Default: `./schemas`.
     #[arg(long, default_value = "schemas")]
