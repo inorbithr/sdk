@@ -13,6 +13,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::OnceLock;
 
 use serde_json::{Map, Value};
 
@@ -23,17 +24,81 @@ pub const FILE: &str = "manifest.json";
 
 const DRAFT: &str = "https://json-schema.org/draft/2020-12/schema";
 const DRAFT_LINE: &str = " Draft line: it may still be corrected.";
-/// Who sees a type (core's `check.py`).
-pub const VISIBILITY: [&str; 3] = ["public", "account", "shared"];
-const STATUS: [&str; 3] = ["draft", "stable", "deprecated"];
-const KEYS: [&str; 6] = [
-    "visibility",
-    "owner_account",
-    "status",
-    "owner",
-    "replaced_by",
-    "note",
-];
+/// The manifest rules, read from the embedded manifest schema found by its `$id`
+/// ([`crate::schema::MANIFEST`]), by the paths core's `check.py` and `tbd-schemas-rules` use:
+/// `/$defs/entry/properties/{visibility,status}/enum`, the keys under that `properties`, and the
+/// `owner_account` pattern. Nothing about them is written here.
+#[derive(Debug)]
+pub struct Rules {
+    pub visibility: Vec<String>,
+    pub status: Vec<String>,
+    pub keys: Vec<String>,
+    account_id: regex::Regex,
+}
+
+impl Rules {
+    fn read() -> Result<Self, String> {
+        let schemas = crate::schema::Schemas::embedded()?;
+        let doc = schemas
+            .get(crate::schema::MANIFEST)
+            .ok_or("the manifest schema is not embedded")?;
+        let entry = doc
+            .pointer("/$defs/entry/properties")
+            .and_then(Value::as_object)
+            .ok_or("the manifest schema has no entry properties")?;
+        let list = |key: &str| -> Result<Vec<String>, String> {
+            entry
+                .get(key)
+                .and_then(|p| p.get("enum"))
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .ok_or_else(|| format!("the manifest schema has no {key} enum"))
+        };
+        let pattern = entry
+            .get("owner_account")
+            .and_then(|p| p.get("pattern"))
+            .and_then(Value::as_str)
+            .ok_or("the manifest schema has no owner_account pattern")?;
+        Ok(Self {
+            visibility: list("visibility")?,
+            status: list("status")?,
+            keys: entry.keys().cloned().collect(),
+            account_id: regex::Regex::new(pattern).map_err(|e| e.to_string())?,
+        })
+    }
+
+    /// The rules of the embedded schema, read once.
+    ///
+    /// # Panics
+    ///
+    /// Never in a shipped build: a test reads the same file, so a schema that cannot give its
+    /// rules fails there first.
+    #[must_use]
+    pub fn get() -> &'static Self {
+        static RULES: OnceLock<Result<Rules, String>> = OnceLock::new();
+        match RULES.get_or_init(Self::read) {
+            Ok(r) => r,
+            Err(e) => panic!("embedded manifest schema: {e}"),
+        }
+    }
+
+    /// Whether `s` is an account id (the schema's pattern, which is anchored).
+    #[must_use]
+    pub fn is_account_id(&self, s: &str) -> bool {
+        self.account_id.is_match(s)
+    }
+}
+
+/// Who sees a type, from the manifest schema; the `--visibility` flag's values.
+#[must_use]
+pub fn visibility() -> Vec<&'static str> {
+    Rules::get().visibility.iter().map(String::as_str).collect()
+}
 /// The `$id` base of a project that names none: its name goes after it.
 pub const DEFAULT_BASE: &str = crate::schema::schemas_origin!();
 
@@ -79,16 +144,6 @@ pub struct Manifest {
     bad: BTreeMap<String, String>,
 }
 
-fn is_account_id(s: &str) -> bool {
-    let parts: Vec<&str> = s.split('-').collect();
-    parts.len() == 5
-        && parts.iter().zip([8, 4, 4, 4, 12]).all(|(p, n)| {
-            p.len() == n
-                && p.bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        })
-}
-
 fn text_of(e: &Map<String, Value>, key: &str) -> Result<Option<String>, String> {
     match e.get(key) {
         None => Ok(None),
@@ -101,19 +156,26 @@ fn parse_entry(v: &Value) -> Result<Entry, String> {
     let Some(e) = v.as_object() else {
         return Err("is not an object".into());
     };
-    if let Some(k) = e.keys().find(|k| !KEYS.contains(&k.as_str())) {
+    let rules = Rules::get();
+    if let Some(k) = e.keys().find(|k| !rules.keys.contains(k)) {
         return Err(format!("has an unknown key {k:?}"));
     }
     let visibility = text_of(e, "visibility")?.unwrap_or_default();
-    if !VISIBILITY.contains(&visibility.as_str()) {
-        return Err(format!("visibility is one of {}", VISIBILITY.join(", ")));
+    if !rules.visibility.contains(&visibility) {
+        return Err(format!(
+            "visibility is one of {}",
+            rules.visibility.join(", ")
+        ));
     }
     let status = text_of(e, "status")?.unwrap_or_default();
-    if !STATUS.contains(&status.as_str()) {
-        return Err(format!("status is one of {}", STATUS.join(", ")));
+    if !rules.status.contains(&status) {
+        return Err(format!("status is one of {}", rules.status.join(", ")));
     }
     let owner_account = text_of(e, "owner_account")?;
-    if owner_account.as_deref().is_some_and(|a| !is_account_id(a)) {
+    if owner_account
+        .as_deref()
+        .is_some_and(|a| !rules.is_account_id(a))
+    {
         return Err("owner_account is an account id, a lowercase UUID".into());
     }
     Ok(Entry {
@@ -552,8 +614,12 @@ pub fn plan_new(root: &Path, fam: &str, a: &NewArgs) -> Result<Plan, String> {
             "{fam}: a schema path is two or more lowercase segments, <area>/<name>"
         ));
     }
-    if !VISIBILITY.contains(&a.visibility.as_str()) {
-        return Err(format!("visibility is one of {}", VISIBILITY.join(", ")));
+    let rules = Rules::get();
+    if !rules.visibility.contains(&a.visibility) {
+        return Err(format!(
+            "visibility is one of {}",
+            rules.visibility.join(", ")
+        ));
     }
     let mut plan = Plan::default();
     let mut m = working_manifest(root, &mut plan)?;
@@ -727,6 +793,56 @@ pub fn plan_deprecate(root: &Path, fam: &str, replaced_by: Option<&str>) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::Schemas;
+
+    #[test]
+    fn the_rules_come_from_the_manifest_schema_by_its_id() {
+        let r = Rules::get();
+        let sorted = |v: &[String]| {
+            let mut v = v.to_vec();
+            v.sort();
+            v
+        };
+        assert_eq!(sorted(&r.visibility), ["account", "public", "shared"]);
+        assert_eq!(sorted(&r.status), ["deprecated", "draft", "stable"]);
+        assert_eq!(
+            sorted(&r.keys),
+            [
+                "note",
+                "owner",
+                "owner_account",
+                "replaced_by",
+                "status",
+                "visibility"
+            ]
+        );
+        assert!(r.is_account_id("0a1b2c3d-0000-4000-8000-0123456789ab"));
+        for bad in [
+            "",
+            "0A1B2C3D-0000-4000-8000-0123456789ab",
+            "not-an-id",
+            "0a1b2c3d-0000-4000-8000-0123456789abx",
+        ] {
+            assert!(!r.is_account_id(bad), "{bad}");
+        }
+        // The words this file writes for a new or bumped type are words the schema allows.
+        for w in ["draft", "stable"] {
+            assert!(r.status.iter().any(|s| s == w), "{w}");
+        }
+        assert!(r.visibility.iter().any(|v| v == "account"));
+    }
+
+    #[test]
+    fn the_vendored_manifest_schema_is_its_published_id() {
+        // Offline: the copy is core's file; `schemas:check` in core proves the published bytes
+        // equal that source. Here the copy must name the `$id` it is looked up by.
+        let doc = Schemas::embedded().unwrap();
+        let doc = doc.get(crate::schema::MANIFEST).unwrap();
+        assert_eq!(
+            doc["$id"],
+            "https://schemas.inorbit.hr/schemas/manifest/v0.json"
+        );
+    }
 
     fn fams(l: &[&str]) -> BTreeSet<String> {
         l.iter().map(|s| (*s).to_owned()).collect()

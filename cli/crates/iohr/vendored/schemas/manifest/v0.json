@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.inorbit.hr/schemas/manifest/v0.json",
+  "title": "Schemas manifest",
+  "description": "The file that lists a folder's schema families: for each one, who may see it, how settled it is, and which account owns it. It is an allowlist: a family on disk that is not listed is refused, and only a public one is published. The tools that check and edit a manifest read their rules (the visibilities, the statuses, the keys an entry may carry and the shape of an account id) from this schema, so there is one place they are written. Draft line: it may still be corrected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemas"
+  ],
+  "properties": {
+    "$schema": {
+      "description": "The address of this schema, for editors that read it.",
+      "type": "string"
+    },
+    "$comment": {
+      "description": "A note for the people who edit the file. Tools ignore it.",
+      "type": "string"
+    },
+    "schemas": {
+      "description": "Every family, by its path under the folder: an area and a name in lowercase letters, digits and hyphens, joined by slashes (sensors/sensor). Its versions live at <path>/v<major>.json.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)+$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "description": "One family's line. A deprecated family may name the family that replaces it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "visibility",
+        "status",
+        "owner_account"
+      ],
+      "properties": {
+        "visibility": {
+          "description": "Who may see the family: public is everyone and is the only one published; account is the owning account's members; shared is those and the parties the owning account grants, until each grant expires.",
+          "enum": [
+            "public",
+            "account",
+            "shared"
+          ]
+        },
+        "status": {
+          "description": "How settled the family is: draft may still change, stable keeps its major, deprecated is kept for old readers and names its replacement when there is one.",
+          "enum": [
+            "draft",
+            "stable",
+            "deprecated"
+          ]
+        },
+        "owner_account": {
+          "description": "The id of the account that owns the family: a UUID in lowercase hex with its four hyphens. It decides who sees an account or shared family.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "owner": {
+          "description": "Who answers for the family: a team or a role, never a person's address.",
+          "type": "string"
+        },
+        "replaced_by": {
+          "description": "The listed family that replaces this one. Only a deprecated family carries it, and never names itself.",
+          "type": "string"
+        },
+        "note": {
+          "description": "A short note shown with the family.",
+          "type": "string"
+        }
+      },
+      "dependentSchemas": {
+        "replaced_by": {
+          "properties": {
+            "status": {
+              "const": "deprecated"
+            }
+          }
+        }
+      }
+    }
+  }
+}

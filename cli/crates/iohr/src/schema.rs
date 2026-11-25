@@ -36,12 +36,20 @@ pub const BASE: &str = schemas_origin!("iohr/");
 pub const SCRUM_CARD: &str = schemas_origin!("iohr/scrum/card/v0.json");
 pub const SCRUM_BOARD: &str = schemas_origin!("iohr/scrum/board/v0.json");
 pub const MONITOR: &str = schemas_origin!("iohr/monitors/monitor/v0.json");
+/// The schemas manifest's own schema: the rules `iohr schemas` reads (RFC 0234). It is core's
+/// published file, so it lives under the origin and not under `iohr/`.
+pub const MANIFEST: &str = schemas_origin!("schemas/manifest/v0.json");
 
 /// The schemas inside the binary, by `$id`.
-const EMBEDDED: [(&str, &str); 3] = [
+const EMBEDDED: [(&str, &str); 4] = [
     (SCRUM_CARD, include_str!("../schemas/scrum/card/v0.json")),
     (SCRUM_BOARD, include_str!("../schemas/scrum/board/v0.json")),
     (MONITOR, include_str!("../schemas/monitors/monitor/v0.json")),
+    // Kept outside `schemas/`, the CLI's own tree: it is core's file, byte for byte.
+    (
+        MANIFEST,
+        include_str!("../vendored/schemas/manifest/v0.json"),
+    ),
 ];
 
 /// The largest schema, example or invalid case that is read.
@@ -560,8 +568,8 @@ mod tests {
     #[test]
     fn a_schema_is_found_by_its_id() {
         let s = Schemas::embedded().unwrap();
-        assert_eq!(s.ids().count(), 3);
-        for id in [SCRUM_CARD, SCRUM_BOARD, MONITOR] {
+        assert_eq!(s.ids().count(), 4);
+        for id in [SCRUM_CARD, SCRUM_BOARD, MONITOR, MANIFEST] {
             let doc = s.get(id).unwrap();
             assert_eq!(doc["$id"], id);
         }
