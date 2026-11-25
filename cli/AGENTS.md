@@ -14,6 +14,8 @@ Read the root `AGENTS.md`, `docs/design.md` sections 4 to 6 and
   certificate, identifier `hr.inorbit.iohr`), so the Keychain trusts every rebuild. The
   signing is `iohr sign-binary` (hidden), which is `upgrade/sign.rs`; a script never signs on
   its own. Never `cp` over an installed binary (macOS kills it): the task removes it first.
+  It also builds `ui/` and runs `iohr-preview ui install` (the UI lands in the data folder's
+  `ui/dist`, so `ui serve` works from any folder); `IOHR_PREVIEW_SKIP_UI=1` skips that.
 - `mise run cli:keyring` (Linux): the credential-store test against a throwaway Secret
   Service in a private D-Bus session.
 - `mise run cli:hydra`: browser and device sign-in, refresh and revocation against the
