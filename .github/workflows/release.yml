@@ -145,7 +145,14 @@ jobs:
           # This job holds statuses: write and produces the evidence the publish jobs rely
           # on: it installs the toolchains fresh rather than restore a cache.
           cache: false
+      # Build the CLI once, as ci.yml's tools job does, and hand it to the examples through
+      # IOHR_BIN. Without it tools/iohr.sh falls back to `cargo run`, and ext-ask's self-test
+      # compiles the whole CLI inside its 600 s per-example budget (549 s on 2026-11-24,
+      # timed out at 600 s on 2026-11-27 in run 45722458019).
+      - run: cargo build --locked --manifest-path cli/Cargo.toml -p iohr
       - run: mise run examples:run
+        env:
+          IOHR_BIN: ${{ github.workspace }}/cli/target/debug/iohr
       - name: Post the examples-run status
         env:
           GH_TOKEN: ${{ github.token }}
