@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/inorbithr/sdk/compare/iohr/v0.1.2...iohr/v0.1.3) (2026-11-27)
+
+
+### Bug fixes
+
+* **cli:** iohr ui serve works from any folder (RFC 0217) ([#511](https://github.com/inorbithr/sdk/issues/511)) ([5afa764](https://github.com/inorbithr/sdk/commit/5afa764e640bb0f733fa4e93c02365a9db62d0cb))
+
 ## [0.1.2](https://github.com/inorbithr/sdk/compare/iohr/v0.1.1...iohr/v0.1.2) (2026-11-24)
 
 
