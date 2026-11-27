@@ -86,7 +86,9 @@ Conventional Commits that touched it; nobody sets one by hand (no `release-as`, 
 
 The Homebrew formula pins every archive by its checksum from the release's `SHA256SUMS`, so
 `iohr-tap` can only run after the `iohr` job has published the release's files, and that
-job waits for a maintainer's approval in `release-cli`. When it is never approved, or its
+job waits for a maintainer's approval in `release-cli`. While it waits it holds only its
+own release ([Concurrency](#concurrency)): release-please and every other package carry on.
+When it is never approved, or its
 run is cancelled (as for `iohr/v0.1.0-alpha.15`, 2026-10), the release exists without
 files and the tap stays on the earlier version. With GitHub Actions paused the workflow
 cannot run at all. Once a release has its files, `mise run cli:tap-local <version>` does what
@@ -114,6 +116,28 @@ that environment, not in the repository. Build jobs hold read permissions only.
 | `iohr-apt` | `release-cli` | as above | `APT_SIGNING_KEY`, `APT_SIGNING_KEY_ID`, `APT_SIGNING_PASSPHRASE`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT` |
 
 `RELEASE_APP_ID` is a variable, not a secret, and stays at the repository.
+
+## Concurrency
+
+`release.yml` has no workflow-level concurrency group; each job that must not overlap
+has its own, all with `cancel-in-progress: false`. Until 2026-11-27 one workflow-level
+group, `release`, serialised whole runs: a run waiting on an environment review held it,
+so release-please and every other package's publish queued behind it, and since GitHub
+keeps one pending run per group, each newer push cancelled the pending one (iohr 0.1.2's
+`release-cli` review, waiting from 2026-11-24, cancelled three later runs, among them the
+merge of csharp 0.4.1, and release-please did not refresh the open release PR).
+
+| Job | Group | What it keeps apart |
+|---|---|---|
+| `release-please` | `release-please` | two runs editing the release PRs or tagging at once. Never cancelled while it runs: only the run that creates a release reports it, so a run stopped after tagging would leave that release unpublished. A pending one a newer push replaces is harmless: the newer run works from `main` HEAD and creates any release the replaced one would have |
+| `go`, `rust`, `ts`, `ui`, `py`, `iohr` | `release-<tag>`, e.g. `release-iohr/v0.1.2` | two publishes of the same tag. A held review holds only that tag; two different releases never wait on, or cancel, each other |
+| `py-existing`, `ts` on a manual run | the same `release-<tag>` | a manual republish and a push run publishing the same tag at once |
+| `iohr-tap`, `iohr-policy` | `release-<tag>-tap`, `release-<tag>-policy` | the same tag twice. Each has its own key: the three channel jobs start together after `iohr`, and siblings sharing a key would queue, the newest pending one cancelling the other |
+| `iohr-apt` | `release-iohr-apt`, one for every version | two uploads of the one APT index on R2 at once (an `InRelease` that does not match its `Packages`). A held apt review holds the next version's apt job only; as a newer version's index replaces an older one anyway, reject a stale apt review rather than leave it waiting |
+
+Build jobs (`examples-attest`, `examples-gate`, `py-build`, `iohr-build`, `iohr-install`,
+`iohr-winget`) take no group: they write nothing shared. `cli-build.yml` keeps its own
+group per ref and tag.
 
 ## One-time setup (before the first release)
 

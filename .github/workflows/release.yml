@@ -40,9 +40,11 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: release
-  cancel-in-progress: false
+# No workflow-level concurrency group: a run that waits on one environment review would
+# hold it for every later push, so release-please and every other package's publish would
+# queue behind it, and each newer push would cancel the pending one (2026-11-24 to 11-27,
+# iohr 0.1.2 held release-please for three days). Each job that needs serialising has its
+# own group instead (docs/releasing.md, Concurrency).
 
 defaults:
   run:
@@ -61,6 +63,13 @@ jobs:
     # Holds RELEASE_APP_PRIVATE_KEY. It runs on every push to main, so its environment has
     # no required reviewer (one would hold every push); `main` only is the gate.
     environment: release-please
+    # One release-please at a time, so two runs never edit the release PRs or create a tag
+    # at once. Not cancel-in-progress: a run stopped after it tagged would leave that
+    # release unpublished (only the run that creates a release reports it). A pending run
+    # that a newer push replaces is harmless: the newer one works from main HEAD.
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
     permissions: {}
     outputs:
       go: ${{ steps.rp.outputs['go--release_created'] }}
@@ -195,6 +204,10 @@ jobs:
     # A tag on the Go module proxy cannot be taken back: wait for a maintainer, as the
     # other registries do.
     environment: release-go
+    # One publish per tag at a time; a review held on one release holds only that tag.
+    concurrency:
+      group: release-${{ needs.release-please.outputs.go_tag }}
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
@@ -235,6 +248,9 @@ jobs:
     if: needs.release-please.outputs.rust == 'true'
     runs-on: ubuntu-latest
     environment: release-crates
+    concurrency:
+      group: release-${{ needs.release-please.outputs.rust_tag }}
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
@@ -281,6 +297,10 @@ jobs:
       || (github.event_name == 'workflow_dispatch' && inputs.typescript_tag != '')) }}
     runs-on: ubuntu-latest
     environment: release-npm
+    # The same key as a manual run for that tag, so the two never publish it at once.
+    concurrency:
+      group: release-${{ needs.release-please.outputs.ts_tag || inputs.typescript_tag }}
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
@@ -344,6 +364,9 @@ jobs:
       && needs.release-please.outputs.ui == 'true' }}
     runs-on: ubuntu-latest
     environment: release-npm
+    concurrency:
+      group: release-${{ needs.release-please.outputs.ui_tag }}
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
@@ -423,6 +446,9 @@ jobs:
     needs: [release-please, py-build]
     runs-on: ubuntu-latest
     environment: release-pypi
+    concurrency:
+      group: release-${{ needs.release-please.outputs.py_tag }}
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
@@ -457,6 +483,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.python_tag != ''
     runs-on: ubuntu-latest
     environment: release-pypi
+    # The same key as `py` for that tag.
+    concurrency:
+      group: release-${{ inputs.python_tag }}
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
@@ -495,6 +525,9 @@ jobs:
     needs: [release-please, iohr-build]
     runs-on: ubuntu-latest
     environment: release-cli
+    concurrency:
+      group: release-${{ needs.release-please.outputs.iohr_tag }}
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
@@ -602,6 +635,11 @@ jobs:
     # Its secrets live in release-cli. iohr-tap, iohr-policy and iohr-apt start together
     # after `iohr`, so one more approval of release-cli releases all three.
     environment: release-cli
+    # Its own key, not the `iohr` one: iohr-tap, iohr-policy and iohr-apt start together,
+    # and siblings sharing a key would queue, the newest pending one cancelling the other.
+    concurrency:
+      group: release-${{ needs.release-please.outputs.iohr_tag }}-tap
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
@@ -643,6 +681,9 @@ jobs:
     # Its secrets live in release-cli. iohr-tap, iohr-policy and iohr-apt start together
     # after `iohr`, so one more approval of release-cli releases all three.
     environment: release-cli
+    concurrency:
+      group: release-${{ needs.release-please.outputs.iohr_tag }}-policy
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
@@ -678,6 +719,12 @@ jobs:
     # Its secrets live in release-cli. iohr-tap, iohr-policy and iohr-apt start together
     # after `iohr`, so one more approval of release-cli releases all three.
     environment: release-cli
+    # One key for every version, not per tag: each run rebuilds and uploads the one shared
+    # repository index on R2, and two at once could leave an InRelease that does not match
+    # its Packages. A held apt review therefore holds only the next version's apt job.
+    concurrency:
+      group: release-iohr-apt
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
