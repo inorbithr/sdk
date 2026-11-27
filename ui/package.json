@@ -1,6 +1,6 @@
 {
   "name": "@inorbithr/ui",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "The web UI that `iohr ui` serves: the shell frame and the extension panels (RFC 0217).",
   "license": "Apache-2.0",
   "repository": {
