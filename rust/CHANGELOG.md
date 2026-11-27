@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2](https://github.com/inorbithr/sdk/compare/rust/v0.4.1...rust/v0.4.2) (2026-11-27)
+
+
+### Bug fixes
+
+* **deps:** bump cookie to 0.18.3 for RUSTSEC-2026-0594 ([#612](https://github.com/inorbithr/sdk/issues/612)) ([d39c37c](https://github.com/inorbithr/sdk/commit/d39c37c02b73f92d0a83f4bee0773a11b2fe9d9a))
+* sdk main gate: url 2.5.9 (RUSTSEC-2026-0592) and a non-reserved id for the ask example ([#607](https://github.com/inorbithr/sdk/issues/607)) ([bd64cac](https://github.com/inorbithr/sdk/commit/bd64cacd1473f004f4006d9e7a3a3315c6e889c6))
+
 ## [0.4.1](https://github.com/inorbithr/sdk/compare/rust/v0.4.0...rust/v0.4.1) (2026-11-14)
 
 
